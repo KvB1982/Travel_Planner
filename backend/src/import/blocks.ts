@@ -113,7 +113,7 @@ export interface PagePhoto {
 }
 
 const IMAGE_KEYS = /^(images?|photos?|pictures?|gallery|galleryImages|media|mediaItems|imageUrls?|photoUrls?|imageList|photoList)$/i;
-const NOT_A_PHOTO = /bat\.bing\.|doubleclick|google-analytics|googletagmanager|googleadservices|facebook\.com\/tr|\/collect\?|\/pixel|beacon|logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
+const NOT_A_PHOTO = /bat\.bing\.|maps\.googleapis\.|maps\.gstatic\.|\/staticmap|mapbox\.com|doubleclick|google-analytics|googletagmanager|googleadservices|facebook\.com\/tr|\/collect\?|\/pixel|beacon|logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
 const IMAGE_EXT = /\.(jpe?g|png|webp|avif|heic)(\?|$)/i;
 /** Preferred key when one picture comes in several sizes. */
 const SIZE_KEYS = ["original", "originalUrl", "full", "fullUrl", "xxl", "xl", "large", "largeUrl", "big", "url", "baseUrl", "src", "href", "contentUrl", "uri", "path", "medium"];
