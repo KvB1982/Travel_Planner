@@ -223,7 +223,15 @@ export async function processImport(
 
     // Reviews are kept per source and put together anew each time, so reading one platform again
     // never loses what another one said.
-    const own = { title: extracted.title, rating: extracted.rating, reviews: extracted.reviews, reviewSummary: extracted.reviewSummary };
+    // A reading that brought no reviews (the server sees far less of some pages than the device) must not
+    // wipe the ones an earlier reading of the same source found.
+    const earlier = sources.find((s) => s.id === input.sourceId)?.extract;
+    const own = {
+      title: extracted.title,
+      rating: extracted.rating,
+      reviews: extracted.reviews.length ? extracted.reviews : (earlier?.reviews ?? []),
+      reviewSummary: extracted.reviewSummary.summary ? extracted.reviewSummary : (earlier?.reviewSummary ?? extracted.reviewSummary),
+    };
     const perSource = sources.map((s, i) => {
       if (s.id === input.sourceId) return { platform: s.platform, extract: own };
       if (s.extract) return { platform: s.platform, extract: s.extract };
