@@ -357,6 +357,52 @@ public struct Photo: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// What guests wrote about an offer: a summary written by the server and the individual reviews.
+public struct Reviews: Codable, Hashable, Sendable {
+    public struct Item: Codable, Identifiable, Hashable, Sendable {
+        public var id: String
+        public var author: String?
+        /// Day of the review or stay, "2026-08-14".
+        public var date: String?
+        public var rating: Double?
+        public var scale: Double?
+        public var title: String?
+        public var text: String
+        public var language: String?
+        /// German version of a review written in another language.
+        public var translatedText: String?
+        public var stayType: String?
+        public var ownerReply: String?
+        public var platform: String?
+
+        public init(id: String, author: String? = nil, date: String? = nil, rating: Double? = nil, scale: Double? = nil, title: String? = nil,
+                    text: String, language: String? = nil, translatedText: String? = nil, stayType: String? = nil, ownerReply: String? = nil,
+                    platform: String? = nil) {
+            self.id = id; self.author = author; self.date = date; self.rating = rating; self.scale = scale; self.title = title
+            self.text = text; self.language = language; self.translatedText = translatedText; self.stayType = stayType
+            self.ownerReply = ownerReply; self.platform = platform
+        }
+    }
+
+    public var summary: String?
+    public var positives: [String]?
+    public var negatives: [String]?
+    public var basedOn: Double?
+    public var generatedAt: Date?
+    public var items: [Item]?
+
+    public init(summary: String? = nil, positives: [String]? = nil, negatives: [String]? = nil, basedOn: Double? = nil,
+                generatedAt: Date? = nil, items: [Item]? = nil) {
+        self.summary = summary; self.positives = positives; self.negatives = negatives; self.basedOn = basedOn
+        self.generatedAt = generatedAt; self.items = items
+    }
+
+    /// Nothing to show: no summary, no points, no reviews.
+    public var isEmpty: Bool {
+        (summary ?? "").isEmpty && (positives ?? []).isEmpty && (negatives ?? []).isEmpty && (items ?? []).isEmpty
+    }
+}
+
 /// `GET /candidates/:id`.
 public struct CandidateDetail: Codable, Hashable, Sendable {
     public var candidate: CandidateRecord
@@ -368,11 +414,13 @@ public struct CandidateDetail: Codable, Hashable, Sendable {
     public var comments: [Comment]
     /// In the order of the advert. Missing on servers that do not import pictures yet.
     public var photos: [Photo]?
+    /// Missing on servers that do not read reviews yet, or when the advert has none.
+    public var reviews: Reviews?
 
     public init(candidate: CandidateRecord, role: MemberRole, listing: Listing, sources: [ListingSource] = [], prices: [PriceSnapshot] = [],
-                votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil) {
+                votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil, reviews: Reviews? = nil) {
         self.candidate = candidate; self.role = role; self.listing = listing; self.sources = sources; self.prices = prices
-        self.votes = votes; self.comments = comments; self.photos = photos
+        self.votes = votes; self.comments = comments; self.photos = photos; self.reviews = reviews
     }
 
     /// All pictures; falls back to the cover image alone when the server sent no list.

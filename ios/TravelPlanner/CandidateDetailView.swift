@@ -15,6 +15,7 @@ struct CandidateDetailView: View {
     @State private var captureSource: ListingSource?
     @State private var actionError: String?
     @State private var confirmDelete = false
+    @State private var showReviews = false
 
     var body: some View {
         Group {
@@ -44,6 +45,9 @@ struct CandidateDetailView: View {
             Button("OK") {}
         } message: {
             Text(actionError ?? "")
+        }
+        .sheet(isPresented: $showReviews) {
+            ReviewList(items: detail?.reviews?.items ?? [])
         }
         .sheet(item: $captureSource) { source in
             CaptureView(source: source, candidateID: candidateID)
@@ -147,6 +151,10 @@ struct CandidateDetailView: View {
 
             priceSection(detail)
 
+            if let reviews = detail.reviews, !reviews.isEmpty {
+                ReviewsSection(reviews: reviews, rating: profile.rating) { showReviews = true }
+            }
+
             Section("Eckdaten") {
                 fact("Art", profile.objectType ?? detail.listing.kind.label, "objectType", profile)
                 number("Gäste", profile.maxGuests, "maxGuests", profile)
@@ -156,7 +164,7 @@ struct CandidateDetailView: View {
                 number("Bäder", profile.bathrooms, "bathrooms", profile)
                 number("Wohnfläche", profile.livingAreaSqm, "livingAreaSqm", profile, unit: " m²")
                 number("Grundstück", profile.plotSqm, "plotSqm", profile, unit: " m²")
-                if let rating = profile.rating, let value = rating.value {
+                if detail.reviews?.isEmpty ?? true, let rating = profile.rating, let value = rating.value {
                     let scale = rating.scale.map { " von \(Format.number($0))" } ?? ""
                     let count = rating.count.map { " (\(Format.number($0)) Bewertungen)" } ?? ""
                     LabeledContent("Bewertung", value: "\(Format.number(value))\(scale)\(count)")

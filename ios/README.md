@@ -47,6 +47,14 @@ FeWo-direkt und Casamundo sperren den Abruf vom Server. Solche Angebote kommen m
 
 Der Steckbrief zeigt alle Bilder eines Angebots als Leiste zum Durchwischen, ein Tipp öffnet das Vollbild in voller Qualität mit Zoom. Erwartet wird in `GET /candidates/:id` ein Feld `photos` mit `id`, `url` (Original), `thumbUrl`, `width`, `height`, `caption`. Fehlt es, erscheint nur das Titelbild. Adressen dürfen absolut sein oder mit `/` beginnen. Den Anmelde-Token schickt die App nur an Bildadressen auf dem eigenen Server mit, nie an fremde Hosts. Geladene Bilder bleiben auf dem Gerät zwischengespeichert.
 
+## Bewertungen
+
+Liefert `GET /candidates/:id` ein Feld `reviews` (`summary`, `positives`, `negatives`, `basedOn`, `generatedAt`, `items`), zeigt der Steckbrief die Zusammenfassung mit Gelobtem und Kritisiertem und öffnet auf Wunsch die Einzelbewertungen, bei fremdsprachigen mit Übersetzung und Original. Die Zusammenfassung ist als automatisch erstellt gekennzeichnet.
+
+## Löschen und Aktualisieren
+
+Angebote lassen sich in der Liste per Wischen oder im Menü des Steckbriefs löschen, jeweils mit Rückfrage. Unter „Quellen“ ruft „Aktualisieren“ das Inserat über den Server neu ab, „Auf diesem Gerät aktualisieren“ liest es in der App neu aus. Dabei merkt sich die App alle Fotos, die die Seite lädt, und hängt sie als `tp-captured-images` an das gesendete HTML.
+
 ## Noch nicht enthalten
 
 Vergleich, Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.

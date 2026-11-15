@@ -193,7 +193,22 @@ public actor DemoBackend: TravelBackend {
                 prices: [price, older],
                 votes: VoteOverview(yes: votes.filter { $0.verdict == .yes }.count, maybe: votes.filter { $0.verdict == .maybe }.count,
                                     no: votes.filter { $0.verdict == .no }.count, vetoes: votes.filter(\.veto).count, entries: votes),
-                comments: comments, photos: photos)
+                comments: comments, photos: photos,
+                reviews: number == 3 ? nil : Reviews(
+                    summary: "Gäste loben vor allem die ruhige Lage, den großen Garten und die hilfsbereiten Vermieter. Die Küche gilt als gut ausgestattet. Mehrfach erwähnt werden die schmale Zufahrt und dass es im Obergeschoss im Hochsommer warm wird.",
+                    positives: ["Ruhige Lage mit Weitblick", "Großer Garten, Pool gepflegt", "Vermieter schnell erreichbar", "Küche gut ausgestattet"],
+                    negatives: ["Schmale, steile Zufahrt", "Obergeschoss im Sommer warm", "WLAN im Garten schwach"],
+                    basedOn: 38, generatedAt: .now,
+                    items: [
+                        .init(id: "r-\(id)-1", author: "Familie M.", date: "2026-08-22", rating: 5, scale: 5, title: "Perfekt für zwei Familien",
+                              text: "Wir waren mit acht Personen dort und hatten reichlich Platz. Der Pool war jeden Tag sauber, die Kinder wollten gar nicht mehr raus. Die Vermieterin hat uns frisches Gemüse vorbeigebracht.",
+                              stayType: "Familie mit Kindern", platform: platform),
+                        .init(id: "r-\(id)-2", author: "Thomas", date: "2026-07-05", rating: 4, scale: 5,
+                              text: "Sehr schönes Haus, nur die Zufahrt ist mit einem großen Auto abenteuerlich. Oben wird es nachts warm, Ventilatoren sind vorhanden.",
+                              ownerReply: "Danke für den Hinweis, wir haben inzwischen im Obergeschoss eine Klimaanlage nachgerüstet.", platform: platform),
+                        .init(id: "r-\(id)-3", author: "Giulia", date: "2026-05-30", rating: 5, scale: 5, text: "Posto meraviglioso, casa pulitissima e proprietari gentilissimi.",
+                              language: "it", translatedText: "Wunderschöner Ort, sehr sauberes Haus und überaus freundliche Eigentümer.", platform: platform),
+                    ]))
         }
 
         var blocked = home("c-3", trip: "t-1", title: "Podere mit Blick auf San Gimignano", place: "San Gimignano", country: "Italien",

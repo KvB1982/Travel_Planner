@@ -190,6 +190,32 @@ final class PhotoTests: XCTestCase {
     }
 }
 
+final class ReviewTests: XCTestCase {
+    func testReviewsDecodeWithSparseFields() throws {
+        let reviews = try APIClient.decoder.decode(Reviews.self, from: Data("""
+        {"summary":"Ruhig und sauber.","positives":["Lage"],"negatives":[],"basedOn":12,"generatedAt":"2026-11-15T22:00:00.000Z",
+         "items":[{"id":"r1","author":null,"date":null,"rating":null,"scale":null,"title":null,"text":"Schön.","language":null,
+                   "translatedText":null,"stayType":null,"ownerReply":null,"platform":"casamundo"},
+                  {"id":"r2","author":"Ana","date":"2026-08-01","rating":9.2,"scale":10,"title":"Top","text":"Muy bien","language":"es",
+                   "translatedText":"Sehr gut","stayType":"Paar","ownerReply":"Danke","platform":"booking"}]}
+        """.utf8))
+        XCTAssertFalse(reviews.isEmpty)
+        XCTAssertEqual(reviews.items?.count, 2)
+        XCTAssertEqual(reviews.items?[1].rating, 9.2)
+        XCTAssertNil(reviews.items?[0].author)
+    }
+
+    func testEmptyReviews() throws {
+        XCTAssertTrue(try APIClient.decoder.decode(Reviews.self, from: Data(#"{"summary":null,"positives":[],"negatives":[],"basedOn":0,"generatedAt":null,"items":[]}"#.utf8)).isEmpty)
+        XCTAssertTrue(try APIClient.decoder.decode(Reviews.self, from: Data("{}".utf8)).isEmpty)
+    }
+
+    func testDetailWithNullReviews() throws {
+        struct Wrapper: Decodable { var reviews: Reviews? }
+        XCTAssertNil(try APIClient.decoder.decode(Wrapper.self, from: Data(#"{"reviews":null}"#.utf8)).reviews)
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()
