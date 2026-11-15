@@ -14,6 +14,8 @@ export interface PageBlocks {
   photos: PagePhoto[];
   /** Single guest reviews found in the page data, newest or most prominent first as the page has them. */
   reviews: PageReview[];
+  /** How many pictures the app handed over, and how many it marked as the advert's gallery. */
+  captured: { total: number; marked: number };
 }
 
 export interface PageReview {
@@ -427,7 +429,7 @@ export function extractBlocks(html: string): PageBlocks {
     if (merged.length > photos.length) photos = merged;
   }
 
-  return { title, og, jsonLd, state, text, photos, reviews };
+  return { title, og, jsonLd, state, text, photos, reviews, captured: { total: capturedImgs.length, marked: marked.length } };
 }
 
 /**

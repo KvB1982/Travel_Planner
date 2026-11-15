@@ -166,7 +166,7 @@ export async function processImport(
     const blocks = extractBlocks(html);
     // Shape of what arrived, for diagnosis; never content.
     console.info(
-      `import ${input.link.platform}/${input.link.externalId}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}`,
+      `import ${input.link.platform}/${input.link.externalId}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}, reviews ${blocks.reviews.length}, captured ${blocks.captured.total} marked ${blocks.captured.marked}`,
     );
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
     const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
