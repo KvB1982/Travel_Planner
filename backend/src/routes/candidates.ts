@@ -23,6 +23,23 @@ function tally(rows: { verdict: "yes" | "maybe" | "no"; veto: boolean }[]) {
 /** Deep partial of the profile for manual edits: every field optional, null allowed to clear a value. */
 const profilePatch = z.record(z.string(), z.unknown());
 
+function reviewsFor(listing: typeof listings.$inferSelect | undefined, platform: string | null) {
+  const p = listing?.profile;
+  const items = [...(p?.reviews ?? [])];
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (items.length && items.every((r) => r.date && iso.test(r.date))) items.sort((a, b) => b.date!.localeCompare(a.date!));
+  const s = p?.reviewSummary;
+  if (!items.length && !s?.summary) return null;
+  return {
+    summary: s?.summary ?? null,
+    positives: s?.positives ?? [],
+    negatives: s?.negatives ?? [],
+    basedOn: s?.basedOn ?? (items.length || null),
+    generatedAt: listing?.updatedAt ?? null,
+    items: items.map((r) => ({ ...r, platform })),
+  };
+}
+
 export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
   const importDeps = { db, fetcher: ctx.fetcher, extractor: ctx.extractor };
@@ -183,9 +200,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
       photos: listing?.profile.photos ?? [],
-      // Single guest reviews and what they add up to. Both empty for adverts imported before this existed.
-      reviews: listing?.profile.reviews ?? [],
-      reviewSummary: listing?.profile.reviewSummary ?? { summary: null, positives: [], negatives: [], basedOn: null },
+      // What guests say: the model's summary and the single reviews, newest first where the page dates them.
+      reviews: reviewsFor(listing, sources[0]?.platform ?? null),
       sources: sources.map((s) => ({ id: s.id, platform: s.platform, url: s.url, canonicalUrl: s.canonicalUrl, provenance: s.provenance, lastFetchedAt: s.lastFetchedAt })),
       prices,
       votes: { ...tally(voteRows), entries: voteRows },

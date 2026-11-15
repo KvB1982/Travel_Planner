@@ -168,6 +168,17 @@ describe("what real pages taught us", () => {
     expect(profileFromBlocks(blocks, "vacation_home").profile.photos[0]!.thumbUrl).toBe(`${c}/medium/e_v5/aaa.jpg`);
   });
 
+  it("keeps other adverts' pictures out when the page itself says which ones belong", () => {
+    const m = "https://a0.muscache.com/im/pictures";
+    const ld = { "@type": "VacationRental", name: "Haus", image: [1, 2, 3].map((n) => `${m}/own${n}.jpeg?im_w=480`) };
+    const shown = [`${m}/own2.jpeg?im_w=320`, `${m}/similar1.jpeg?im_w=320`, `${m}/similar2.jpeg?im_w=320`, `${m}/similar3.jpeg?im_w=320`, `${m}/similar4.jpeg?im_w=320`];
+    const html = (attr: string) => `<html><head><script type="application/ld+json">${JSON.stringify(ld)}</script></head><body>Haus
+      <div id="tp-captured-images" hidden>${shown.map((u, i) => `<img src="${u}"${i > 0 ? attr : ""}>`).join("")}</div></body></html>`;
+    expect(extractBlocks(html("")).photos.map((p) => p.url)).toEqual([`${m}/own1.jpeg?im_w=480`, `${m}/own2.jpeg`, `${m}/own3.jpeg?im_w=480`]);
+    // Marked by the app as the gallery: then the device is believed.
+    expect(extractBlocks(html(' data-gallery="1"')).photos.map((p) => p.url).slice(0, 4)).toEqual([1, 2, 3, 4].map((n) => `${m}/similar${n}.jpeg`));
+  });
+
   it("collects single reviews and shows them to the model in their own block", () => {
     const ld = { "@type": "VacationRental", name: "Haus", review: [{ "@type": "Review", reviewBody: "Sehr schönes Haus mit tollem Pool, wir kommen wieder.", reviewRating: { ratingValue: 5, bestRating: 5 }, author: { name: "Anna" }, datePublished: "2026-08-14T10:00:00Z" }] };
     const state = { hotel: { ratingList: [{ comment: "Das Buffet war gut, aber die Liegen kosten extra.", score: 8.5, firstName: "Jörg", date: 1755129600 }, { comment: "Sehr schönes Haus mit tollem Pool, wir kommen wieder." }, { score: 9 }], other: { reviews: [{ text: "Bewertung eines ganz anderen Angebots in der Nähe." }] } } };

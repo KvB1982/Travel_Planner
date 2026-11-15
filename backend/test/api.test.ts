@@ -221,6 +221,8 @@ describe("import", () => {
     // Pictures come with the detail, first one is the cover.
     expect(detail.body.photos.map((p: { url: string }) => p.url)).toEqual(["https://images.example.test/1.jpg", "https://images.example.test/2.jpg", "https://images.example.test/3.jpg"]);
     expect(detail.body.photos[0]).toMatchObject({ id: expect.stringMatching(/^[0-9a-f]{16}$/), thumbUrl: null, caption: null });
+    // No single reviews on this page: the app shows nothing.
+    expect(detail.body.reviews).toBeNull();
   });
 
   it("uses page content sent along with the link instead of fetching", async () => {
