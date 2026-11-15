@@ -34,6 +34,7 @@ Regeln:
 - Trage nur ein, was in den Daten belegt ist. Was nicht belegt ist, bleibt null oder eine leere Liste. Schätze nichts und ergänze nichts aus Allgemeinwissen. Eine Ausnahme sind region und country, wenn sie sich aus Ortsangabe oder Koordinaten eindeutig ergeben.
 - Ausstattung: true nur, wenn sie genannt ist. false nur, wenn sie ausdrücklich ausgeschlossen ist. Sonst null.
 - beds zählt Betten, sleepingPlaces zählt Schlafplätze. Ein Doppelbett ist ein Bett und zwei Schlafplätze. Ein Schlafsofa zählt als Schlafplatz und gehört mit Raum in bedDetails.
+- bedDetails ist eine Liste von Objekten der Form {"room": "Schlafzimmer 1", "beds": "1 Doppelbett"}, ein Eintrag je Raum mit Schlafgelegenheit.
 - Entfernungen in Metern, Flughafen in Kilometern. Fahrzeiten sind keine Entfernungen: lass das Feld dann null und nenne die Fahrzeit in warnings.
 - price: Beträge in Euro als Zahl. kind ist "total" bei einem Gesamtpreis für einen konkreten Zeitraum, "from" bei einem Ab-Preis, "range" bei einer Preisspanne. Nenne unter included, was laut Seite im Preis enthalten ist, und unter extraCosts jede zusätzliche oder verbrauchsabhängige Position (Endreinigung, Bettwäsche, Strom, Wasser, Kurtaxe, Servicegebühr). amountEur ist null, wenn kein Betrag genannt ist, dann steht in note zum Beispiel "nach Verbrauch".
 - packageTrip nur bei Hotels und Pauschalreisen füllen.
@@ -114,11 +115,20 @@ export function parseLenient(raw: unknown): { profile: Profile; dropped: string[
     const issues = [...parsed.error.issues].sort((a, b) => b.path.join(".").localeCompare(a.path.join("."), "en", { numeric: true }));
     for (const issue of issues) {
       if (issue.path.length === 0) return null;
+      // Walk as far as the path exists. A complaint about a key that is missing is a complaint
+      // about the entry that lacks it, so that entry goes.
       let parent: unknown = data;
-      for (const key of issue.path.slice(0, -1)) parent = parent && typeof parent === "object" ? (parent as Record<PropertyKey, unknown>)[key as PropertyKey] : undefined;
-      if (!parent || typeof parent !== "object") continue;
-      const last = issue.path.at(-1) as PropertyKey;
-      if (!(last in parent)) continue;
+      let last: PropertyKey = issue.path[0] as PropertyKey;
+      for (let i = 0; i < issue.path.length; i++) {
+        const key = issue.path[i] as PropertyKey;
+        const next = parent && typeof parent === "object" ? (parent as Record<PropertyKey, unknown>)[key] : undefined;
+        last = key;
+        if (i === issue.path.length - 1 || next === undefined || next === null || typeof next !== "object") break;
+        const deeper = issue.path[i + 1] as PropertyKey;
+        if (!(deeper in (next as object))) break;
+        parent = next;
+      }
+      if (!parent || typeof parent !== "object" || !(last in parent)) continue;
       if (Array.isArray(parent)) parent.splice(Number(last), 1);
       else {
         // Back to the empty default where there is one, otherwise gone.

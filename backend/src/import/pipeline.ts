@@ -192,7 +192,7 @@ export async function processImport(
     // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
     // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
     const fromLink = priceBelongsToTrip ? (current?.profile.warnings ?? []).filter((w) => !input.link.warnings.includes(w)) : (current?.profile.warnings ?? []);
-    profile.warnings = [...new Set([...fromLink, ...extracted.warnings])].slice(0, 5);
+    profile.warnings = [...new Set([...extracted.warnings, ...fromLink])].slice(0, 5);
 
     await db
       .update(listings)

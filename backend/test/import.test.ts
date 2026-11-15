@@ -139,7 +139,7 @@ describe("what real pages taught us", () => {
 
   it("falls back to the pictures in a page rendered on the device", () => {
     const img = (n: number) => `<img srcset="https://img.example.test/h${n}_400.jpg 400w, https://img.example.test/h${n}_1600.jpg 1600w" alt="Zimmer ${n}">`;
-    const html = `<html><body><img src="https://img.example.test/icon-pool.png" width="24">${[1, 2, 3, 4].map(img).join("")}<img src="/relative.jpg"></body></html>`;
+    const html = `<html><body><img src="https://img.example.test/icon-pool.png" width="24">${[1, 2, 3, 4].map(img).join("")}<img src="/relative.jpg"><img src="https://bat.bing.com/action/0?ti=1&evt=pageLoad"><img src="https://stats.example.test/t?u=1"></body></html>`;
     const { photos } = extractBlocks(html);
     expect(photos.map((p) => p.url)).toEqual([1, 2, 3, 4].map((n) => `https://img.example.test/h${n}_1600.jpg`));
     expect(photos[1]!.caption).toBe("Zimmer 2");
@@ -157,6 +157,15 @@ describe("what real pages taught us", () => {
     // Each text once, and a budget that is kept.
     expect(input.match(/Geschirrspüler/g)).toHaveLength(1);
     expect(digestState({ a: Array.from({ length: 500 }, (_, i) => `Satz Nummer ${i} mit etwas Text`) }, 2000)).toMatch(/\[gekürzt\]$/);
+  });
+
+  it("takes the pictures the app saw load, each once and in its largest size", () => {
+    const c = "https://cdn.hometogo.net";
+    const html = `<html><body><img src="${c}/medium/e_v5/aaa.jpg"><p>Villa</p>
+      <div id="tp-captured-images" hidden><img src="${c}/medium/e_v5/aaa.jpg"><img src="${c}/large/e_v5/aaa.jpg"><img src="${c}/large/e_v5/bbb.jpg"><img src="${c}/medium/v1/ccc.jpg"><img src="https://bat.bing.com/action/0?ti=1"><img src="${c}/thumb/v1/ccc.jpg"></div></body></html>`;
+    const blocks = extractBlocks(html);
+    expect(blocks.photos.map((p) => p.url)).toEqual([`${c}/large/e_v5/aaa.jpg`, `${c}/large/e_v5/bbb.jpg`, `${c}/medium/v1/ccc.jpg`]);
+    expect(profileFromBlocks(blocks, "vacation_home").profile.photos[0]!.thumbUrl).toBe(`${c}/medium/e_v5/aaa.jpg`);
   });
 
   it("finds state that a page assigns in an inline script", () => {
@@ -225,6 +234,8 @@ describe("claudeExtractor", () => {
     const result = parseLenient(answer);
     expect(result?.profile).toMatchObject({ title: "Haus", bedrooms: null, maxGuests: 8, highlights: ["Pool", "Meerblick"], price: { totalEur: null, nights: 7 } });
     expect(result?.dropped.map((d) => d.split(":")[0]).sort()).toEqual(["bedrooms", "highlights.1", "price.totalEur"]);
+    const beds = parseLenient({ bedDetails: ["Schlafzimmer 1: 1 Doppelbett", { name: "Wohnraum", description: "1 Schlafsofa" }, { room: "Flur" }] });
+    expect(beds?.profile.bedDetails).toEqual([{ room: "Schlafzimmer 1", beds: "1 Doppelbett" }, { room: "Wohnraum", beds: "1 Schlafsofa" }]);
     // Keys the model left out, and an object where it wrote null, fall back to empty values.
     const sparse = parseLenient({ title: "Haus", amenities: { pool: true }, price: null, rating: { value: 4.5 } });
     expect(sparse?.profile).toMatchObject({ title: "Haus", bedrooms: null, amenities: { pool: true, wifi: null }, price: { totalEur: null, extraCosts: [] }, rating: { value: 4.5, count: null }, warnings: [] });
