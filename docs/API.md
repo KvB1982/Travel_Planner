@@ -59,6 +59,7 @@ Ein Angebot innerhalb einer Reise heißt in der Schnittstelle `candidate`.
 | PATCH | `/candidates/:id` | `status` (`new`, `shortlist`, `favorite`, `rejected`, `booked`), `rejectionReason`, `notes`, `tags`. |
 | PATCH | `/candidates/:id/profile` | Steckbrief von Hand korrigieren. Nur die geänderten Felder senden. |
 | POST | `/candidates/:id/capture` | Auf dem Gerät ausgelesenen Seiteninhalt nachreichen: `html`. |
+| POST | `/candidates/:id/refresh` | Angebot erneut vom Server abrufen und auswerten (ohne Inhalt). Antwort 202, danach wie beim Import auf `importStatus` warten. 429, wenn der letzte Abruf weniger als eine Minute her ist. |
 | PUT | `/candidates/:id/vote` | Abstimmen: `verdict` (`yes`, `maybe`, `no`), `veto`. |
 | POST | `/candidates/:id/comments` | Kommentar: `body`. |
 | POST | `/candidates/:id/prices` | Preis von Hand festhalten: `totalCents`, `startDate`, `endDate`, `persons`, `breakdown[]`. |

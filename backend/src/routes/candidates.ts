@@ -73,6 +73,21 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(202).send({ candidateId: candidate.id });
   });
 
+  /** Read the advert again from the server, for example after the import got better or to look for a new price. */
+  app.post("/candidates/:candidateId/refresh", async (req, reply) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
+    const [source] = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt)).limit(1);
+    if (!source) throw new HttpError(409, "no_source", "Zu diesem Angebot gibt es keinen Link.");
+    // Platforms are asked sparingly: not again within a minute.
+    if (source.lastFetchedAt && Date.now() - source.lastFetchedAt.getTime() < 60_000) throw new HttpError(429, "too_soon", "Das Angebot wurde gerade erst abgerufen. Bitte gleich noch einmal versuchen.");
+    const shared = analyzeLink(source.url);
+    const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
+    await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
+    ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid }));
+    return reply.code(202).send({ candidateId: candidate.id });
+  });
+
   app.get("/trips/:tripId/candidates", async (req) => {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
