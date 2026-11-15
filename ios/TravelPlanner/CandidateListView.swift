@@ -16,6 +16,7 @@ struct CandidateListView: View {
     @State private var invite: Invite?
     @State private var notice: String?
     @State private var pendingDelete: CandidateSummary?
+    @State private var showCompare = false
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -75,6 +76,11 @@ struct CandidateListView: View {
                     Button("Link hinzufügen", systemImage: "plus") { showAddLink = true }
                 }
             }
+            if candidates.count > 1 {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Vergleichen", systemImage: "rectangle.split.3x1") { showCompare = true }
+                }
+            }
             if detail?.role == .organizer {
                 ToolbarItem(placement: .secondaryAction) {
                     Button("Jemanden einladen", systemImage: "person.badge.plus") { createInvite() }
@@ -101,6 +107,9 @@ struct CandidateListView: View {
             Button("Löschen", role: .destructive) { delete(candidate) }
         } message: { candidate in
             Text("„\(candidate.listing.title ?? "Dieses Angebot")“ wird mit allen Stimmen und Kommentaren aus der Reise entfernt. Das lässt sich nicht rückgängig machen.")
+        }
+        .fullScreenCover(isPresented: $showCompare) {
+            CompareView(candidates: candidates, persons: detail?.trip.persons)
         }
         .sheet(item: $invite) { invite in
             InviteSheet(invite: invite)

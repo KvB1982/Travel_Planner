@@ -16,6 +16,7 @@ struct CandidateDetailView: View {
     @State private var actionError: String?
     @State private var confirmDelete = false
     @State private var showReviews = false
+    @AppStorage("showWarnings") private var showWarnings = false
 
     var body: some View {
         Group {
@@ -119,13 +120,7 @@ struct CandidateDetailView: View {
 
             importSection(detail, canEdit: canEdit)
 
-            if let warnings = profile.warnings, !warnings.isEmpty {
-                Section("Hinweise") {
-                    ForEach(warnings, id: \.self) { warning in
-                        Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                    }
-                }
-            }
+            hintsSection(detail, canEdit: canEdit)
 
             Section("Deine Stimme") {
                 let mine = detail.votes.entries.first { $0.userId == model.user?.id }
@@ -309,6 +304,54 @@ struct CandidateDetailView: View {
         var parts = [detail.listing.place, profile.region, detail.listing.country].compactMap { $0 }.filter { !$0.isEmpty }
         parts.append(contentsOf: detail.sources.map { Format.platformName($0.platform) })
         return parts.joined(separator: " · ")
+    }
+
+    /// Hints are folded away by default and can be hidden one by one once the group has dealt with them.
+    /// Hiding applies to everyone on the trip and can be undone; nothing is deleted.
+    @ViewBuilder
+    private func hintsSection(_ detail: CandidateDetail, canEdit: Bool) -> some View {
+        let visible = detail.hints.filter { !$0.hidden }
+        let hidden = detail.hints.filter(\.hidden)
+        if !visible.isEmpty {
+            Section {
+                DisclosureGroup(isExpanded: $showWarnings) {
+                    ForEach(visible) { hint in
+                        Label(hint.text, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .swipeActions(edge: .trailing) {
+                                if canEdit {
+                                    Button("Ausblenden", systemImage: "eye.slash") {
+                                        let list = hidden.map(\.text) + [hint.text]
+                                        perform { try await $0.setHiddenWarnings(candidateId: candidateID, hidden: list) }
+                                    }
+                                    .tint(.gray)
+                                }
+                            }
+                    }
+                    if canEdit {
+                        Button(visible.count == 1 ? "Hinweis ausblenden" : "Alle \(visible.count) Hinweise ausblenden", systemImage: "eye.slash") {
+                            let list = detail.hints.map(\.text)
+                            perform { try await $0.setHiddenWarnings(candidateId: candidateID, hidden: list) }
+                        }
+                    }
+                } label: {
+                    Label(visible.count == 1 ? "1 Hinweis" : "\(visible.count) Hinweise", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                }
+            } footer: {
+                if showWarnings && canEdit {
+                    Text("Einzelne Hinweise blendest du aus, indem du sie nach links wischst. Das gilt für alle Mitreisenden.")
+                }
+            }
+        }
+        if !hidden.isEmpty && canEdit {
+            Section {
+                Button(hidden.count == 1 ? "1 ausgeblendeten Hinweis wieder zeigen" : "\(hidden.count) ausgeblendete Hinweise wieder zeigen", systemImage: "eye") {
+                    perform { try await $0.setHiddenWarnings(candidateId: candidateID, hidden: []) }
+                }
+                .font(.footnote)
+            }
+        }
     }
 
     @ViewBuilder

@@ -125,6 +125,12 @@ public actor DemoBackend: TravelBackend {
         throw APIError(status: 0, code: "demo", message: "Mit Beispieldaten gibt es keinen Server, der das Inserat neu abrufen könnte.")
     }
 
+    public func setHiddenWarnings(candidateId: String, hidden: [String]) async throws {
+        var detail = try detail(candidateId)
+        detail.warnings = (detail.listing.profile.warnings ?? []).map { Hint(text: $0, hidden: hidden.contains($0)) }
+        details[candidateId] = detail
+    }
+
     public func delete(candidateId: String) async throws {
         _ = try detail(candidateId)
         details[candidateId] = nil
@@ -232,7 +238,7 @@ public actor DemoBackend: TravelBackend {
                  platform: "novasol", guests: 8, bedrooms: 4, baths: 2, sqm: 180, total: 539_000, start: "2027-05-15", end: "2027-05-29", nights: 14,
                  persons: 8, status: .shortlist,
                  amenities: ["pool": true, "airConditioning": false, "wifi": true, "dishwasher": true, "washingMachine": true, "fireplace": true, "parking": true, "petsAllowed": true],
-                 warnings: ["Das Inserat nennt 8 Gäste, die Reise hat 8 Personen: kein Spielraum."],
+                 warnings: ["Das Inserat nennt 8 Gäste, die Reise hat 8 Personen: kein Spielraum.", "Die Endreinigung ist im Preis nicht enthalten."],
                  votes: [VoteEntry(userId: "u-2", name: "Anna", verdict: .no, veto: false)], fill: 78),
             blocked,
             home("c-4", trip: "t-2", title: "Reetdachhaus hinter der Düne", place: "Henne Strand", country: "Dänemark", lat: 55.7372, lon: 8.1832,

@@ -238,11 +238,92 @@ final class ReviewTests: XCTestCase {
         XCTAssertNil(try detail(#","reviewSummary":null,"reviews":null"#).reviews)
     }
 
+    func testHintsWithHiddenStateAndFallbackToProfile() throws {
+        let withList = try detail(#","warnings":[{"text":"Preis für 6","hidden":true},{"text":"Kein WLAN","hidden":false}]"#)
+        XCTAssertEqual(withList.hints.filter(\.hidden).map(\.text), ["Preis für 6"])
+        XCTAssertEqual(withList.hints.filter { !$0.hidden }.map(\.text), ["Kein WLAN"])
+        XCTAssertTrue(try detail("").hints.isEmpty)
+    }
+
     func testOddExtrasNeverBreakTheOffer() throws {
         let detail = try detail(#","photos":"kaputt","reviewSummary":17,"reviews":{"unerwartet":true}"#)
         XCTAssertEqual(detail.listing.title, "Casa")
         XCTAssertNil(detail.photos)
         XCTAssertNil(detail.reviews)
+    }
+}
+
+final class ComparisonTests: XCTestCase {
+    private func offer(_ id: String, total: Int?, forTrip: Bool = true, bedrooms: Double?, beach: Double?, pool: Bool?,
+                       rating: Rating? = nil, yes: Int = 0) -> CandidateDetail {
+        var profile = Profile()
+        profile.bedrooms = bedrooms
+        var distances = Profile.Distances(); distances.beachM = beach
+        profile.distances = distances
+        profile.amenities = ["pool": pool]
+        profile.rating = rating
+        let prices = total.map { [PriceSnapshot(id: "p\(id)", tripId: forTrip ? "t" : nil, startDate: "2027-05-15", endDate: "2027-05-29",
+                                                nights: 14, persons: 6, totalCents: $0)] } ?? []
+        return CandidateDetail(candidate: CandidateRecord(id: id, tripId: "t", listingId: "l\(id)"), role: .member,
+                               listing: Listing(id: "l\(id)", title: id, profile: profile), prices: prices,
+                               votes: VoteOverview(yes: yes))
+    }
+
+    private func row(_ comparison: Comparison, _ id: String) -> Comparison.Row? {
+        comparison.sections.flatMap(\.rows).first { $0.id == id }
+    }
+
+    func testBestValuesPointTheRightWay() throws {
+        let comparison = Comparison(offers: [
+            offer("a", total: 480_000, bedrooms: 4, beach: 900, pool: true, rating: Rating(value: 4.5, scale: 5), yes: 2),
+            offer("b", total: 420_000, bedrooms: 5, beach: 300, pool: false, rating: Rating(value: 8.6, scale: 10), yes: 1),
+            offer("c", total: nil, bedrooms: nil, beach: nil, pool: nil),
+        ], persons: 8)
+        XCTAssertEqual(row(comparison, "price")?.best, [1], "der niedrigste Preis gewinnt")
+        XCTAssertEqual(row(comparison, "bedrooms")?.best, [1])
+        XCTAssertEqual(row(comparison, "beach")?.best, [1], "die kürzeste Entfernung gewinnt")
+        XCTAssertEqual(row(comparison, "amenity.pool")?.best, [0])
+        XCTAssertEqual(row(comparison, "amenity.pool")?.values, ["Ja", "Nein", nil], "unbekannt ist nicht Nein")
+        XCTAssertEqual(row(comparison, "rating")?.best, [0], "4,5 von 5 schlägt 8,6 von 10")
+        XCTAssertEqual(row(comparison, "yes")?.best, [0])
+        // 480.000 Cent / (8 Personen der Reise * 14 Nächte)
+        XCTAssertEqual(row(comparison, "perHead")?.values[0]?.filter { !$0.isWhitespace }, "43€")
+        XCTAssertNil(row(comparison, "perHead")?.values[2] ?? nil)
+    }
+
+    func testPriceForOtherDatesIsShownButNotRanked() throws {
+        let comparison = Comparison(offers: [
+            offer("a", total: 480_000, bedrooms: 4, beach: nil, pool: nil),
+            offer("b", total: 100_000, forTrip: false, bedrooms: 4, beach: nil, pool: nil),
+        ], persons: 8)
+        let price = try XCTUnwrap(row(comparison, "price"))
+        XCTAssertEqual(price.best, [], "ein einzelner gültiger Preis hat keinen Gegner")
+        XCTAssertEqual(price.values[1]?.hasPrefix("("), true)
+        XCTAssertNotNil(price.note)
+        XCTAssertNil(row(comparison, "perHead")?.values[1] ?? nil)
+    }
+
+    func testEqualAndUnknownRows() throws {
+        let comparison = Comparison(offers: [
+            offer("a", total: 400_000, bedrooms: 4, beach: nil, pool: true),
+            offer("b", total: 400_000, bedrooms: 4, beach: nil, pool: true),
+        ], persons: 6)
+        XCTAssertEqual(row(comparison, "price")?.best, [], "Gleichstand hat keinen Sieger")
+        XCTAssertEqual(row(comparison, "bedrooms")?.differs, false)
+        XCTAssertEqual(row(comparison, "amenity.pool")?.best, [], "beide Ja: nichts hervorzuheben")
+        XCTAssertNil(row(comparison, "beach"), "Zeilen ohne jeden Wert entfallen")
+        XCTAssertNil(row(comparison, "amenity.sauna"))
+        let differences = comparison.differencesOnly()
+        XCTAssertNil(row(differences, "bedrooms"))
+        XCTAssertFalse(differences.sections.flatMap(\.rows).contains { !$0.differs })
+    }
+
+    func testWinsCountBestValues() {
+        let comparison = Comparison(offers: [
+            offer("a", total: 480_000, bedrooms: 4, beach: 900, pool: true),
+            offer("b", total: 420_000, bedrooms: 5, beach: 300, pool: false),
+        ], persons: 8)
+        XCTAssertEqual(comparison.wins, [1, 4])
     }
 }
 
@@ -262,6 +343,19 @@ final class DemoBackendTests: XCTestCase {
 
         let list = try await demo.candidates(tripId: "t-1")
         XCTAssertEqual(list.first { $0.id == "c-1" }?.myVote?.verdict, .yes)
+    }
+
+    func testHidingHintsKeepsThemButMarksThem() async throws {
+        let demo = DemoBackend()
+        let before = try await demo.candidate("c-2").hints
+        XCTAssertEqual(before.count, 2)
+        XCTAssertFalse(before.contains(where: \.hidden))
+        try await demo.setHiddenWarnings(candidateId: "c-2", hidden: [before[0].text])
+        let after = try await demo.candidate("c-2").hints
+        XCTAssertEqual(after.map(\.hidden), [true, false])
+        try await demo.setHiddenWarnings(candidateId: "c-2", hidden: [])
+        let restored = try await demo.candidate("c-2").hints
+        XCTAssertFalse(restored.contains(where: \.hidden))
     }
 
     func testDeleteRemovesOfferAndUpdatesCounts() async throws {

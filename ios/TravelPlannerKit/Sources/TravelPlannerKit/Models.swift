@@ -357,6 +357,17 @@ public struct Photo: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A hint on an offer, such as "price is for six people". The group can hide hints it has dealt with.
+public struct Hint: Codable, Hashable, Sendable, Identifiable {
+    public var text: String
+    public var hidden: Bool
+    public var id: String { text }
+
+    public init(text: String, hidden: Bool = false) {
+        self.text = text; self.hidden = hidden
+    }
+}
+
 /// What guests wrote about an offer: a summary written by the server and the individual reviews.
 public struct Reviews: Codable, Hashable, Sendable {
     public struct Item: Codable, Identifiable, Hashable, Sendable {
@@ -416,6 +427,13 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     public var photos: [Photo]?
     /// Missing on servers that do not read reviews yet, or when the advert has none.
     public var reviews: Reviews?
+    /// All hints with their hidden state; nil when the server only sends them inside the profile.
+    public var warnings: [Hint]?
+
+    /// Hints of the offer, taken from the profile when the server sent no list of its own.
+    public var hints: [Hint] {
+        warnings ?? (listing.profile.warnings ?? []).map { Hint(text: $0) }
+    }
 
     public init(candidate: CandidateRecord, role: MemberRole, listing: Listing, sources: [ListingSource] = [], prices: [PriceSnapshot] = [],
                 votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil, reviews: Reviews? = nil) {
@@ -424,7 +442,7 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews
+        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews, warnings
     }
 
     /// The server sends the summary (`reviewSummary`) and the single reviews (`reviews`, a list) side by side.
@@ -439,6 +457,7 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
         votes = try container.decodeIfPresent(VoteOverview.self, forKey: .votes) ?? .init()
         comments = try container.decodeIfPresent([Comment].self, forKey: .comments) ?? []
         photos = (try? container.decodeIfPresent([Photo].self, forKey: .photos)) ?? nil
+        warnings = (try? container.decodeIfPresent([Hint].self, forKey: .warnings)) ?? nil
 
         var combined = ((try? container.decodeIfPresent(Reviews.self, forKey: .reviewSummary)) ?? nil) ?? Reviews()
         if let items = (try? container.decodeIfPresent([Reviews.Item].self, forKey: .reviews)) ?? nil {

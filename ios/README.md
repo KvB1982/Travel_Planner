@@ -55,6 +55,12 @@ Liefert `GET /candidates/:id` die Felder `reviewSummary` (`summary`, `positives`
 
 Angebote lassen sich in der Liste per Wischen oder im Menü des Steckbriefs löschen, jeweils mit Rückfrage. Unter „Quellen“ ruft „Aktualisieren“ das Inserat über den Server neu ab, „Auf diesem Gerät aktualisieren“ liest es in der App neu aus. Dabei merkt sich die App alle Fotos, die die Seite lädt, und hängt sie als `tp-captured-images` an das gesendete HTML.
 
+## Vergleich und Hinweise
+
+„Vergleichen“ in der Angebotsliste stellt die Angebote einer Reise nebeneinander: Preis, Stimmen, Bewertungen, Größe, Lage, Ausstattung, Regeln. Der jeweils beste bekannte Wert ist markiert, „Nur Unterschiede zeigen“ blendet gleiche Zeilen aus, über „Auswahl“ lassen sich Angebote ab- und zuwählen. Preise für einen anderen Zeitraum stehen in Klammern und zählen nicht. Die Logik liegt in `TravelPlannerKit/Comparison.swift` und rechnet aus den Steckbriefen; der Server bietet mit `GET /trips/:id/compare` dasselbe an, die App nutzt es noch nicht.
+
+Hinweise im Steckbrief sind eingeklappt. Einzelne lassen sich per Wischen ausblenden (`PATCH /candidates/:id` mit `hiddenWarnings`), das gilt für die ganze Reise und lässt sich zurücknehmen.
+
 ## Noch nicht enthalten
 
-Vergleich, Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.
+Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.

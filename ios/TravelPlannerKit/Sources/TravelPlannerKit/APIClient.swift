@@ -28,6 +28,8 @@ public protocol TravelBackend: Sendable {
     /// Asks the server to read the advert again. Progress shows in `importStatus`, as after an import.
     func refresh(candidateId: String) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
+    /// Sets which hints of an offer are hidden for the whole trip, by their exact wording. An empty list shows all again.
+    func setHiddenWarnings(candidateId: String, hidden: [String]) async throws
     /// Removes the offer from its trip, with its votes and comments. Cannot be undone.
     func delete(candidateId: String) async throws
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
@@ -214,6 +216,11 @@ public struct APIClient: TravelBackend {
 
     public func refresh(candidateId: String) async throws {
         _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/refresh")
+    }
+
+    public func setHiddenWarnings(candidateId: String, hidden: [String]) async throws {
+        struct Body: Encodable { var hiddenWarnings: [String] }
+        _ = try await data("PATCH", "/candidates/\(candidateId.pathEscaped)", body: Body(hiddenWarnings: hidden))
     }
 
     public func delete(candidateId: String) async throws {
