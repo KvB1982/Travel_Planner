@@ -1,7 +1,7 @@
 # Konzept: Ferienhaus-Planer für Familie und Freunde
 
 **Arbeitstitel:** Travel Planner
-**Stand:** 15.11.2026, Version 0.2 (Rahmenbedingungen geklärt)
+**Stand:** 15.11.2026, Version 0.3 (Server-Bestandsaufnahme eingearbeitet)
 **Status:** Konzeptphase, noch keine Implementierung
 
 ---
@@ -17,9 +17,9 @@ Die Kernempfehlungen in Kürze:
 | Thema | Empfehlung |
 |---|---|
 | App | Native iOS/iPadOS-App in **Swift und SwiftUI**, mit Share Extension als wichtigstem Einstiegspunkt |
-| Backend | **TypeScript (Node.js, Fastify)** als Docker-Stack auf dem eigenen Server |
+| Backend | **TypeScript (Node.js, Fastify)** als Docker-Stack in einer eigenen Linux-VM auf dem Server |
 | Datenbank | **PostgreSQL** auf dem eigenen Server, nie direkt erreichbar, nur über die API |
-| Erreichbarkeit | API über HTTPS aus dem Internet (Reverse Proxy auf dem Hetzner-Server), Administration nur über Tailscale |
+| Erreichbarkeit | API über HTTPS aus dem Internet, zum Start über Tailscale Funnel ohne offene Ports, Administration nur über Tailscale |
 | Datenimport | Teilen-Menü plus KI-gestützte Extraktion. Offizielle APIs der großen Plattformen stehen Privatprojekten praktisch nicht offen |
 | Mitmachen ohne App | Abstimmung für Gäste über einen Web-Link, damit auch Android-Nutzer und Großeltern teilnehmen können |
 | Verteilung | TestFlight, kein öffentlicher App-Store-Auftritt nötig |
@@ -374,15 +374,28 @@ Reines Tailscale wäre am sichersten, verlangt aber, dass **jeder Mitreisende** 
 | App und Gäste-Web auf die API | HTTPS aus dem Internet |
 | Datenbank, Server-Administration, Protokolle, Sicherungen | Ausschließlich über Tailscale |
 
-Der Server ist ein dedizierter Hetzner-Server im Rechenzentrum mit fester öffentlicher Adresse. Damit ist der direkte Weg der einfachste:
+**Ausgangslage laut Bestandsaufnahme vom 15.11.2026:**
 
-1. **Caddy als Reverse Proxy** auf dem Server, mit automatischem Let's-Encrypt-Zertifikat. Nach außen sind nur die Ports 80 und 443 offen, alles andere sperrt die Firewall.
-2. **Eigene Subdomain** (zum Beispiel `reisen.<domain>.de`) mit einem DNS-Eintrag auf die Serveradresse. Die Domain wird bei Strato eingerichtet oder reaktiviert.
-3. **SSH, Datenbank und Verwaltung** sind ausschließlich über Tailscale erreichbar.
+- Dedizierter Hetzner-Server mit Windows 10 Pro, 8 Threads, 32 GB Arbeitsspeicher (rund 10 GB frei), zwei SSDs mit je 512 GB ohne RAID, reichlich freier Speicherplatz.
+- Hyper-V ist aktiv. Das Dokumentenarchiv läuft bereits als Docker-Stack in einer Ubuntu-VM und ist ausschließlich über Tailscale erreichbar.
+- Auf dem Windows-System selbst gibt es kein Docker und keinen Reverse Proxy. Die Ports 80 und 443 sind frei, Port 5432 ist durch eine vorhandene PostgreSQL-Installation belegt.
+- Der Server hat eine einzige öffentliche IPv4-Adresse, die auf dem Windows-System liegt.
+- Windows 10 erhält keine regulären Sicherheitsupdates mehr.
 
-Ein Tunnel-Dienst (Cloudflare Tunnel, Tailscale Funnel) ist bei dieser Ausgangslage nicht nötig. Tailscale Funnel bleibt eine Übergangslösung, falls die Domain zum Start von Phase 0 noch nicht bereitsteht.
+**Empfehlung: eigene Linux-VM, Veröffentlichung in zwei Stufen.**
 
-Da auf dem Server bereits weitere Projekte laufen, bekommt der Travel Planner einen eigenen Docker-Compose-Stack mit eigener Datenbank und eigenem Netz. Falls dort schon ein Reverse Proxy läuft, wird dieser mitgenutzt statt ein zweiter aufgesetzt.
+Der Travel Planner bekommt eine eigene Ubuntu-VM unter Hyper-V (Vorschlag: 2 virtuelle Kerne, 4 GB Arbeitsspeicher, 60 GB Platte auf Laufwerk D:). Das folgt dem bewährten Muster des Dokumentenarchivs, trennt die Projekte sauber voneinander und hält das Windows-System aus dem Datenverkehr heraus. Die VM enthält den kompletten Docker-Stack mit eigener PostgreSQL-Datenbank.
+
+| Stufe | Weg | Bewertung |
+|---|---|---|
+| **1, zum Start** | **Tailscale Funnel** aus der VM heraus. Die API ist per HTTPS unter einer `ts.net`-Adresse öffentlich erreichbar. | Keine offenen Ports, keine zusätzliche IP, kein Eingriff am Windows-System, in Minuten eingerichtet. Nachteil: Die Adresse ist nicht die eigene Domain, das sieht man nur in den Gäste-Links. |
+| **2, bei Bedarf** | **Zusätzliche IP-Adresse von Hetzner** für die VM, darauf Caddy mit `reisen.von-bleichert.com` und Let's-Encrypt-Zertifikat. | Eigene Domain und volle Kontrolle, kostet wenige Euro im Monat. Die VM steht dann direkt im Netz und braucht eine eigene Firewall. |
+
+Bewusst **nicht empfohlen** wird, die Ports 80 und 443 am Windows-System zu öffnen und an die VM weiterzureichen. Ein Betriebssystem ohne Sicherheitsupdates sollte keine zusätzlichen Dienste ins Internet stellen.
+
+In beiden Stufen gilt: SSH, Datenbank und Verwaltung sind ausschließlich über Tailscale erreichbar. Die Adresse der API ist in der App konfigurierbar, der Wechsel von Stufe 1 zu Stufe 2 erfordert also keine neue App-Version.
+
+**Sicherung:** Die VM wird in das vorhandene Verfahren aufgenommen (nächtliche, verschlüsselte Sicherung mit restic auf eine Hetzner Storage Box). Da der Server kein RAID hat, ist die externe Sicherung die einzige Absicherung gegen einen Plattenausfall.
 
 ### 8.4 Synchronisation und Offline-Verhalten
 
@@ -469,7 +482,7 @@ Die Angaben sind grobe Richtwerte für die Entwicklung mit KI-Unterstützung und
 ### Phase 0: Grundlagen (etwa 1 Woche)
 
 - Offene Fragen klären (Abschnitt 13)
-- Server vorbereiten: Ausstattung und laufende Dienste erfassen, Docker-Stack, Subdomain, Sicherung
+- Server vorbereiten: Ubuntu-VM unter Hyper-V anlegen, Docker-Stack, Tailscale Funnel, Sicherung
 - Apple-Developer-Konto, Projektgerüst, automatischer Build
 - Klickbarer Entwurf der wichtigsten Ansichten
 - **Machbarkeitstest Import** mit je fünf echten Inseraten von Airbnb, FeWo-direkt, Novasol und Check24. Dieser Test entscheidet früh über das größte Risiko.
@@ -534,9 +547,9 @@ Stand 15.11.2026, nach Rückmeldung des Auftraggebers:
 | Thema | Ergebnis | Folge für das Projekt |
 |---|---|---|
 | **Mac und Xcode** | Wird zur Verfügung stehen | Native App wie empfohlen, Build und Test auf dem eigenen Mac |
-| **Apple-Developer-Konto** | Wird neu angelegt | Früh in Phase 0 erledigen, die Freischaltung kann einige Tage dauern |
-| **Server** | Dedizierter Hetzner-Server im Rechenzentrum, dort laufen bereits weitere Projekte | Direkte Veröffentlichung über Reverse Proxy, eigener Docker-Stack, siehe 8.3 |
-| **Domain** | Noch keine aktive, Einrichtung über Strato geplant | Subdomain für die API, bis dahin Übergang möglich |
+| **Apple-Developer-Konto** | Anmeldung ist erfolgt | TestFlight-Verteilung ist möglich |
+| **Server** | Dedizierter Hetzner-Server mit Windows 10 und Hyper-V, 32 GB Arbeitsspeicher, dort laufen bereits weitere Projekte | Eigene Ubuntu-VM mit Docker-Stack, siehe 8.3 |
+| **Domain** | von-bleichert.com bei Strato ist aktiv | Subdomain `reisen.von-bleichert.com` für Stufe 2 der Veröffentlichung, zum Start nicht nötig |
 | **Nutzerkreis** | Zunächst höchstens 20 Personen, überwiegend iPhone | Geringe Last, ein kleiner Stack genügt. Gäste-Web bleibt für die wenigen ohne iPhone in Phase 2 |
 | **Plattformen** | Airbnb, FeWo-direkt, Novasol, Check24 | Import und Machbarkeitstest werden auf diese vier ausgerichtet |
 | **KI-Dienst** | Claude API ist freigegeben | KI-Extraktion ist fester Bestandteil des MVP |
@@ -544,14 +557,16 @@ Stand 15.11.2026, nach Rückmeldung des Auftraggebers:
 
 **Noch offen:**
 
-- Genaue Ausstattung des Servers (Betriebssystem, Arbeitsspeicher, freier Speicherplatz, vorhandener Reverse Proxy). Wird zu Beginn von Phase 0 direkt auf dem Server ausgelesen.
-- Ob die frühere Strato-Domain noch aktiv ist.
+- Details der vorhandenen VM und der Firewall-Regeln am Windows-System. Dafür sind Administratorrechte nötig.
+- Ob vor dem Server eine Hetzner-Firewall aktiv ist.
+
+**Hinweis außerhalb des Projektumfangs:** Bei der Bestandsaufnahme fiel auf, dass am Windows-System Fernzugriff (RDP) und PostgreSQL auch an der öffentlichen Adresse lauschen. Ob sie aus dem Internet erreichbar sind, ließ sich ohne Administratorrechte nicht klären und sollte geprüft werden. Empfehlenswert ist, beide nur über Tailscale zuzulassen.
 
 ---
 
 ## 14. Nächste Schritte
 
-1. Apple-Developer-Konto anlegen und Domain klären (Auftraggeber)
+1. Erreichbarkeit von RDP und PostgreSQL aus dem Internet prüfen (Auftraggeber oder gemeinsam mit Administratorrechten)
 2. Machbarkeitstest für den Import mit echten Inseraten
 3. Entwurf der wichtigsten Ansichten zur Abstimmung
 4. Start von Phase 0
