@@ -12,7 +12,96 @@ export interface PageBlocks {
   text: string;
   /** Picture addresses of the advert in page order, already cleaned of icons and duplicates. */
   photos: PagePhoto[];
+  /** Single guest reviews found in the page data, newest or most prominent first as the page has them. */
+  reviews: PageReview[];
 }
+
+export interface PageReview {
+  text: string;
+  title: string | null;
+  rating: number | null;
+  scale: number | null;
+  /** As the page gives it: an ISO date where possible, otherwise its wording ("August 2026"). */
+  date: string | null;
+  author: string | null;
+}
+
+const REVIEW_KEYS = /^(reviews?|reviewList|ratingList|guestReviews?|customerReviews?|userReviews?|comments|testimonials|feedbacks?|bewertungen)$/i;
+const REVIEW_TEXT_KEYS = ["reviewBody", "text", "comment", "comments", "body", "content", "review", "localizedReview", "description", "message", "positive", "pros", "negative", "cons"];
+
+const shortText = (v: unknown, max = 80): string | null => (typeof v === "string" && v.trim() && v.trim().length <= max && !/^https?:/i.test(v.trim()) ? v.trim() : null);
+
+function reviewFrom(item: unknown): PageReview | null {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const o = item as Record<string, unknown>;
+  // The text is under a usual name, or else the longest piece of prose in the entry.
+  const parts: string[] = [];
+  for (const key of REVIEW_TEXT_KEYS) {
+    const v = o[key];
+    const t = typeof v === "string" ? v : v && typeof v === "object" && !Array.isArray(v) ? ((v as Record<string, unknown>).text ?? (v as Record<string, unknown>).value) : null;
+    if (typeof t === "string" && t.trim().length >= 20 && /\s/.test(t) && !parts.includes(t.trim())) parts.push(t.trim());
+  }
+  if (!parts.length) {
+    const longest = Object.values(o).filter((v): v is string => typeof v === "string" && v.trim().length >= 40 && /\s/.test(v) && !/^https?:/i.test(v)).sort((a, b) => b.length - a.length)[0];
+    if (longest) parts.push(longest.trim());
+  }
+  if (!parts.length) return null;
+  const text = parts.join("\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").slice(0, 2000);
+
+  const ratingNode = o.reviewRating ?? o.rating ?? o.score ?? o.stars ?? o.ratingValue ?? o.overallRating ?? o.value;
+  const r = ratingNode && typeof ratingNode === "object" ? (ratingNode as Record<string, unknown>) : null;
+  const rating = num(r ? (r.ratingValue ?? r.value ?? r.score ?? r.overall) : ratingNode);
+  const scale = r ? num(r.bestRating ?? r.scale ?? r.max) : num(o.bestRating ?? o.maxRating ?? o.scale);
+
+  const authorNode = o.author ?? o.reviewer ?? o.user ?? o.guest ?? o.customer;
+  const a = authorNode && typeof authorNode === "object" ? (authorNode as Record<string, unknown>) : null;
+  const author = shortText(a ? (a.name ?? a.firstName ?? a.displayName ?? a.nickname) : authorNode, 40) ?? shortText(o.authorName ?? o.reviewerName ?? o.firstName ?? o.name ?? o.nickname, 40);
+
+  const rawDate = o.datePublished ?? o.date ?? o.createdAt ?? o.created ?? o.reviewDate ?? o.submissionDate ?? o.travelDate ?? o.localizedDate ?? o.time;
+  let date: string | null = null;
+  if (typeof rawDate === "string") date = /^\d{4}-\d{2}-\d{2}/.exec(rawDate.trim())?.[0] ?? shortText(rawDate, 40);
+  else if (typeof rawDate === "number" && rawDate > 1e9) date = new Date(rawDate < 1e12 ? rawDate * 1000 : rawDate).toISOString().slice(0, 10);
+
+  return { text, title: shortText(o.title ?? o.headline, 120), rating: rating !== null && rating >= 0 && rating <= 100 ? rating : null, scale, date, author };
+}
+
+/** Every list of reviews in a state object; the advert's own is, as a rule, the longest. */
+function reviewLists(root: unknown): PageReview[][] {
+  const lists: PageReview[][] = [];
+  const queue: unknown[] = [root];
+  for (let i = 0; i < queue.length && i < 50_000; i++) {
+    const node = queue[i];
+    if (!node || typeof node !== "object") continue;
+    if (Array.isArray(node)) {
+      queue.push(...node);
+      continue;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (REVIEW_KEYS.test(key) && Array.isArray(value)) {
+        const found = value.map(reviewFrom).filter((r): r is PageReview => r !== null);
+        if (found.length) lists.push(found);
+      }
+      queue.push(value);
+    }
+  }
+  return lists;
+}
+
+function cleanReviews(candidates: PageReview[], limit = 40): PageReview[] {
+  const seen = new Set<string>();
+  const out: PageReview[] = [];
+  for (const review of candidates) {
+    const key = review.text.slice(0, 120).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(review);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** A stable id for a review, so the app can keep its place in a list. */
+export const reviewId = (review: Pick<PageReview, "text">): string => createHash("sha256").update(review.text).digest("hex").slice(0, 16);
 
 export interface PagePhoto {
   url: string;
@@ -271,6 +360,16 @@ export function extractBlocks(html: string): PageBlocks {
     if (!LODGING_TYPES.test(typeOf(node)) || /Product/i.test(typeOf(node))) continue;
     candidates.push(...[node.image, node.photo].flat().map(photoFrom).filter((p): p is PagePhoto => p !== null));
   }
+  // Reviews: JSON-LD of the lodging, then the longest list in the page state.
+  const reviewCandidates: PageReview[] = [];
+  for (const node of jsonLd) {
+    if (/Product/i.test(typeOf(node)) && !LODGING_TYPES.test(typeOf(node).replace(/Product/gi, ""))) continue;
+    reviewCandidates.push(...[node.review, node.reviews].flat().map(reviewFrom).filter((r): r is PageReview => r !== null));
+  }
+  const reviewSets = rawStates.flatMap(reviewLists).sort((a, b) => b.length - a.length);
+  if (reviewSets[0]) reviewCandidates.push(...reviewSets[0]);
+  const reviews = cleanReviews(reviewCandidates);
+
   const galleries = rawStates.flatMap(photoLists).sort((a, b) => b.length - a.length);
   if (galleries[0]) candidates.push(...galleries[0]);
   let photos = cleanPhotos(candidates);
@@ -298,7 +397,7 @@ export function extractBlocks(html: string): PageBlocks {
     if (merged.length > photos.length) photos = merged;
   }
 
-  return { title, og, jsonLd, state, text, photos };
+  return { title, og, jsonLd, state, text, photos, reviews };
 }
 
 /**
@@ -440,6 +539,11 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
     provenance.photos = `${profile.photos.length} Bilder aus den Seitendaten`;
   }
 
+  if (blocks.reviews.length) {
+    profile.reviews = blocks.reviews.map((r) => ({ id: reviewId(r), ...r }));
+    provenance.reviews = `${profile.reviews.length} Bewertungen aus den Seitendaten`;
+  }
+
   const portalMeta = hasPortalMetadata(blocks);
   if (portalMeta) provenance.metadata = "Seite trägt nur die Angaben des Portals";
   if (!profile.title && !portalMeta) {
@@ -543,6 +647,18 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest:
     const json = JSON.stringify(blocks.state);
     // A state that fits is passed as it is; a large one as its readable digest instead of an arbitrary first slice.
     parts.push(json.length <= limits.state ? `<page_state>\n${json}\n</page_state>` : `<page_state format="Auszug: Schlüssel und Wert je Zeile, in Seitenreihenfolge">\n${digestState(blocks.state, limits.digest)}\n</page_state>`);
+  }
+  if (blocks.reviews.length) {
+    // Enough voices for a fair picture, short enough to stay cheap.
+    const lines: string[] = [];
+    let used = 0;
+    for (const r of blocks.reviews) {
+      const line = `- ${r.rating !== null ? `[${r.rating}${r.scale ? `/${r.scale}` : ""}] ` : ""}${r.date ? `(${r.date}) ` : ""}${r.text.replace(/\s+/g, " ").slice(0, 600)}`;
+      if (used + line.length > 9_000) break;
+      used += line.length;
+      lines.push(line);
+    }
+    parts.push(`<reviews count="${blocks.reviews.length}">\n${lines.join("\n")}\n</reviews>`);
   }
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);
   return parts.join("\n\n");
