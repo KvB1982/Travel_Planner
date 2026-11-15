@@ -55,7 +55,7 @@ Ein Angebot innerhalb einer Reise heißt in der Schnittstelle `candidate`.
 |---|---|---|
 | POST | `/trips/:id/imports` | Link teilen. Körper: `url`, optional `html`. |
 | GET | `/trips/:id/candidates` | Liste mit Kerndaten, aktuellem Preis, Stimmen und eigener Stimme. |
-| GET | `/candidates/:id` | Vollständiger Steckbrief, Quellen, Preisverlauf, Stimmen, Kommentare. |
+| GET | `/candidates/:id` | Vollständiger Steckbrief, Quellen, Preisverlauf, Stimmen, Kommentare, dazu `photos`. |
 | PATCH | `/candidates/:id` | `status` (`new`, `shortlist`, `favorite`, `rejected`, `booked`), `rejectionReason`, `notes`, `tags`. |
 | PATCH | `/candidates/:id/profile` | Steckbrief von Hand korrigieren. Nur die geänderten Felder senden. |
 | POST | `/candidates/:id/capture` | Auf dem Gerät ausgelesenen Seiteninhalt nachreichen: `html`. |
@@ -93,3 +93,20 @@ Der Steckbrief steht unter `listing.profile`. Die vollständige Struktur ist in 
 ### Preise
 
 Jeder Preis ist ein eigener Eintrag mit Zeitpunkt, Zeitraum, Personenzahl und Herkunft (`capture`: `import`, `device`, `manual`, `auto`). In der Liste erscheint bevorzugt der neueste Preis, der für diese Reise erfasst wurde (`forThisTrip: true`).
+
+## Bilder
+
+`GET /candidates/:id` liefert `photos` in der Reihenfolge der Anzeige, das erste ist das Titelbild:
+
+```json
+{ "id": "9f2c1a0b3d4e5f67", "url": "https://…/bild.jpg", "thumbUrl": null, "width": null, "height": null, "caption": null }
+```
+
+- `url` ist die Adresse des Originals in voller Qualität beim Bilddienst der Plattform. Die App lädt von dort und speichert auf dem Gerät zwischen.
+- `thumbUrl` ist eine kleinere Fassung (rund 720 px), wo der Bilddienst der Plattform das anbietet (derzeit Airbnb), sonst `null`. Dann verkleinert die App das Original selbst.
+- `id` bleibt für dieselbe Bildadresse gleich und taugt als Cache-Schlüssel.
+- Die Liste ist leer bei Angeboten, die vor dieser Funktion importiert wurden, oder wenn die Seite keine Bilder preisgab. Dann gilt `coverImageUrl`.
+- Die Bildadressen werden beim Import aus den Seitendaten gelesen (JSON-LD, Seitenzustand, bei Geräte-Erfassung auch die Bilder im HTML). Die App muss sie bei `/capture` nicht getrennt schicken.
+- Die Bilder liegen bisher nicht auf dem eigenen Server. Eine eigene Bildablage mit Vorschaubildern ist als nächster Schritt vorgesehen; die Felder bleiben dabei gleich, nur die Adressen zeigen dann auf die API.
+
+Die Liste `GET /trips/:id/candidates` enthält weiter `coverImageUrl` und zusätzlich `photoCount`.

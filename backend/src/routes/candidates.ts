@@ -120,6 +120,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
             lat: listing.lat,
             lon: listing.lon,
             coverImageUrl: listing.coverImageUrl,
+            photoCount: p.photoCount,
             fillPercent: listing.fillPercent,
             maxGuests: p.maxGuests,
             bedrooms: p.bedrooms,
@@ -158,6 +159,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       candidate,
       role,
       listing,
+      // In page order, first is the cover. Empty for adverts imported before pictures were collected.
+      photos: listing?.profile.photos ?? [],
       sources: sources.map((s) => ({ id: s.id, platform: s.platform, url: s.url, canonicalUrl: s.canonicalUrl, provenance: s.provenance, lastFetchedAt: s.lastFetchedAt })),
       prices,
       votes: { ...tally(voteRows), entries: voteRows },

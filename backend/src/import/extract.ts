@@ -60,7 +60,7 @@ ${context}
 
 Fülle diese Struktur. Die Schlüssel und ihre Reihenfolge bleiben unverändert:
 
-${JSON.stringify(emptyProfile(link.kind), null, 1)}`;
+${JSON.stringify({ ...emptyProfile(link.kind), photos: undefined }, null, 1)}`;
 }
 
 function parseJsonObject(text: string): unknown {
@@ -131,6 +131,8 @@ export function combine(baseline: Profile, fromModel: Profile): Profile {
   merged.lon = baseline.lon ?? fromModel.lon;
   if (baseline.rating.value !== null) merged.rating = baseline.rating;
   if (baseline.coverImageUrl) merged.coverImageUrl = baseline.coverImageUrl;
+  // Picture addresses are copied from page data, never written by the model.
+  merged.photos = baseline.photos;
   merged.photoCount = Math.max(baseline.photoCount ?? 0, fromModel.photoCount ?? 0) || null;
   merged.highlights = merged.highlights.slice(0, 4);
   merged.warnings = merged.warnings.slice(0, 4);

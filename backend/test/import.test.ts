@@ -121,6 +121,30 @@ describe("what real pages taught us", () => {
     expect(profileFromBlocks(own, "vacation_home").profile.title).toMatch(/online buchen/);
   });
 
+  it("collects the advert's gallery, one address per picture, without icons or other adverts", () => {
+    const pic = (n: number) => ({ id: n, baseUrl: `https://a0.muscache.com/im/pictures/p${n}.jpeg`, thumb: `https://a0.muscache.com/im/pictures/p${n}.jpeg?im_w=240`, accessibilityLabel: `Bild ${n}` });
+    const state = { listing: { photos: [1, 2, 3, 4, 5].map(pic), host: { images: ["https://a0.muscache.com/im/users/avatar.jpg"] } }, similar: [{ images: ["https://a0.muscache.com/im/pictures/other.jpeg"] }] };
+    const html = `<html><head><script id="data-deferred-state-0" type="application/json">${JSON.stringify(state)}</script></head>
+      <body><img src="https://cdn.example.test/logo.png"><p>Villa</p></body></html>`;
+    const blocks = extractBlocks(html);
+    expect(blocks.photos.map((p) => p.url)).toEqual([1, 2, 3, 4, 5].map((n) => `https://a0.muscache.com/im/pictures/p${n}.jpeg`));
+    expect(blocks.photos[0]!.caption).toBe("Bild 1");
+    const { profile } = profileFromBlocks(blocks, "vacation_home");
+    expect(profile.photoCount).toBe(5);
+    expect(profile.coverImageUrl).toBe("https://a0.muscache.com/im/pictures/p1.jpeg");
+    expect(profile.photos[0]).toMatchObject({ thumbUrl: "https://a0.muscache.com/im/pictures/p1.jpeg?im_w=720", caption: "Bild 1" });
+    // The model's input stays free of picture lists.
+    expect(modelInput(blocks)).not.toContain("muscache");
+  });
+
+  it("falls back to the pictures in a page rendered on the device", () => {
+    const img = (n: number) => `<img srcset="https://img.example.test/h${n}_400.jpg 400w, https://img.example.test/h${n}_1600.jpg 1600w" alt="Zimmer ${n}">`;
+    const html = `<html><body><img src="https://img.example.test/icon-pool.png" width="24">${[1, 2, 3, 4].map(img).join("")}<img src="/relative.jpg"></body></html>`;
+    const { photos } = extractBlocks(html);
+    expect(photos.map((p) => p.url)).toEqual([1, 2, 3, 4].map((n) => `https://img.example.test/h${n}_1600.jpg`));
+    expect(photos[1]!.caption).toBe("Zimmer 2");
+  });
+
   it("finds state that a page assigns in an inline script", () => {
     const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
     const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");
