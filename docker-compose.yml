@@ -1,0 +1,36 @@
+# Stack für die Ubuntu-VM. Start: `docker compose up -d --build`
+# Nach außen ist nichts geöffnet: Die API lauscht nur auf 127.0.0.1 und wird
+# über Tailscale Funnel oder einen Reverse Proxy veröffentlicht.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: travel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Bitte POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: travel
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U travel -d travel"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://travel:${POSTGRES_PASSWORD}@db:5432/travel
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Bitte PUBLIC_BASE_URL in .env setzen}
+      BOOTSTRAP_SECRET: ${BOOTSTRAP_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL:-claude-haiku-5-5}
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  db-data:
