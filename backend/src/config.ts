@@ -8,6 +8,8 @@ const schema = z.object({
   BOOTSTRAP_SECRET: z.string().min(24).optional(),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   EXTRACTION_MODEL: z.string().default("claude-haiku-5-5"),
+  /** Finding the same property on other platforms needs web search and more judgement than reading a page. */
+  SEARCH_MODEL: z.string().default("claude-sonnet-5-5"),
 });
 
 export type Config = z.infer<typeof schema>;

@@ -8,7 +8,8 @@ import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { migrationsFolder, type Db } from "../src/db/client.js";
 import * as schema from "../src/db/schema.js";
-import { baselineExtractor, type Extractor } from "../src/import/extract.js";
+import { baselineExtractor, type Extractor, type ReviewSummarizer } from "../src/import/extract.js";
+import type { Searcher } from "../src/import/search.js";
 import type { FetchedPage, PageFetcher } from "../src/import/fetch.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,7 @@ export function page(html: string, overrides: Partial<FetchedPage> = {}): Fetche
   return { finalUrl: "https://example.test/", status: 200, html, blocked: false, redirects: [], ...overrides };
 }
 
-export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extractor } = {}) {
+export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extractor; searcher?: Searcher; summarizer?: ReviewSummarizer } = {}) {
   const db = await testDb();
   const requested: string[] = [];
   const fetcher: PageFetcher = async (url) => {
@@ -36,7 +37,7 @@ export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extr
     return (options.fetcher ?? (async () => page(fixture("novasol.html"))))(url);
   };
   const config = loadConfig({ DATABASE_URL: "pglite://memory", BOOTSTRAP_SECRET, PUBLIC_BASE_URL: "https://reisen.example.test" });
-  const { app, ctx } = await buildApp({ db, config, fetcher, extractor: options.extractor ?? baselineExtractor });
+  const { app, ctx } = await buildApp({ db, config, fetcher, extractor: options.extractor ?? baselineExtractor, searcher: options.searcher ?? null, summarizer: options.summarizer ?? null });
 
   const call = async (method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, token?: string | null, body?: unknown) => {
     const res = await app.inject({ method, url, headers: token ? { authorization: `Bearer ${token}` } : {}, ...(body !== undefined ? { payload: body as object } : {}) });

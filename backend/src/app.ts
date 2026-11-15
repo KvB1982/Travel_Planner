@@ -4,7 +4,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { Config } from "./config.js";
 import type { Db } from "./db/client.js";
 import { HttpError } from "./http.js";
-import type { Extractor } from "./import/extract.js";
+import type { Extractor, ReviewSummarizer } from "./import/extract.js";
+import type { Searcher } from "./import/search.js";
 import type { PageFetcher } from "./import/fetch.js";
 import { ImportQueue } from "./import/pipeline.js";
 import { authRoutes } from "./routes/auth.js";
@@ -16,6 +17,9 @@ export interface AppContext {
   config: Config;
   fetcher: PageFetcher;
   extractor: Extractor;
+  summarizer?: ReviewSummarizer | null;
+  /** Absent without an API key: then other platforms can only be added by link. */
+  searcher?: Searcher | null;
   queue: ImportQueue;
 }
 

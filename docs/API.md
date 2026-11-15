@@ -162,3 +162,44 @@ Hinweise gehören zum Angebot (`listing.profile.warnings`) und werden bei jedem 
 - `better` ist `higher`, `lower`, `true` oder `null` (nicht wertbar). `best` nennt die Angebote, die in der Zeile vorn liegen; leer, wenn weniger als zwei Werte bekannt oder alle gleich sind.
 - Preise zählen nur, wenn sie als Gesamtpreis für den Zeitraum dieser Reise vorliegen (`price.forThisTrip`), sonst steht `null` in den Preiszeilen.
 - `bestCount` zählt, in wie vielen Zeilen ein Angebot vorn liegt. Das ist ungewichtet und nur eine erste Orientierung.
+
+## Dasselbe Objekt auf anderen Plattformen
+
+Ein Angebot kann mehrere Quellen haben. Die erste ist der Link, mit dem es geteilt wurde; sie bestimmt Titel, Text, Hinweise, Bilder und den Preis im Steckbrief. Weitere Quellen füllen nur Lücken im Steckbrief und bringen eigene Bewertungen und Preise mit.
+
+**Suchen**
+
+- `POST /candidates/:id/sources/search` startet die Suche im Netz (`202`, `{ "status": "running" }`). `503 search_unavailable` ohne KI-Schlüssel, `429 too_soon` innerhalb von zehn Minuten nach der letzten Suche. Jede Suche kostet Geld, deshalb nur auf Knopfdruck.
+- Das Ergebnis steht in `GET /candidates/:id` unter `otherPlatforms`:
+
+```json
+"otherPlatforms": {
+  "available": true,
+  "status": "idle | running | done | failed",
+  "searchedAt": "2026-11-15T22:50:00.000Z",
+  "note": "Auf anderen Plattformen wurde nichts Neues gefunden.",
+  "suggestions": [ { "id": "…", "url": "https://…", "platform": "airbnb", "title": "…", "reason": "Gleicher Ort, drei Schlafzimmer, Pool.", "confidence": "high | medium | low", "status": "proposed | accepted | rejected" } ]
+}
+```
+
+- Solange `status` `running` ist, die Detailansicht alle paar Sekunden neu laden; eine Suche dauert etwa 20 bis 60 Sekunden.
+- Treffer sind Vorschläge. Ob es wirklich dasselbe Haus ist, bestätigt ein Mensch: Link öffnen lassen, dann
+  `POST /candidates/:id/suggestions/:suggestionId` mit `{ "decision": "accept" }` oder `{ "decision": "reject" }`. `accept` hängt die Seite als weitere Quelle an und liest sie (`202`, mit `sourceId`). Optional `html` mitgeben, wenn die App die Seite schon auf dem Gerät gelesen hat.
+
+**Von Hand**
+
+- `POST /candidates/:id/sources` mit `{ "url": "…", "html": "…optional" }` hängt einen Link als weitere Quelle an (`202`; `200`, wenn er schon dranhängt; `409 already_listed`, wenn der Link bereits ein eigenes Angebot ist).
+- `DELETE /candidates/:id/sources/:sourceId` nimmt eine weitere Quelle wieder weg, samt ihren Preisen und Bewertungen (`204`). Die erste Quelle lässt sich nicht entfernen (`409 primary_source`). Angaben, die die Quelle in den Steckbrief gefüllt hat, bleiben stehen.
+
+**Quellen in der Detailansicht**
+
+`sources` ist nach Alter sortiert, die erste ist die führende:
+
+```json
+{ "id": "…", "platform": "casamundo", "url": "…", "canonicalUrl": "…", "primary": false, "read": false, "needsDevice": true, "title": null, "rating": null, "reviewCount": null, "lastFetchedAt": "…" }
+```
+
+- `needsDevice: true` heißt: Die Plattform hat den Server abgewiesen. Die App öffnet `url` im Hintergrund und schickt die Seite an `POST /candidates/:id/capture` mit `{ "html": "…", "sourceId": "<id der Quelle>" }`. Ohne `sourceId` gilt die Seite wie bisher der führenden Quelle.
+- `rating` ist die Note dieser Plattform (`value`, `scale`, `count`), `title` der Titel dort, `reviewCount` die Zahl der dort gelesenen Einzelbewertungen. Alle drei sind `null`, solange die Quelle nicht gelesen ist.
+- `prices[].listingSourceId` sagt, von welcher Quelle ein Preis stammt. So lassen sich Preise je Plattform nebeneinanderstellen.
+- `reviews.items[].platform` nennt die Herkunft jeder Bewertung. `reviews.summary` läuft über alle Plattformen, sobald mehr als eine Bewertungen geliefert hat.

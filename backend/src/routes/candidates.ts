@@ -2,9 +2,9 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { comments, dateOptions, listings, listingSources, priceSnapshots, tripListings, users, votes } from "../db/schema.js";
+import { comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripListings, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
-import { processImport, startImport } from "../import/pipeline.js";
+import { processImport, resolveLink, startImport } from "../import/pipeline.js";
 import { analyzeLink } from "../import/url.js";
 import { compare } from "../compare.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
@@ -37,7 +37,7 @@ function reviewsFor(listing: typeof listings.$inferSelect | undefined, platform:
     negatives: s?.negatives ?? [],
     basedOn: s?.basedOn ?? (items.length || null),
     generatedAt: listing?.updatedAt ?? null,
-    items: items.map((r) => ({ ...r, platform })),
+    items: items.map((r) => ({ ...r, platform: r.platform ?? platform })),
   };
 }
 
@@ -48,7 +48,7 @@ function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: 
 
 export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
-  const importDeps = { db, fetcher: ctx.fetcher, extractor: ctx.extractor };
+  const importDeps = { db, fetcher: ctx.fetcher, extractor: ctx.extractor, summarizer: ctx.summarizer ?? null };
 
   /** Share a link into a trip. Answers at once; details are read in the background. */
   app.post("/trips/:tripId/imports", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
@@ -79,21 +79,25 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     });
   });
 
-  /** Page content captured on the device, for platforms that refuse the server. */
+  /**
+   * Page content captured on the device, for platforms that refuse the server. With `sourceId`
+   * the page belongs to a further source of the advert, otherwise to the link it was shared with.
+   */
   app.post("/candidates/:candidateId/capture", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES) }), req.body);
-    const [source] = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt)).limit(1);
-    if (!source) throw new HttpError(409, "no_source", "Zu diesem Angebot gibt es keinen Link.");
+    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional() }), req.body);
+    const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
+    const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
+    if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
     // The shared link keeps the dates and party; an app short link carries nothing, so its resolved form is used.
     const shared = analyzeLink(source.url);
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
-    await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
+    if (source.id === sources[0]!.id) await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
     ctx.queue.push(() =>
       processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html }),
     );
-    return reply.code(202).send({ candidateId: candidate.id });
+    return reply.code(202).send({ candidateId: candidate.id, sourceId: source.id });
   });
 
   /** Read the advert again from the server, for example after the import got better or to look for a new price. */
@@ -207,7 +211,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const { candidate, role } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid);
     const [listing] = await db.select().from(listings).where(eq(listings.id, candidate.listingId)).limit(1);
-    const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId));
+    const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
+    const suggestions = await db.select().from(sourceSuggestions).where(eq(sourceSuggestions.tripListingId, candidate.id)).orderBy(asc(sourceSuggestions.createdAt));
     const prices = sources.length
       ? await db.select().from(priceSnapshots).where(inArray(priceSnapshots.listingSourceId, sources.map((s) => s.id))).orderBy(desc(priceSnapshots.capturedAt)).limit(200)
       : [];
@@ -232,11 +237,156 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       reviews: reviewsFor(listing, sources[0]?.platform ?? null),
       // Every hint with whether this trip hid it. `listing.profile.warnings` stays the full, unfiltered list.
       warnings: warningsFor(listing, candidate.hiddenWarnings),
-      sources: sources.map((s) => ({ id: s.id, platform: s.platform, url: s.url, canonicalUrl: s.canonicalUrl, provenance: s.provenance, lastFetchedAt: s.lastFetchedAt })),
+      // First is the link the advert was shared with. `read` says whether its page has been read at all,
+      // `needsDevice` that the platform refused the server and the app should capture the page.
+      sources: sources.map((s, i) => ({
+        id: s.id,
+        platform: s.platform,
+        url: s.url,
+        canonicalUrl: s.canonicalUrl,
+        primary: i === 0,
+        read: Boolean(s.provenance.details),
+        needsDevice: s.fetchNote === "blocked" && !s.provenance.details,
+        title: s.extract?.title ?? null,
+        rating: s.extract?.rating ?? null,
+        reviewCount: s.extract?.reviews.length ?? null,
+        provenance: s.provenance,
+        lastFetchedAt: s.lastFetchedAt,
+      })),
+      // The same property elsewhere: state of the search and what it proposed.
+      otherPlatforms: {
+        available: Boolean(ctx.searcher),
+        status: candidate.searchStatus,
+        searchedAt: candidate.searchedAt,
+        note: candidate.searchNote,
+        suggestions: suggestions.map((g) => ({ id: g.id, url: g.url, platform: g.platform, title: g.title, reason: g.reason, confidence: g.confidence, status: g.status })),
+      },
       prices,
       votes: { ...tally(voteRows), entries: voteRows },
       comments: commentRows,
     };
+  });
+
+  /** Hang a further page of the same property onto a candidate and read it. */
+  async function attachSource(candidate: typeof tripListings.$inferSelect, uid: string, url: string, html?: string) {
+    let link;
+    try {
+      link = await resolveLink(url, ctx.fetcher);
+    } catch {
+      throw new HttpError(422, "link_unreadable", "Der Link konnte nicht gelesen werden.");
+    }
+    const [existing] = await db.select().from(listingSources).where(and(eq(listingSources.platform, link.platform), eq(listingSources.externalId, link.externalId))).limit(1);
+    if (existing && existing.listingId !== candidate.listingId) {
+      throw new HttpError(409, "already_listed", "Dieser Link ist bereits als eigenes Angebot erfasst. Entferne es dort, um es hier als weitere Quelle zu führen.");
+    }
+    const source =
+      existing ??
+      (await db
+        .insert(listingSources)
+        .values({ listingId: candidate.listingId, platform: link.platform, externalId: link.externalId, url: url.trim(), canonicalUrl: link.canonicalUrl, provenance: { stay: "Link" } })
+        .returning())[0]!;
+    ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html }));
+    if (!existing) await logActivity(ctx, candidate.tripId, uid, "source_added", { candidateId: candidate.id, platform: link.platform });
+    return { sourceId: source.id, platform: link.platform, duplicate: Boolean(existing) };
+  }
+
+  /** Add the same property on another platform by its link. */
+  app.post("/candidates/:candidateId/sources", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
+    const body = parseBody(z.object({ url: z.string().trim().url().max(4000), html: z.string().max(MAX_PAGE_BYTES).optional() }), req.body);
+    const attached = await attachSource(candidate, uid, body.url, body.html);
+    return reply.code(attached.duplicate ? 200 : 202).send(attached);
+  });
+
+  /**
+   * Take a further source away again, for example after a wrong match. Its prices and reviews go;
+   * facts it filled into the profile stay and can be corrected by hand.
+   */
+  app.delete("/candidates/:candidateId/sources/:sourceId", async (req, reply) => {
+    const uid = userId(req);
+    const params = req.params as { candidateId: string; sourceId: string };
+    const { candidate } = await requireCandidate(db, uuidParam(params.candidateId), uid, "member");
+    const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
+    const source = sources.find((s) => s.id === uuidParam(params.sourceId));
+    if (!source) throw new HttpError(404, "not_found", "Diese Quelle gehört nicht zum Angebot.");
+    if (source.id === sources[0]!.id) throw new HttpError(409, "primary_source", "Der Link, mit dem das Angebot geteilt wurde, lässt sich nicht entfernen. Entferne stattdessen das Angebot.");
+    const [listing] = await db.select().from(listings).where(eq(listings.id, candidate.listingId)).limit(1);
+    await db.transaction(async (tx) => {
+      await tx.delete(priceSnapshots).where(eq(priceSnapshots.listingSourceId, source.id));
+      await tx.delete(listingSources).where(eq(listingSources.id, source.id));
+      if (listing) {
+        const profile = structuredClone(listing.profile);
+        profile.reviews = profile.reviews.filter((r) => r.platform !== source.platform);
+        // The joint summary spoke for this source too; fall back to what the leading source said alone.
+        if (sources[0]!.extract) profile.reviewSummary = sources[0]!.extract.reviewSummary;
+        await tx.update(listings).set({ profile, updatedAt: new Date() }).where(eq(listings.id, listing.id));
+      }
+      await tx.update(sourceSuggestions).set({ status: "rejected" }).where(and(eq(sourceSuggestions.tripListingId, candidate.id), eq(sourceSuggestions.url, source.url)));
+    });
+    return reply.code(204).send();
+  });
+
+  /** Look on the web for the same property on other platforms. Results arrive as suggestions on the candidate. */
+  app.post("/candidates/:candidateId/sources/search", async (req, reply) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
+    const searcher = ctx.searcher;
+    if (!searcher) throw new HttpError(503, "search_unavailable", "Die Suche ist auf diesem Server nicht eingerichtet.");
+    if (candidate.searchStatus === "running" && candidate.searchedAt && Date.now() - candidate.searchedAt.getTime() < 5 * 60_000) return reply.code(202).send({ candidateId: candidate.id, status: "running" });
+    // Every search costs money: not again for the same advert within ten minutes.
+    if (candidate.searchedAt && Date.now() - candidate.searchedAt.getTime() < 10 * 60_000) throw new HttpError(429, "too_soon", "Für dieses Angebot wurde gerade erst gesucht. Bitte in ein paar Minuten noch einmal versuchen.");
+    const [listing] = await db.select().from(listings).where(eq(listings.id, candidate.listingId)).limit(1);
+    const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId));
+    await db.update(tripListings).set({ searchStatus: "running", searchedAt: new Date(), searchNote: null }).where(eq(tripListings.id, candidate.id));
+
+    ctx.queue.push(async () => {
+      try {
+        const { hits, note } = await searcher({ profile: listing!.profile, known: sources.map((s) => ({ platform: s.platform, url: s.canonicalUrl })) });
+        let added = 0;
+        for (const hit of hits) {
+          let link;
+          try {
+            link = analyzeLink(hit.url);
+          } catch {
+            continue;
+          }
+          // Not what is already attached, and nothing on a platform that is.
+          if (sources.some((s) => s.platform === link.platform && (s.externalId === link.externalId || link.platform !== "other"))) continue;
+          const inserted = await db
+            .insert(sourceSuggestions)
+            .values({ tripListingId: candidate.id, url: link.canonicalUrl, platform: link.platform, title: hit.title, reason: hit.reason, confidence: hit.confidence })
+            .onConflictDoNothing()
+            .returning({ id: sourceSuggestions.id });
+          added += inserted.length;
+        }
+        await db
+          .update(tripListings)
+          .set({ searchStatus: "done", searchedAt: new Date(), searchNote: note ?? (added === 0 ? "Auf anderen Plattformen wurde nichts Neues gefunden." : null) })
+          .where(eq(tripListings.id, candidate.id));
+      } catch (err) {
+        await db.update(tripListings).set({ searchStatus: "failed", searchedAt: new Date(), searchNote: "Die Suche ist fehlgeschlagen. Bitte später noch einmal versuchen." }).where(eq(tripListings.id, candidate.id));
+        throw err;
+      }
+    });
+    return reply.code(202).send({ candidateId: candidate.id, status: "running" });
+  });
+
+  /** Confirm or dismiss a suggestion. Confirming attaches the page as a further source and reads it. */
+  app.post("/candidates/:candidateId/suggestions/:suggestionId", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
+    const uid = userId(req);
+    const params = req.params as { candidateId: string; suggestionId: string };
+    const { candidate } = await requireCandidate(db, uuidParam(params.candidateId), uid, "member");
+    const body = parseBody(z.object({ decision: z.enum(["accept", "reject"]), html: z.string().max(MAX_PAGE_BYTES).optional() }), req.body);
+    const [suggestion] = await db.select().from(sourceSuggestions).where(and(eq(sourceSuggestions.id, uuidParam(params.suggestionId)), eq(sourceSuggestions.tripListingId, candidate.id))).limit(1);
+    if (!suggestion) throw new HttpError(404, "not_found", "Vorschlag nicht gefunden.");
+    if (body.decision === "reject") {
+      await db.update(sourceSuggestions).set({ status: "rejected" }).where(eq(sourceSuggestions.id, suggestion.id));
+      return reply.code(200).send({ status: "rejected" });
+    }
+    const attached = await attachSource(candidate, uid, suggestion.url, body.html);
+    await db.update(sourceSuggestions).set({ status: "accepted" }).where(eq(sourceSuggestions.id, suggestion.id));
+    return reply.code(202).send({ status: "accepted", ...attached });
   });
 
   /**
