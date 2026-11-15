@@ -193,6 +193,8 @@ public struct ListingSummary: Codable, Hashable, Sendable {
     public var rating: Rating?
     public var platforms: [String]
     public var photoCount: Double?
+    /// The position is only roughly known: derived from text, or a platform that shows the area on purpose.
+    public var locationApproximate: Bool?
 
     public init(id: String, kind: ListingKind = .vacationHome, title: String? = nil, place: String? = nil, country: String? = nil,
                 lat: Double? = nil, lon: Double? = nil, coverImageUrl: String? = nil, fillPercent: Int = 0, maxGuests: Double? = nil,

@@ -360,6 +360,14 @@ final class PlaceTests: XCTestCase {
         XCTAssertEqual(PlaceHint(latitude: nil, longitude: nil, place: nil, region: nil, country: "Dänemark").query, "Dänemark")
     }
 
+    func testApproximateFlagFromList() throws {
+        let json = #"{"id":"l1","kind":"vacation_home","title":"Casa","place":"Vela Luka","country":"Kroatien","lat":42.96,"lon":16.71,"coverImageUrl":null,"fillPercent":50,"maxGuests":null,"bedrooms":null,"bathrooms":null,"rating":null,"platforms":["airbnb"],"photoCount":3,"locationApproximate":true}"#
+        let summary = try APIClient.decoder.decode(ListingSummary.self, from: Data(json.utf8))
+        XCTAssertTrue(PlaceHint(summary: summary).uncertain)
+        XCTAssertTrue(PlaceHint(summary: summary).hasCoordinates)
+        XCTAssertFalse(PlaceHint(summary: ListingSummary(id: "x", lat: 1, lon: 1)).uncertain)
+    }
+
     func testGoogleMapsLinks() {
         XCTAssertEqual(MapLinks.googleMaps(latitude: 43.4701, longitude: 11.2893)?.absoluteString,
                        "https://www.google.com/maps/search/?api=1&query=43.470100,11.289300")

@@ -33,7 +33,8 @@ public struct PlaceHint: Hashable, Sendable {
     }
 
     public init(summary: ListingSummary) {
-        self.init(latitude: summary.lat, longitude: summary.lon, place: summary.place, region: nil, country: summary.country)
+        self.init(latitude: summary.lat, longitude: summary.lon, place: summary.place, region: nil, country: summary.country,
+                  uncertain: summary.locationApproximate ?? false)
     }
 
     public var hasCoordinates: Bool { latitude != nil && longitude != nil }
