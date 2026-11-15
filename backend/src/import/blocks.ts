@@ -383,7 +383,7 @@ export function extractBlocks(html: string): PageBlocks {
   const reviewBlock = root.querySelector("#tp-captured-reviews");
   const capturedReviews = [...new Set((reviewBlock?.querySelectorAll("[data-review]") ?? []).map((n) => n.text.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim()))]
     .filter((t) => t.length >= 20)
-    .slice(0, 60)
+    .slice(0, 150)
     .map((t) => t.slice(0, 3000));
   reviewBlock?.remove();
   const imgs = root.querySelectorAll("img");
@@ -707,8 +707,11 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest:
     const lines: string[] = [];
     let used = 0;
     for (const [i, text] of blocks.capturedReviews.entries()) {
-      const line = `<block i="${i}">${text.replace(/\s+/g, " ").slice(0, 1200)}</block>`;
-      if (used + line.length > 30_000) break;
+      // The model sorts the blocks and finds where the guest's words begin and end; for that it needs
+      // both ends of a long block, not its middle.
+      const flat = text.replace(/\s+/g, " ");
+      const line = `<block i="${i}">${flat.length > 800 ? `${flat.slice(0, 480)} […] ${flat.slice(-300)}` : flat}</block>`;
+      if (used + line.length > 130_000) break;
       used += line.length;
       lines.push(line);
     }

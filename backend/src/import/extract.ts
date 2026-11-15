@@ -203,7 +203,7 @@ export function reviewsFromBlocks(blocks: string[], items: unknown): Profile["re
     if (text.length < 10) text = block;
     out.push({ id: createHash("sha1").update(block).digest("hex").slice(0, 16), text, title: null, rating: num(raw.rating), scale: num(raw.scale), date: str(raw.date, 40), author: str(raw.author, 80), platform: null });
   }
-  return out.slice(0, 60);
+  return out.slice(0, 150);
 }
 
 export function claudeExtractor(options: { apiKey: string; model: string; client?: Anthropic }): Extractor {
@@ -214,7 +214,8 @@ export function claudeExtractor(options: { apiKey: string; model: string; client
     try {
       const response = await client.messages.create({
         model: options.model,
-        max_tokens: 16000,
+        // Room for a line per collected review on top of the profile.
+        max_tokens: input.blocks.capturedReviews.length > 60 ? 20000 : 16000,
         // Extraction is routine work: low effort keeps it fast and cheap.
         output_config: { effort: "low" },
         system: SYSTEM,
