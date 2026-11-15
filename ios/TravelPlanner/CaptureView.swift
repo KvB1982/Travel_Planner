@@ -183,7 +183,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
               if (score > bestScore) { bestScore = score; best = texts; }
             }
           }
-          return (best || []).slice(0, 60);
+          return (best || []).slice(0, 150);
         } catch (e) { return []; }
       };
       window.__tpCollect = function () {
@@ -231,7 +231,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
       }
       if (!list) { continue; }
       var still = 0;
-      for (var round = 0; round < 30 && still < 3; round++) {
+      for (var round = 0; round < 80 && still < 3; round++) {
         var before = list.scrollHeight;
         list.scrollTop = list.scrollHeight;
         await new Promise(function (done) { setTimeout(done, 500); });
