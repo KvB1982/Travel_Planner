@@ -112,3 +112,17 @@ Jeder Preis ist ein eigener Eintrag mit Zeitpunkt, Zeitraum, Personenzahl und He
 - Die Bilder liegen bisher nicht auf dem eigenen Server. Eine eigene Bildablage mit Vorschaubildern ist als nächster Schritt vorgesehen; die Felder bleiben dabei gleich, nur die Adressen zeigen dann auf die API.
 
 Die Liste `GET /trips/:id/candidates` enthält weiter `coverImageUrl` und zusätzlich `photoCount`.
+
+## Bewertungen
+
+`GET /candidates/:id` liefert zusätzlich:
+
+```json
+"reviewSummary": { "summary": "Zwei bis drei Sätze …", "positives": ["Pool", "Lage"], "negatives": ["Liegen kosten extra"], "basedOn": 20 },
+"reviews": [ { "id": "3b1f…", "text": "…", "title": null, "rating": 8.5, "scale": 10, "date": "2026-08-14", "author": "Jörg" } ]
+```
+
+- `reviewSummary` schreibt die KI aus den einzelnen Bewertungen der Seite, auf Deutsch, auch wenn die Bewertungen in anderen Sprachen sind. `positives` und `negatives` haben je höchstens vier Stichpunkte. `summary` ist `null`, wenn die Seite keine einzelnen Bewertungen hergab. `basedOn` ist die Zahl der gelesenen Bewertungen.
+- `reviews` sind die einzelnen Bewertungen im Wortlaut der Seite, höchstens 40, in der Reihenfolge der Seite. `rating` steht in der Skala der Plattform; `scale` ist `null`, wenn die Seite sie nicht nennt, dann gilt die Skala aus `profile.rating.scale`. `date` ist ein ISO-Datum (`JJJJ-MM-TT`), wo die Seite eines liefert, sonst ihr Wortlaut ("August 2026") oder `null`. `author` ist der Anzeigename von der Seite oder `null`.
+- Beide Felder sind leer bei Angeboten, die vor dieser Funktion importiert wurden; "Aktualisieren" oder erneutes Auslesen auf dem Gerät füllt sie.
+- Die Gesamtnote steht weiter in `profile.rating` (`value`, `scale`, `count`).

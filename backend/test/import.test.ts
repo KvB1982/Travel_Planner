@@ -168,6 +168,29 @@ describe("what real pages taught us", () => {
     expect(profileFromBlocks(blocks, "vacation_home").profile.photos[0]!.thumbUrl).toBe(`${c}/medium/e_v5/aaa.jpg`);
   });
 
+  it("collects single reviews and shows them to the model in their own block", () => {
+    const ld = { "@type": "VacationRental", name: "Haus", review: [{ "@type": "Review", reviewBody: "Sehr schönes Haus mit tollem Pool, wir kommen wieder.", reviewRating: { ratingValue: 5, bestRating: 5 }, author: { name: "Anna" }, datePublished: "2026-08-14T10:00:00Z" }] };
+    const state = { hotel: { ratingList: [{ comment: "Das Buffet war gut, aber die Liegen kosten extra.", score: 8.5, firstName: "Jörg", date: 1755129600 }, { comment: "Sehr schönes Haus mit tollem Pool, wir kommen wieder." }, { score: 9 }], other: { reviews: [{ text: "Bewertung eines ganz anderen Angebots in der Nähe." }] } } };
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify(ld)}</script><script id="js-hotel-data" type="application/json">${JSON.stringify(state)}</script></head><body>Haus</body></html>`;
+    const blocks = extractBlocks(html);
+    expect(blocks.reviews).toEqual([
+      { text: "Sehr schönes Haus mit tollem Pool, wir kommen wieder.", title: null, rating: 5, scale: 5, date: "2026-08-14", author: "Anna" },
+      { text: "Das Buffet war gut, aber die Liegen kosten extra.", title: null, rating: 8.5, scale: null, date: "2025-08-14", author: "Jörg" },
+    ]);
+    const { profile } = profileFromBlocks(blocks, "hotel");
+    expect(profile.reviews[0]).toMatchObject({ id: expect.stringMatching(/^[0-9a-f]{16}$/), author: "Anna" });
+    const input = modelInput(blocks);
+    expect(input).toContain('<reviews count="2">');
+    expect(input).toContain("[8.5] (2025-08-14) Das Buffet war gut");
+    // The reviews reach the model once, not a second time inside the page state.
+    expect(input.match(/Liegen kosten extra/g)).toHaveLength(1);
+    // The model's summary is kept, the reviews themselves come from the page.
+    const combined = combine(profile, { ...emptyProfile("hotel"), reviews: [], reviewSummary: { summary: "Gäste loben den Pool.", positives: ["Pool", "a", "b", "c", "d"], negatives: [], basedOn: 2 } });
+    expect(combined.reviews).toHaveLength(2);
+    expect(combined.reviewSummary).toMatchObject({ summary: "Gäste loben den Pool.", basedOn: 2 });
+    expect(combined.reviewSummary.positives).toHaveLength(4);
+  });
+
   it("finds state that a page assigns in an inline script", () => {
     const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
     const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");

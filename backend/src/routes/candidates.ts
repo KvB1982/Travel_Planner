@@ -183,6 +183,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
       photos: listing?.profile.photos ?? [],
+      // Single guest reviews and what they add up to. Both empty for adverts imported before this existed.
+      reviews: listing?.profile.reviews ?? [],
+      reviewSummary: listing?.profile.reviewSummary ?? { summary: null, positives: [], negatives: [], basedOn: null },
       sources: sources.map((s) => ({ id: s.id, platform: s.platform, url: s.url, canonicalUrl: s.canonicalUrl, provenance: s.provenance, lastFetchedAt: s.lastFetchedAt })),
       prices,
       votes: { ...tally(voteRows), entries: voteRows },

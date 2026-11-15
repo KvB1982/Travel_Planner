@@ -38,6 +38,7 @@ Regeln:
 - Entfernungen in Metern, Flughafen in Kilometern. Fahrzeiten sind keine Entfernungen: lass das Feld dann null und nenne die Fahrzeit in warnings.
 - price: Beträge in Euro als Zahl. kind ist "total" bei einem Gesamtpreis für einen konkreten Zeitraum, "from" bei einem Ab-Preis, "range" bei einer Preisspanne. Nenne unter included, was laut Seite im Preis enthalten ist, und unter extraCosts jede zusätzliche oder verbrauchsabhängige Position (Endreinigung, Bettwäsche, Strom, Wasser, Kurtaxe, Servicegebühr). amountEur ist null, wenn kein Betrag genannt ist, dann steht in note zum Beispiel "nach Verbrauch".
 - packageTrip nur bei Hotels und Pauschalreisen füllen.
+- reviewSummary: fasse zusammen, was Gäste sagen, wenn einzelne Bewertungen vorliegen (in <reviews> oder im sichtbaren Text). summary: zwei bis drei Sätze auf Deutsch in eigenen Worten, ausgewogen, auch wenn die Bewertungen in anderen Sprachen sind. positives und negatives: je höchstens vier kurze Stichpunkte, nur was mehrfach oder mit Nachdruck genannt wird; ein einzelner Ausreißer wird als solcher bezeichnet. basedOn: die Zahl der Bewertungen, die du gelesen hast. Ohne einzelne Bewertungen bleibt summary null und die Listen leer; die reine Punktzahl ist keine Zusammenfassung.
 - summary: höchstens zwei Sätze in eigenen Worten auf Deutsch. Übernimm keine Formulierungen der Seite.
 - highlights: höchstens vier kurze Stichworte, was dieses Angebot auszeichnet.
 - warnings: höchstens vier kurze Hinweise auf Deutsch zu dem, was eine Reisegruppe wissen sollte: Widersprüche zwischen Quellen (zum Beispiel unterschiedliche Gästezahlen), fehlende oder unklare Nebenkosten, ein Preis für eine andere Personenzahl, Besonderheiten bei Schlafplätzen oder Lage.
@@ -75,7 +76,7 @@ ${context}
 
 Fülle diese Struktur. Die Schlüssel und ihre Reihenfolge bleiben unverändert:
 
-${JSON.stringify({ ...emptyProfile(link.kind), photos: undefined }, null, 1)}`;
+${JSON.stringify({ ...emptyProfile(link.kind), photos: undefined, reviews: undefined }, null, 1)}`;
 }
 
 function parseJsonObject(text: string): unknown {
@@ -157,6 +158,9 @@ export function combine(baseline: Profile, fromModel: Profile): Profile {
   if (baseline.coverImageUrl) merged.coverImageUrl = baseline.coverImageUrl;
   // Picture addresses are copied from page data, never written by the model.
   merged.photos = baseline.photos;
+  merged.reviews = baseline.reviews;
+  merged.reviewSummary.positives = merged.reviewSummary.positives.slice(0, 4);
+  merged.reviewSummary.negatives = merged.reviewSummary.negatives.slice(0, 4);
   merged.photoCount = Math.max(baseline.photoCount ?? 0, fromModel.photoCount ?? 0) || null;
   merged.highlights = merged.highlights.slice(0, 4);
   merged.warnings = merged.warnings.slice(0, 4);

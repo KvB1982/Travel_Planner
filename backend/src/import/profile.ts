@@ -149,6 +149,31 @@ export const profileSchema = z.object({
     )
     .max(120)
     .default([]),
+  /** Single guest reviews as the page gave them. Read from page data, never written by the model. */
+  reviews: z
+    .array(
+      z.object({
+        id: z.string(),
+        text: z.string(),
+        title: nstr.default(null),
+        rating: nnum.default(null),
+        scale: nnum.default(null),
+        date: nstr.default(null),
+        author: nstr.default(null),
+      }),
+    )
+    .max(60)
+    .default([]),
+  /** What the reviews say, taken together. Written by the model from the reviews it was shown. */
+  reviewSummary: z
+    .object({
+      summary: nstr.default(null),
+      positives: z.array(z.string()).default([]),
+      negatives: z.array(z.string()).default([]),
+      /** How many single reviews the summary rests on. */
+      basedOn: nnum.default(null),
+    })
+    .prefault({}),
   summary: nstr,
   highlights: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
