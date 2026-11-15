@@ -1,7 +1,7 @@
 # Konzept: Ferienhaus-Planer für Familie und Freunde
 
 **Arbeitstitel:** Travel Planner
-**Stand:** 15.11.2026, Version 0.1 (Entwurf zur Abstimmung)
+**Stand:** 15.11.2026, Version 0.2 (Rahmenbedingungen geklärt)
 **Status:** Konzeptphase, noch keine Implementierung
 
 ---
@@ -19,7 +19,7 @@ Die Kernempfehlungen in Kürze:
 | App | Native iOS/iPadOS-App in **Swift und SwiftUI**, mit Share Extension als wichtigstem Einstiegspunkt |
 | Backend | **TypeScript (Node.js, Fastify)** als Docker-Stack auf dem eigenen Server |
 | Datenbank | **PostgreSQL** auf dem eigenen Server, nie direkt erreichbar, nur über die API |
-| Erreichbarkeit | API über HTTPS aus dem Internet (Tunnel oder Reverse Proxy), Administration nur über Tailscale |
+| Erreichbarkeit | API über HTTPS aus dem Internet (Reverse Proxy auf dem Hetzner-Server), Administration nur über Tailscale |
 | Datenimport | Teilen-Menü plus KI-gestützte Extraktion. Offizielle APIs der großen Plattformen stehen Privatprojekten praktisch nicht offen |
 | Mitmachen ohne App | Abstimmung für Gäste über einen Web-Link, damit auch Android-Nutzer und Großeltern teilnehmen können |
 | Verteilung | TestFlight, kein öffentlicher App-Store-Auftritt nötig |
@@ -220,7 +220,8 @@ Dies ist der Punkt mit dem größten Risiko im Projekt, deshalb hier eine nücht
 | **Booking.com** | Die Demand API richtet sich an freigeschaltete Affiliate-Partner mit kommerziellem Hintergrund. | Für ein privates Projekt unrealistisch |
 | **Vrbo / FeWo-direkt** (Expedia Group) | Schnittstellen nur für Vertriebspartner mit Vertrag. | Nicht nutzbar |
 | **HomeToGo, Holidu** (Metasuchen) | Partner- und Affiliate-Programme, zum Teil mit Datenfeeds. | Theoretisch möglich, Aufwand und Auflagen stehen in keinem Verhältnis |
-| **Interhome, Novasol, Belvilla und ähnliche** | Teils Produktfeeds über Affiliate-Netzwerke. | Nur bei Bedarf prüfen |
+| **Novasol**, Interhome, Belvilla und ähnliche | Teils Produktfeeds über Affiliate-Netzwerke, gedacht für Vermittler. | Nicht eingeplant, Import über Link |
+| **Check24** | Vergleichsportal, das Angebote anderer Anbieter bündelt. Keine Schnittstelle für Privatnutzer. | Import über Link. Dasselbe Haus taucht hier oft zusätzlich zu Novasol oder FeWo-direkt auf, die Dubletten-Erkennung ist dafür wichtig |
 | **Drittanbieter** (Scraping-Dienste) | Liefern Daten gegen Gebühr, bewegen sich aber selbst in der Grauzone und brechen bei Änderungen der Plattformen. | Nicht als Fundament geeignet |
 
 **Ergebnis:** Eine saubere API-Anbindung der großen Plattformen ist für ein privates Projekt derzeit nicht erreichbar. Die konkreten Zugangsbedingungen ändern sich gelegentlich und sollten vor Beginn von Ausbaustufe 3 noch einmal geprüft werden. Das Konzept ist bewusst so angelegt, dass es **ohne** solche APIs vollständig funktioniert.
@@ -248,7 +249,7 @@ Preise hängen von Zeitraum und Personenzahl ab und werden von den Plattformen a
 2. **„Jetzt prüfen" auf Knopfdruck.** Die App lädt das Inserat mit den Reisedaten und aktualisiert Preis und Verfügbarkeit. Auch für mehrere Favoriten nacheinander.
 3. **Automatik für wenige Favoriten.** Der Server prüft ausgewählte Häuser ein- bis zweimal täglich mit einem echten Browser (Playwright). Das funktioniert nach dem Prinzip „so gut es geht", kann je Plattform ausfallen und braucht gelegentliche Pflege.
 
-Stufe 3 ist ausdrücklich eine spätere Ausbaustufe und sollte als Experiment verstanden werden, nicht als zugesagte Funktion.
+Stufe 3 ist ausdrücklich eine spätere Ausbaustufe und sollte als Experiment verstanden werden, nicht als zugesagte Funktion. Erschwerend kommt hinzu, dass der Server im Rechenzentrum steht: Anfragen von Rechenzentrums-Adressen werden von den Plattformen besonders häufig blockiert. Der verlässliche Weg bleibt deshalb die Prüfung auf dem Gerät des Nutzers (Stufe 1 und 2).
 
 ### 6.4 Rechtliche Einordnung
 
@@ -373,13 +374,15 @@ Reines Tailscale wäre am sichersten, verlangt aber, dass **jeder Mitreisende** 
 | App und Gäste-Web auf die API | HTTPS aus dem Internet |
 | Datenbank, Server-Administration, Protokolle, Sicherungen | Ausschließlich über Tailscale |
 
-Für die Veröffentlichung der API gibt es drei Wege, in dieser Reihenfolge empfohlen:
+Der Server ist ein dedizierter Hetzner-Server im Rechenzentrum mit fester öffentlicher Adresse. Damit ist der direkte Weg der einfachste:
 
-1. **Cloudflare Tunnel** mit eigener Domain: keine offenen Ports am Router, Schutz vor Angriffen inklusive.
-2. **Tailscale Funnel:** ebenfalls ohne offene Ports, am schnellsten eingerichtet, Adresse unter der Tailscale-Domain.
-3. **Portfreigabe mit Caddy** und Let's-Encrypt-Zertifikat: volle Kontrolle, aber der Server steht direkt im Netz.
+1. **Caddy als Reverse Proxy** auf dem Server, mit automatischem Let's-Encrypt-Zertifikat. Nach außen sind nur die Ports 80 und 443 offen, alles andere sperrt die Firewall.
+2. **Eigene Subdomain** (zum Beispiel `reisen.<domain>.de`) mit einem DNS-Eintrag auf die Serveradresse. Die Domain wird bei Strato eingerichtet oder reaktiviert.
+3. **SSH, Datenbank und Verwaltung** sind ausschließlich über Tailscale erreichbar.
 
-Welche Variante passt, hängt davon ab, wo der Server steht und ob eine eigene Domain vorhanden ist.
+Ein Tunnel-Dienst (Cloudflare Tunnel, Tailscale Funnel) ist bei dieser Ausgangslage nicht nötig. Tailscale Funnel bleibt eine Übergangslösung, falls die Domain zum Start von Phase 0 noch nicht bereitsteht.
+
+Da auf dem Server bereits weitere Projekte laufen, bekommt der Travel Planner einen eigenen Docker-Compose-Stack mit eigener Datenbank und eigenem Netz. Falls dort schon ein Reverse Proxy läuft, wird dieser mitgenutzt statt ein zweiter aufgesetzt.
 
 ### 8.4 Synchronisation und Offline-Verhalten
 
@@ -466,10 +469,10 @@ Die Angaben sind grobe Richtwerte für die Entwicklung mit KI-Unterstützung und
 ### Phase 0: Grundlagen (etwa 1 Woche)
 
 - Offene Fragen klären (Abschnitt 13)
-- Server vorbereiten: Docker, Domain oder Tunnel, Sicherung
+- Server vorbereiten: Ausstattung und laufende Dienste erfassen, Docker-Stack, Subdomain, Sicherung
 - Apple-Developer-Konto, Projektgerüst, automatischer Build
 - Klickbarer Entwurf der wichtigsten Ansichten
-- **Machbarkeitstest Import** mit je fünf echten Inseraten von Airbnb, Booking.com und FeWo-direkt. Dieser Test entscheidet früh über das größte Risiko.
+- **Machbarkeitstest Import** mit je fünf echten Inseraten von Airbnb, FeWo-direkt, Novasol und Check24. Dieser Test entscheidet früh über das größte Risiko.
 
 ### Phase 1: MVP „Sammeln und Abstimmen" (etwa 4 bis 6 Wochen)
 
@@ -482,7 +485,7 @@ Die Angaben sind grobe Richtwerte für die Entwicklung mit KI-Unterstützung und
 - Preis manuell festhalten
 - Verteilung über TestFlight
 
-**Ziel:** Die nächste echte Urlaubsplanung läuft vollständig über die App.
+**Ziel:** Die Planung für die Pfingstferien 2027 und den Sommerurlaub 2027 läuft über die App. Häuser für Pfingsten und Sommer werden üblicherweise schon im Winter gebucht. Das MVP sollte deshalb so früh wie möglich im Januar 2027 in den Händen der Gruppe sein, die Sommerplanung ist der realistische erste vollständige Durchlauf.
 
 ### Phase 2: „Vergleichen und Entscheiden" (etwa 3 bis 4 Wochen)
 
@@ -524,22 +527,31 @@ Die Angaben sind grobe Richtwerte für die Entwicklung mit KI-Unterstützung und
 
 ---
 
-## 13. Offene Fragen an den Auftraggeber
+## 13. Geklärte Rahmenbedingungen
 
-1. **Mac und Xcode:** Steht ein Mac für Build und Test zur Verfügung?
-2. **Apple-Developer-Konto:** Vorhanden oder neu anzulegen?
-3. **Server:** Welches Betriebssystem, läuft bereits Docker, wo steht er (zu Hause oder Rechenzentrum)?
-4. **Domain:** Gibt es eine eigene Domain für die API?
-5. **Nutzerkreis:** Wie viele Personen ungefähr, und wie viele davon ohne iPhone?
-6. **Plattformen:** Welche drei werden am häufigsten genutzt? Darauf wird der Import zuerst optimiert.
-7. **KI-Dienst:** Ist die Nutzung der Claude API mit geringen laufenden Kosten in Ordnung?
-8. **Nächste Reise:** Gibt es eine konkrete Planung, an der das MVP erprobt werden kann? Das wäre der beste Zieltermin.
+Stand 15.11.2026, nach Rückmeldung des Auftraggebers:
+
+| Thema | Ergebnis | Folge für das Projekt |
+|---|---|---|
+| **Mac und Xcode** | Wird zur Verfügung stehen | Native App wie empfohlen, Build und Test auf dem eigenen Mac |
+| **Apple-Developer-Konto** | Wird neu angelegt | Früh in Phase 0 erledigen, die Freischaltung kann einige Tage dauern |
+| **Server** | Dedizierter Hetzner-Server im Rechenzentrum, dort laufen bereits weitere Projekte | Direkte Veröffentlichung über Reverse Proxy, eigener Docker-Stack, siehe 8.3 |
+| **Domain** | Noch keine aktive, Einrichtung über Strato geplant | Subdomain für die API, bis dahin Übergang möglich |
+| **Nutzerkreis** | Zunächst höchstens 20 Personen, überwiegend iPhone | Geringe Last, ein kleiner Stack genügt. Gäste-Web bleibt für die wenigen ohne iPhone in Phase 2 |
+| **Plattformen** | Airbnb, FeWo-direkt, Novasol, Check24 | Import und Machbarkeitstest werden auf diese vier ausgerichtet |
+| **KI-Dienst** | Claude API ist freigegeben | KI-Extraktion ist fester Bestandteil des MVP |
+| **Erste Reisen** | Pfingstferien 2027 und Sommerurlaub 2027 | Zieltermin für das MVP, siehe Roadmap |
+
+**Noch offen:**
+
+- Genaue Ausstattung des Servers (Betriebssystem, Arbeitsspeicher, freier Speicherplatz, vorhandener Reverse Proxy). Wird zu Beginn von Phase 0 direkt auf dem Server ausgelesen.
+- Ob die frühere Strato-Domain noch aktiv ist.
 
 ---
 
 ## 14. Nächste Schritte
 
-1. Rückmeldung zu diesem Konzept und Beantwortung der offenen Fragen
+1. Apple-Developer-Konto anlegen und Domain klären (Auftraggeber)
 2. Machbarkeitstest für den Import mit echten Inseraten
 3. Entwurf der wichtigsten Ansichten zur Abstimmung
 4. Start von Phase 0
