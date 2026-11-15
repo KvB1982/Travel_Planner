@@ -265,6 +265,31 @@ describe("claudeExtractor", () => {
     }
   });
 
+  it("sorts collected reviews in calls of their own, and keeps them even when the reading is cut off", async () => {
+    const captured = Array.from({ length: 45 }, (_, i) => `Gast ${i}\nAugust 2026\nEin wirklich schöner Aufenthalt Nummer ${i}, gerne wieder.`);
+    const calls: string[] = [];
+    const client = {
+      messages: {
+        create: async (params: { system: string; messages: { content: string }[] }) => {
+          const sorting = params.system.includes('"items"');
+          calls.push(sorting ? "sort" : "read");
+          if (!sorting) return { stop_reason: "max_tokens", content: [{ type: "text", text: "{" }] };
+          // The second batch fails; its blocks are kept as they came.
+          if (params.messages[0]!.content.includes("Nummer 20,")) return { stop_reason: "max_tokens", content: [] };
+          const n = params.messages[0]!.content.split("<block").length - 1;
+          return { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ items: Array.from({ length: n }, (_, i) => ({ i, keep: i !== 1, author: "Gast", date: "August 2026", rating: 5, scale: 5, start: "Ein wirklich schöner Aufenthalt", end: "gerne wieder." })) }) }] };
+        },
+      },
+    } as never;
+    const { profile, note } = await claudeExtractor({ apiKey: "x", model: "m", client })({ blocks: { ...blocks, capturedReviews: captured }, link, baseline: { ...baseline, reviews: [] } });
+    expect(calls.sort()).toEqual(["read", "sort", "sort", "sort"]);
+    expect(note).toMatch(/abgeschnitten/);
+    // 45 blocks, one in each sorted batch dropped as no review (two batches), the failed batch kept whole.
+    expect(profile.reviews).toHaveLength(43);
+    expect(profile.reviews[0]).toMatchObject({ author: "Gast", rating: 5, text: "Ein wirklich schöner Aufenthalt Nummer 0, gerne wieder." });
+    expect(profile.reviews.find((r) => r.text.includes("Nummer 25,"))).toMatchObject({ author: null, text: expect.stringContaining("Gast 25") });
+  });
+
   it("drops a malformed field instead of the whole answer", () => {
     const answer = { ...emptyProfile(), title: "Haus", bedrooms: "drei", maxGuests: 8, highlights: ["Pool", 7, "Meerblick"], price: { ...emptyProfile().price, totalEur: "2.646 €", nights: 7 } };
     const result = parseLenient(answer);

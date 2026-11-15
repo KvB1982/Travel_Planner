@@ -707,11 +707,10 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest:
     const lines: string[] = [];
     let used = 0;
     for (const [i, text] of blocks.capturedReviews.entries()) {
-      // The model sorts the blocks and finds where the guest's words begin and end; for that it needs
-      // both ends of a long block, not its middle.
+      // For the summary a good part of each review is enough; the single reviews are sorted in a call of their own.
       const flat = text.replace(/\s+/g, " ");
-      const line = `<block i="${i}">${flat.length > 800 ? `${flat.slice(0, 480)} […] ${flat.slice(-300)}` : flat}</block>`;
-      if (used + line.length > 130_000) break;
+      const line = `<block i="${i}">${flat.length > 700 ? `${flat.slice(0, 700)} […]` : flat}</block>`;
+      if (used + line.length > 60_000) break;
       used += line.length;
       lines.push(line);
     }
