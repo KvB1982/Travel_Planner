@@ -124,6 +124,22 @@ describe("import", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({ check_in: "2027-08-21", check_out: "2027-08-28", adults: "4", children: "4" });
   });
 
+  it("labels the stay with the trip's dates and party when the page was fetched for them", async () => {
+    const s = await setup({ fetcher: async () => page(fixture("novasol.html")) });
+    const res = await s.importLink(AIRBNB);
+    const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
+    // The link said 14 nights from 14 August for one guest.
+    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 8 });
+  });
+
+  it("does not turn a search window into a stay", async () => {
+    const s = await setup({ fetcher: async () => page(fixture("novasol.html")) });
+    const res = await s.importLink("https://urlaub.check24.de/suche/angebot?days=11-25&departureDate=2027-08-06&pageArea=package&returnDate=2027-08-30&roomAllocation=A-A-7-11&hotelId=12912");
+    const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
+    expect(detail.body.listing.profile.price).toMatchObject({ startDate: null, endDate: null, nights: null, persons: 4 });
+    expect(detail.body.listing.profile.warnings.join(" ")).toMatch(/11 bis 25 Tagen/);
+  });
+
   it("recognises the same advert shared twice", async () => {
     const s = await setup();
     const first = await s.importLink(NOVASOL);

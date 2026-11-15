@@ -27,7 +27,8 @@ describe("analyzeLink", () => {
 
   it("recognises a Check24 package holiday and its search window", () => {
     const info = analyzeLink(CHECK24);
-    expect(info).toMatchObject({ platform: "check24", externalId: "12912", kind: "package" });
+    expect(info).toMatchObject({ platform: "check24", externalId: "12912", kind: "package", searchWindow: true });
+    expect(analyzeLink(AIRBNB).searchWindow).toBe(false);
     expect(info.stay).toMatchObject({ adults: 2, children: 2, childAges: [7, 11], nights: null });
     expect(info.canonicalUrl).not.toMatch(/hotelListId|bestSeller|airport/);
     expect(info.warnings.join(" ")).toMatch(/11 bis 25 Tagen/);

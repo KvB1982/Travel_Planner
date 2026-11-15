@@ -21,7 +21,7 @@ function tally(rows: { verdict: "yes" | "maybe" | "no"; veto: boolean }[]) {
 }
 
 /** Deep partial of the profile for manual edits: every field optional, null allowed to clear a value. */
-const profilePatch = z.record(z.unknown());
+const profilePatch = z.record(z.string(), z.unknown());
 
 export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;

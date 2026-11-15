@@ -1,6 +1,7 @@
 /**
  * Runs the real import pipeline against real links, without a database server:
  *   npx tsx scripts/live-import.ts <url> [<url> ...]
+ *   npx tsx scripts/live-import.ts @links.txt
  * Uses the Claude API when ANTHROPIC_API_KEY is set, otherwise structured data only.
  * Each link is fetched at most twice (short-link resolution plus the page).
  */
@@ -14,7 +15,12 @@ import { baselineExtractor, claudeExtractor } from "../src/import/extract.js";
 import { fetchPage, type PageFetcher } from "../src/import/fetch.js";
 import { processImport, startImport } from "../src/import/pipeline.js";
 
-const urls = process.argv.slice(2);
+import { readFileSync } from "node:fs";
+
+// "@links.txt" reads one link per line; that avoids shells mangling "&" and "%7C".
+const urls = process.argv.slice(2).flatMap((arg) =>
+  arg.startsWith("@") ? readFileSync(arg.slice(1), "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [arg],
+);
 if (urls.length === 0) {
   console.error("Usage: npx tsx scripts/live-import.ts <url> [<url> ...]");
   process.exit(1);

@@ -40,9 +40,12 @@ export async function resolveLink(raw: string, fetcher: PageFetcher): Promise<Li
 function seedProfile(link: LinkInfo): Profile {
   const profile = emptyProfile(link.kind);
   const s = link.stay;
-  profile.price.startDate = s.startDate;
-  profile.price.endDate = link.priceHint?.endDate ?? s.endDate;
-  profile.price.nights = link.priceHint?.nights ?? s.nights;
+  // A search window says when the trip may happen, not how long it lasts.
+  if (!link.searchWindow) {
+    profile.price.startDate = s.startDate;
+    profile.price.endDate = link.priceHint?.endDate ?? s.endDate;
+    profile.price.nights = link.priceHint?.nights ?? s.nights;
+  }
   profile.price.persons = s.adults !== null ? s.adults + (s.children ?? 0) : null;
   if (link.priceHint) {
     profile.price.totalEur = link.priceHint.totalEur;
@@ -167,6 +170,14 @@ export async function processImport(
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
     // What was read from the page replaces what was only seeded from the link.
     const profile = mergeProfiles(current?.profile ?? emptyProfile(input.link.kind), extracted, true);
+    if (priceBelongsToTrip) {
+      // The page was asked for the trip's dates and party, so whatever price it showed belongs to those,
+      // not to what the sharer had selected in the link.
+      profile.price.startDate = stay.startDate;
+      profile.price.endDate = stay.endDate;
+      profile.price.nights = nightsBetween(stay.startDate, stay.endDate);
+      if (stay.adults !== null) profile.price.persons = stay.adults + (stay.children ?? 0);
+    }
     profile.price.nights ??= nightsBetween(profile.price.startDate, profile.price.endDate);
     // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
     profile.warnings = [...new Set([...(current?.profile.warnings ?? []), ...extracted.warnings])].slice(0, 6);

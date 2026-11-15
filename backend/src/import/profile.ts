@@ -35,7 +35,7 @@ export const amenityKeys = [
 
 const amenities = z
   .object(Object.fromEntries(amenityKeys.map((k) => [k, nbool])) as Record<(typeof amenityKeys)[number], typeof nbool>)
-  .default({});
+  .prefault({});
 
 export const profileSchema = z.object({
   kind: z.enum(listingKinds).default("vacation_home"),
@@ -71,9 +71,9 @@ export const profileSchema = z.object({
       restaurantM: nnum,
       airportKm: nnum,
     })
-    .default({}),
+    .prefault({}),
 
-  rating: z.object({ value: nnum, scale: nnum, count: nnum }).default({}),
+  rating: z.object({ value: nnum, scale: nnum, count: nnum }).prefault({}),
 
   rules: z
     .object({
@@ -83,7 +83,7 @@ export const profileSchema = z.object({
       arrivalDays: nstr,
       smoking: nstr,
     })
-    .default({}),
+    .prefault({}),
 
   price: z
     .object({
@@ -98,7 +98,7 @@ export const profileSchema = z.object({
       extraCosts: z.array(z.object({ item: z.string(), amountEur: z.number().nullable(), note: nstr })).default([]),
       depositEur: nnum,
     })
-    .default({}),
+    .prefault({}),
 
   cancellation: nstr,
 
@@ -113,7 +113,7 @@ export const profileSchema = z.object({
       transferIncluded: nbool,
       tourOperator: nstr,
     })
-    .default({}),
+    .prefault({}),
 
   photoCount: nnum,
   coverImageUrl: nstr,

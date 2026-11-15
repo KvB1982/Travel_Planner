@@ -52,6 +52,28 @@ function flattenJsonLd(node: unknown, out: Record<string, unknown>[]): void {
   }
 }
 
+/**
+ * State that a page assigns in an inline script, as Vrbo/FeWo-direkt does:
+ *   window.__APOLLO_STATE__ = JSON.parse("{\"a\":1}");   or   window.__X__ = {"a":1};
+ */
+export function inlineState(script: string): [string, unknown][] {
+  const out: [string, unknown][] = [];
+  if (!script.includes("window.__")) return out;
+  for (const m of script.matchAll(/window\.(__[A-Z0-9_]+__)\s*=\s*JSON\.parse\(\s*("(?:[^"\\]|\\[\s\S])*")\s*\)/g)) {
+    // The argument is a JavaScript string literal; \xNN and \' are valid there but not in JSON.
+    const literal = m[2]!.replace(/\\(\\|x([0-9a-fA-F]{2})|')/g, (all, esc: string, hex?: string) => (esc === "\\" ? all : hex ? `\\u00${hex}` : "'"));
+    const text = safeJson(literal);
+    const value = typeof text === "string" ? safeJson(text) : undefined;
+    if (value && typeof value === "object") out.push([m[1]!, value]);
+  }
+  if (out.length === 0) {
+    const m = /^\s*window\.(__[A-Z0-9_]+__)\s*=\s*(\{[\s\S]*\})\s*;?\s*$/.exec(script);
+    const value = m ? safeJson(m[2]!) : undefined;
+    if (m && value && typeof value === "object") out.push([m[1]!, value]);
+  }
+  return out;
+}
+
 export function extractBlocks(html: string): PageBlocks {
   const root = parse(html, { comment: false, blockTextElements: { script: true, style: true, noscript: false } });
 
@@ -73,9 +95,18 @@ export function extractBlocks(html: string): PageBlocks {
       const data = safeJson(script.rawText) as { props?: { pageProps?: unknown } } | undefined;
       const pruned = prune(data?.props?.pageProps);
       if (pruned) state.nextData = pruned;
+    } else if (/^data-deferred-state/.test(id)) {
+      // Airbnb
+      const pruned = prune(safeJson(script.rawText));
+      if (pruned) state[id] = pruned;
     } else if (id === "js-hotel-data" || (type === "application/json" && /hotel|listing|property|offer/i.test(id))) {
       const pruned = prune(safeJson(script.rawText));
       if (pruned) state[id] = pruned;
+    } else if (!type || /javascript|module/i.test(type)) {
+      for (const [name, value] of inlineState(script.rawText)) {
+        const pruned = prune(value);
+        if (pruned && !(name in state)) state[name] = pruned;
+      }
     }
   }
 
@@ -100,6 +131,18 @@ const num = (v: unknown): number | null => {
 };
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+
+/** First value stored under `key` anywhere in a nested object, breadth first. */
+export function findKey(root: unknown, key: string): unknown {
+  const queue: unknown[] = [root];
+  for (let i = 0; i < queue.length && i < 20_000; i++) {
+    const node = queue[i];
+    if (!node || typeof node !== "object") continue;
+    if (!Array.isArray(node) && key in node && (node as Record<string, unknown>)[key] != null) return (node as Record<string, unknown>)[key];
+    queue.push(...Object.values(node));
+  }
+  return undefined;
+}
 
 const AMENITY_WORDS: [(typeof amenityKeys)[number], RegExp][] = [
   ["pool", /(?<!whirl)pool|schwimmbad|swimming/i],
@@ -128,7 +171,15 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
   const provenance: Record<string, string> = {};
 
   const lodging = blocks.jsonLd.filter((n) => LODGING_TYPES.test(typeOf(n)));
-  const main = lodging.find((n) => !/Product/i.test(typeOf(n))) ?? lodging[0];
+  // A "Product" often describes the portal itself ("CHECK24 Pauschalreisen", rated by 56,000 customers).
+  // It only counts as the property when the page is titled after it.
+  const pageTitle = `${blocks.og["og:title"] ?? ""} ${blocks.title ?? ""}`.toLowerCase();
+  const siteName = (blocks.og["og:site_name"] ?? "").trim().toLowerCase();
+  const namesThePage = (n: Record<string, unknown>) => {
+    const name = str(n.name)?.toLowerCase();
+    return Boolean(name && name !== siteName && pageTitle.includes(name));
+  };
+  const main = lodging.find((n) => !/Product/i.test(typeOf(n))) ?? lodging.find(namesThePage);
 
   if (main) {
     provenance.core = `JSON-LD ${typeOf(main)}`;
@@ -170,7 +221,8 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
     }
   }
 
-  const rated = blocks.jsonLd.find((n) => n.aggregateRating);
+  // Only the property's own rating counts, never that of the portal or of some other node.
+  const rated = main?.aggregateRating ? main : undefined;
   if (rated) {
     const r = obj(rated.aggregateRating);
     profile.rating = { value: num(r.ratingValue), scale: num(r.bestRating), count: num(r.reviewCount ?? r.ratingCount) };
@@ -184,6 +236,35 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
   if (!profile.coverImageUrl && blocks.og["og:image"]) {
     profile.coverImageUrl = blocks.og["og:image"];
     provenance.coverImage = "Open Graph";
+  }
+
+  // The headline of the advert ("… · 4 Schlafzimmer · 4 Betten · 4 Badezimmer") is what visitors see,
+  // and platforms keep it more reliably than their JSON-LD.
+  const headline = [blocks.og["og:title"], blocks.og["og:description"], blocks.og["description"]].filter(Boolean).join(" · ");
+  const count = (re: RegExp): number | null => {
+    const m = re.exec(headline);
+    return m ? Number(m[1]!.replace(",", ".")) : null;
+  };
+  const fromHeadline = {
+    bedrooms: count(/(\d+)\s*(?:Schlafzimmer|bedrooms?)\b/i),
+    beds: count(/(\d+)\s*(?:Betten|Bett|beds?)\b/i),
+    bathrooms: count(/(\d+(?:[.,]5)?)\s*(?:Badezimmer|Bäder|Bad|bath(?:room)?s?)\b/i),
+  };
+  for (const [key, value] of Object.entries(fromHeadline) as [keyof typeof fromHeadline, number | null][]) {
+    if (value !== null && profile[key] === null) {
+      profile[key] = value;
+      provenance.rooms = "Überschrift der Anzeige";
+    }
+  }
+
+  const shownGuests = num(findKey(blocks.state, "personCapacity")) ?? (kind !== "vacation_home" ? null : count(/(\d+)\s*(?:Gäste|Gästen|Personen|guests)\b/i));
+  if (shownGuests !== null && shownGuests > 0 && shownGuests !== profile.maxGuests) {
+    if (profile.maxGuests !== null) {
+      profile.warnings.push(`Die Seite nennt ${shownGuests} Gäste, ihre Maschinendaten ${profile.maxGuests}. Übernommen ist die Angabe, die Besucher sehen.`);
+      profile.uncertain.push("maxGuests");
+    }
+    profile.maxGuests = shownGuests;
+    provenance.maxGuests = "Angabe auf der Seite";
   }
   return { profile, provenance };
 }

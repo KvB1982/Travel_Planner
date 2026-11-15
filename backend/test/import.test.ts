@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractBlocks, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
+import { extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine } from "../src/import/extract.js";
 import { assertPublicUrl, looksBlocked, UnsafeUrlError } from "../src/import/fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles } from "../src/import/profile.js";
@@ -59,6 +59,63 @@ describe("profileFromBlocks", () => {
     const { profile } = profileFromBlocks(extractBlocks("<html><head><title>Haus am See</title></head><body>Text</body></html>"), "vacation_home");
     expect(profile.title).toBe("Haus am See");
     expect(profile.bedrooms).toBeNull();
+  });
+});
+
+describe("what real pages taught us", () => {
+  const ld = (node: unknown) => `<script type="application/ld+json">${JSON.stringify(node)}</script>`;
+
+  it("does not mistake the portal for the hotel", () => {
+    const html = `<html><head><title>Hotel Sol y Mar, Mallorca | Portal</title>
+      ${ld({ "@type": "Product", name: "Portal Pauschalreisen", aggregateRating: { ratingValue: 5, bestRating: 5, reviewCount: 56718 } })}
+      </head><body>Hotel</body></html>`;
+    const { profile } = profileFromBlocks(extractBlocks(html), "package");
+    expect(profile.title).toBe("Hotel Sol y Mar, Mallorca | Portal");
+    expect(profile.rating.value).toBeNull();
+  });
+
+  it("accepts a product that the page is titled after", () => {
+    const html = `<html><head><title>Casa Azul in Tavira</title>
+      ${ld({ "@type": "Product", name: "Casa Azul", aggregateRating: { ratingValue: 4.8, bestRating: 5, reviewCount: 12 } })}
+      </head><body>Haus</body></html>`;
+    const { profile } = profileFromBlocks(extractBlocks(html), "vacation_home");
+    expect(profile.title).toBe("Casa Azul");
+    expect(profile.rating).toEqual({ value: 4.8, scale: 5, count: 12 });
+  });
+
+  it("ignores ratings that belong to something else on the page", () => {
+    const html = `<html><head>${ld([{ "@type": "VacationRental", name: "Haus" }, { "@type": "Organization", name: "Portal", aggregateRating: { ratingValue: 4.9 } }])}</head><body>x</body></html>`;
+    expect(profileFromBlocks(extractBlocks(html), "vacation_home").profile.rating.value).toBeNull();
+  });
+
+  it("reads rooms from the advert's headline and trusts the visible guest count over JSON-LD", () => {
+    const html = `<html><head>
+      <meta property="og:title" content="Villa in Calonge · ★4,95 · 4 Schlafzimmer · 4 Betten · 4,5 Badezimmer">
+      ${ld({ "@type": "VacationRental", name: "Villa mit Pool", containsPlace: { occupancy: { "@type": "QuantitativeValue", value: 4 } } })}
+      <script id="data-deferred-state-0" type="application/json">${JSON.stringify({ niobe: [["x", { data: { listing: { personCapacity: 8 } } }]] })}</script>
+      </head><body>Villa</body></html>`;
+    const { profile, provenance } = profileFromBlocks(extractBlocks(html), "vacation_home");
+    expect(profile).toMatchObject({ maxGuests: 8, bedrooms: 4, beds: 4, bathrooms: 4.5 });
+    expect(profile.uncertain).toContain("maxGuests");
+    expect(profile.warnings[0]).toMatch(/8 Gäste.*4/);
+    expect(provenance.maxGuests).toBe("Angabe auf der Seite");
+  });
+
+  it("does not read a guest count into a hotel from its description", () => {
+    const html = `<html><head><meta name="description" content="Zimmer für 2 Personen"><title>Hotel</title></head><body>x</body></html>`;
+    expect(profileFromBlocks(extractBlocks(html), "hotel").profile.maxGuests).toBeNull();
+  });
+
+  it("finds state that a page assigns in an inline script", () => {
+    const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
+    const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");
+    const html = `<html><body><script>window.__APOLLO_STATE__ = JSON.parse(${literal});window.__OTHER__ = JSON.parse("{\\"a\\":[1]}");</script>
+      <script>window.__PLUGIN_STATE__ = {"view":{"city":"Zingst"}};</script><p>Text</p></body></html>`;
+    const { state } = extractBlocks(html);
+    expect(state.__APOLLO_STATE__).toEqual({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
+    expect(state.__OTHER__).toEqual({ a: [1] });
+    expect(findKey(state, "city")).toBe("Zingst");
+    expect(inlineState("var a = 1;")).toEqual([]);
   });
 });
 

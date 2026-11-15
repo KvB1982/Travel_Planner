@@ -28,6 +28,8 @@ export interface LinkInfo {
   stay: Stay;
   /** A price found in the link parameters themselves (Casamundo). */
   priceHint: PriceHint | null;
+  /** The dates in the link are a search window (earliest departure to latest return), not a stay. */
+  searchWindow: boolean;
   /** App short links must be resolved before anything else can be read. */
   isShortLink: boolean;
   /** Things in the link that contradict each other or look wrong. */
@@ -171,7 +173,8 @@ function analyzeCheck24(url: URL): Partial<LinkInfo> | null {
   }
   const warnings: string[] = [];
   const days = p.get("days");
-  if (days && days.includes("-")) {
+  const searchWindow = Boolean(days && days.includes("-"));
+  if (days && searchWindow) {
     // The dates are a search window, not a stay.
     warnings.push(`Der Link enthält eine Spanne von ${days.replace("-", " bis ")} Tagen statt eines festen Zeitraums. Es gibt deshalb keinen einzelnen Preis.`);
   } else if (days) {
@@ -188,6 +191,7 @@ function analyzeCheck24(url: URL): Partial<LinkInfo> | null {
     canonicalUrl: `https://${url.host}${url.pathname}?${keep.toString()}`,
     kind: isPackage ? "package" : "hotel",
     stay,
+    searchWindow,
     warnings,
   };
 }
@@ -275,6 +279,7 @@ export function analyzeLink(raw: string): LinkInfo {
     kind: "vacation_home",
     stay: emptyStay(),
     priceHint: null,
+    searchWindow: false,
     isShortLink: isShortLinkHost(host),
     warnings: [],
   };
