@@ -25,6 +25,8 @@ public protocol TravelBackend: Sendable {
     func candidate(_ id: String) async throws -> CandidateDetail
     func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult
     func capture(candidateId: String, html: String) async throws
+    /// Asks the server to read the advert again. Progress shows in `importStatus`, as after an import.
+    func refresh(candidateId: String) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
     func comment(candidateId: String, body: String) async throws
@@ -206,6 +208,10 @@ public struct APIClient: TravelBackend {
             throw APIError(status: 0, code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen.")
         }
         _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html))
+    }
+
+    public func refresh(candidateId: String) async throws {
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/refresh")
     }
 
     public func setStatus(candidateId: String, status: CandidateStatus) async throws {

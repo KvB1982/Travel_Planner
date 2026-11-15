@@ -11,6 +11,7 @@ struct CandidateDetailView: View {
     @State private var error: String?
     @State private var comment = ""
     @State private var captureSource: ListingSource?
+    @State private var actionError: String?
 
     var body: some View {
         Group {
@@ -30,6 +31,11 @@ struct CandidateDetailView: View {
                 if Task.isCancelled { break }
                 await load()
             }
+        }
+        .alert("Das hat nicht geklappt", isPresented: .init(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(actionError ?? "")
         }
         .sheet(item: $captureSource) { source in
             CaptureView(source: source, candidateID: candidateID)
@@ -54,7 +60,8 @@ struct CandidateDetailView: View {
                 try await action(backend)
                 model.dataChanged()
             } catch {
-                self.error = model.message(for: error)
+                // The offer stays on screen, so a failed action is reported on top of it.
+                actionError = model.message(for: error)
             }
         }
     }
@@ -202,9 +209,14 @@ struct CandidateDetailView: View {
                         }
                     }
                 }
-                // Also offered for complete offers: reading the page again brings a current price and missing details.
+                if canEdit, detail.candidate.importStatus != .pending, !detail.sources.isEmpty {
+                    Button("Aktualisieren", systemImage: "arrow.clockwise") {
+                        perform { try await $0.refresh(candidateId: candidateID) }
+                    }
+                }
+                // Also offered for complete offers: reading the page here brings a current price and missing details.
                 if canEdit, detail.candidate.importStatus == .ready, let source = detail.sources.first {
-                    Button("Auf diesem Gerät aktualisieren", systemImage: "arrow.triangle.2.circlepath") {
+                    Button("Auf diesem Gerät aktualisieren", systemImage: "iphone.and.arrow.forward") {
                         captureSource = source
                     }
                 }
@@ -212,8 +224,8 @@ struct CandidateDetailView: View {
             } header: {
                 Text("Quellen")
             } footer: {
-                if canEdit, detail.candidate.importStatus == .ready, !detail.sources.isEmpty {
-                    Text("Aktualisieren öffnet das Inserat hier in der App und liest es neu aus, zum Beispiel um den Preis für euren Zeitraum nachzutragen.")
+                if canEdit, !detail.sources.isEmpty {
+                    Text("„Aktualisieren“ lässt den Server das Inserat neu abrufen. „Auf diesem Gerät“ öffnet es hier in der App, wenn die Plattform den Server sperrt oder du den Preis für euren Zeitraum nachtragen willst.")
                 }
             }
 

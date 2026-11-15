@@ -120,6 +120,11 @@ public actor DemoBackend: TravelBackend {
         details[candidateId] = detail
     }
 
+    public func refresh(candidateId: String) async throws {
+        _ = try detail(candidateId)
+        throw APIError(status: 0, code: "demo", message: "Mit Beispieldaten gibt es keinen Server, der das Inserat neu abrufen könnte.")
+    }
+
     public func setStatus(candidateId: String, status: CandidateStatus) async throws {
         var detail = try detail(candidateId)
         detail.candidate.status = status
