@@ -255,14 +255,23 @@ struct VoteBadges: View {
     let votes: VoteTally
 
     var body: some View {
-        HStack(spacing: 8) {
-            if votes.yes > 0 { Label("\(votes.yes)", systemImage: "hand.thumbsup.fill").foregroundStyle(.green) }
-            if votes.maybe > 0 { Label("\(votes.maybe)", systemImage: "questionmark.circle.fill").foregroundStyle(.orange) }
-            if votes.no > 0 { Label("\(votes.no)", systemImage: "hand.thumbsdown.fill").foregroundStyle(.red) }
-            if votes.vetoes > 0 { Label("Veto", systemImage: "hand.raised.fill").foregroundStyle(.red) }
+        HStack(spacing: 10) {
+            if votes.yes > 0 { badge("\(votes.yes)", "hand.thumbsup.fill", .green, "Ja") }
+            if votes.maybe > 0 { badge("\(votes.maybe)", "questionmark.circle.fill", .orange, "Vielleicht") }
+            if votes.no > 0 { badge("\(votes.no)", "hand.thumbsdown.fill", .red, "Nein") }
+            if votes.vetoes > 0 { badge("Veto", "hand.raised.fill", .red, "Veto") }
         }
         .font(.caption)
-        .labelStyle(.titleAndIcon)
+    }
+
+    private func badge(_ text: String, _ symbol: String, _ color: Color, _ meaning: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+            Text(text)
+        }
+        .foregroundStyle(color)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(meaning): \(text)")
     }
 }
 
