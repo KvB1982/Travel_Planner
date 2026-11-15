@@ -61,6 +61,10 @@ Angebote lassen sich in der Liste per Wischen oder im Menü des Steckbriefs lös
 
 Hinweise im Steckbrief sind eingeklappt. Einzelne lassen sich per Wischen ausblenden (`PATCH /candidates/:id` mit `hiddenWarnings`), das gilt für die ganze Reise und lässt sich zurücknehmen.
 
+## Dasselbe Haus auf anderen Plattformen
+
+Im Steckbrief startet „Auf anderen Plattformen suchen“ die Suche des Servers (`POST /candidates/:id/sources/search`, kostenpflichtig, daher nur auf Knopfdruck). Treffer erscheinen als Vorschläge mit Begründung und werden einzeln bestätigt oder abgelehnt; Links lassen sich auch von Hand hinzufügen. Jede Quelle zeigt Plattform, Note und Lesestand und lässt sich einzeln auf dem Gerät auslesen (`sourceId` beim Capture). Beim Auslesen schickt die App die aufgeklappten Einzelbewertungen im Wortlaut als `tp-captured-reviews` mit.
+
 ## Noch nicht enthalten
 
 Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.

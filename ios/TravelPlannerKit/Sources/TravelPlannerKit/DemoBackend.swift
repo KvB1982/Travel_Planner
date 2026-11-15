@@ -113,10 +113,56 @@ public actor DemoBackend: TravelBackend {
         return ImportResult(candidateId: id, duplicate: false, platform: platform)
     }
 
-    public func capture(candidateId: String, html: String) async throws {
+    public func capture(candidateId: String, html: String, sourceId: String?) async throws {
         var detail = try detail(candidateId)
-        detail.candidate.importStatus = .failed
-        detail.candidate.importNote = "Seite auf dem Gerät gelesen (\(html.utf8.count / 1024) KB). In der Demo wird sie nicht ausgewertet."
+        if let sourceId, let index = detail.sources.firstIndex(where: { $0.id == sourceId }) {
+            detail.sources[index].read = true
+            detail.sources[index].needsDevice = false
+        } else {
+            detail.candidate.importStatus = .failed
+            detail.candidate.importNote = "Seite auf dem Gerät gelesen (\(html.utf8.count / 1024) KB). In der Demo wird sie nicht ausgewertet."
+        }
+        details[candidateId] = detail
+    }
+
+    public func searchOtherPlatforms(candidateId: String) async throws {
+        var detail = try detail(candidateId)
+        detail.otherPlatforms = OtherPlatforms(status: .done, searchedAt: .now, note: "Beispieltreffer. Mit dem echten Server sucht hier eine KI im Netz.", suggestions: [
+            .init(id: nextID("v"), url: "https://www.fewo-direkt.de/", platform: "vrbo", title: detail.listing.title.map { "\($0) (FeWo-direkt)" },
+                  reason: "Gleicher Ort, gleiche Zahl an Schlafzimmern, Pool.", confidence: .high),
+            .init(id: nextID("v"), url: "https://www.casamundo.de/", platform: "casamundo", title: "Landhaus mit Pool",
+                  reason: "Gleicher Ort, aber ein Schlafzimmer weniger.", confidence: .low),
+        ])
+        details[candidateId] = detail
+    }
+
+    public func decide(candidateId: String, suggestionId: String, accept: Bool) async throws {
+        var detail = try detail(candidateId)
+        guard var other = detail.otherPlatforms, let index = other.suggestions?.firstIndex(where: { $0.id == suggestionId }),
+              let suggestion = other.suggestions?[index] else {
+            throw APIError(status: 404, code: "not_found", message: "Diesen Vorschlag gibt es nicht mehr.")
+        }
+        other.suggestions?[index].status = accept ? .accepted : .rejected
+        detail.otherPlatforms = other
+        if accept {
+            detail.sources.append(ListingSource(id: nextID("s"), platform: suggestion.platform, url: suggestion.url, canonicalUrl: suggestion.url,
+                                                primary: false, read: false, needsDevice: true, title: suggestion.title))
+        }
+        details[candidateId] = detail
+    }
+
+    public func addSource(candidateId: String, url: String) async throws {
+        var detail = try detail(candidateId)
+        guard !detail.sources.contains(where: { $0.url == url }) else { return }
+        detail.sources.append(ListingSource(id: nextID("s"), platform: "other", url: url, canonicalUrl: url, primary: false, read: false, needsDevice: true))
+        details[candidateId] = detail
+    }
+
+    public func removeSource(candidateId: String, sourceId: String) async throws {
+        var detail = try detail(candidateId)
+        guard let index = detail.sources.firstIndex(where: { $0.id == sourceId }) else { return }
+        guard index > 0 else { throw APIError(status: 409, code: "primary_source", message: "Die erste Quelle lässt sich nicht entfernen.") }
+        detail.sources.remove(at: index)
         details[candidateId] = detail
     }
 
@@ -199,7 +245,7 @@ public actor DemoBackend: TravelBackend {
                 prices: [price, older],
                 votes: VoteOverview(yes: votes.filter { $0.verdict == .yes }.count, maybe: votes.filter { $0.verdict == .maybe }.count,
                                     no: votes.filter { $0.verdict == .no }.count, vetoes: votes.filter(\.veto).count, entries: votes),
-                comments: comments, photos: photos,
+                comments: comments, photos: photos, otherPlatforms: OtherPlatforms(),
                 reviews: number == 3 ? nil : Reviews(
                     summary: "Gäste loben vor allem die ruhige Lage, den großen Garten und die hilfsbereiten Vermieter. Die Küche gilt als gut ausgestattet. Mehrfach erwähnt werden die schmale Zufahrt und dass es im Obergeschoss im Hochsommer warm wird.",
                     positives: ["Ruhige Lage mit Weitblick", "Großer Garten, Pool gepflegt", "Vermieter schnell erreichbar", "Küche gut ausgestattet"],

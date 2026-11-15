@@ -10,6 +10,8 @@ struct CaptureView: View {
     @Environment(\.dismiss) private var dismiss
     let source: ListingSource
     let candidateID: String
+    /// Set when the page belongs to a further source of the offer, not the leading one.
+    var sourceID: String?
 
     @State private var page = WebPage()
     @State private var sending = false
@@ -76,7 +78,7 @@ struct CaptureView: View {
                 guard html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
-                try await backend.capture(candidateId: candidateID, html: html)
+                try await backend.capture(candidateId: candidateID, html: html, sourceId: sourceID)
                 model.dataChanged()
                 dismiss()
             } catch {
@@ -142,6 +144,42 @@ final class WebPage: NSObject, WKNavigationDelegate {
       document.addEventListener('load', function (event) {
         if (event.target && event.target.tagName === 'IMG') { note(event.target); }
       }, true);
+      // The single reviews as shown on the page: the longest run of similar neighbouring blocks of text
+      // inside something that talks about reviews. Cards that link to other adverts are not reviews.
+      window.__tpReviews = function () {
+        try {
+          var roots = Array.prototype.slice.call(document.querySelectorAll(
+            '[role="dialog"], [aria-modal="true"], dialog[open], section, [id*="review" i], [class*="review" i], [data-testid*="review" i], [id*="bewertung" i], [class*="bewertung" i]'));
+          var best = null, bestScore = 0, looked = 0;
+          for (var r = 0; r < roots.length && looked < 6000; r++) {
+            var root = roots[r];
+            if (!/(bewertung|rezension|review)/i.test((root.innerText || '').slice(0, 6000))) { continue; }
+            var inDialog = !!root.closest('[role="dialog"], [aria-modal="true"], dialog');
+            var parents = [root].concat(Array.prototype.slice.call(root.querySelectorAll('*')));
+            for (var p = 0; p < parents.length && looked < 6000; p++, looked++) {
+              var parent = parents[p];
+              if (parent.children.length < 3) { continue; }
+              var texts = [], total = 0, tag = null, same = true;
+              for (var c = 0; c < parent.children.length; c++) {
+                var child = parent.children[c];
+                var text = (child.innerText || '').trim();
+                if (text.length < 60 || text.length > 6000) { continue; }
+                var links = child.querySelectorAll('a[href]'), away = false;
+                for (var l = 0; l < links.length; l++) { if (elsewhere(links[l])) { away = true; break; } }
+                if (away) { continue; }
+                if (tag && tag !== child.tagName) { same = false; }
+                tag = child.tagName;
+                texts.push(text.slice(0, 3000));
+                total += text.length;
+              }
+              if (!same || texts.length < 3 || total / texts.length < 120) { continue; }
+              var score = texts.length * (inDialog ? 2 : 1);
+              if (score > bestScore) { bestScore = score; best = texts; }
+            }
+          }
+          return (best || []).slice(0, 60);
+        } catch (e) { return []; }
+      };
       window.__tpCollect = function () {
         for (var i = 0; i < document.images.length; i++) { note(document.images[i]); }
         return Object.keys(seen).map(function (address) { return { url: address, gallery: seen[address] === true }; });
@@ -150,10 +188,10 @@ final class WebPage: NSObject, WKNavigationDelegate {
     """
 
     /// Opens a collapsed list of reviews, so their text is part of the page that gets sent.
-    /// Only real buttons with a short, unmistakable label are pressed, and never links that lead elsewhere.
+    /// Only buttons and links with a short, unmistakable label are pressed, and never links that lead away from the advert.
     private static let expandReviews = """
     var pressed = 0;
-    var candidates = document.querySelectorAll('button, [role="button"]');
+    var candidates = document.querySelectorAll('button, [role="button"], a[href]');
     for (var i = 0; i < candidates.length && pressed < 2; i++) {
       var element = candidates[i];
       var label = (element.innerText || element.getAttribute('aria-label') || '').trim();
@@ -161,7 +199,13 @@ final class WebPage: NSObject, WKNavigationDelegate {
       if (!/(bewertung|rezension|review)/i.test(label)) { continue; }
       if (!/(alle|mehr|weitere|anzeigen|ansehen|lesen|show|more|all)/i.test(label)) { continue; }
       if (/(schreiben|abgeben|verfassen|write|melden|report)/i.test(label)) { continue; }
-      if (element.closest('a[href]') || element.disabled || element.offsetParent === null) { continue; }
+      if (element.disabled || element.offsetParent === null) { continue; }
+      var link = element.closest('a[href]');
+      if (link) {
+        // Some sites open the review list through a link that stays within the advert; anything else is left alone.
+        var target = new URL(link.getAttribute('href'), location.href);
+        if (target.origin !== location.origin || target.pathname.indexOf(location.pathname.replace(/\\/$/, '')) !== 0) { continue; }
+      }
       element.click();
       pressed++;
       await new Promise(function (done) { setTimeout(done, 1500); });
@@ -234,6 +278,12 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return list
     }
 
+    private func reviewTexts() async -> [String] {
+        let json = try? await webView.evaluateJavaScript("JSON.stringify(window.__tpReviews ? window.__tpReviews() : [])") as? String
+        guard let data = json?.data(using: .utf8), let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return list
+    }
+
     func refreshPictureCount() async {
         // The count shown is the advert's own photos; pictures of other adverts on the page are not promised.
         pictureCount = await pictures().filter(\.gallery).count
@@ -258,7 +308,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
             try await Task.sleep(for: .milliseconds(500))
         }
         let page = try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
-        return Self.append(pictures: await pictures(), to: page)
+        return Self.append(reviews: await reviewTexts(), to: Self.append(pictures: await pictures(), to: page))
     }
 
     /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.
@@ -271,6 +321,22 @@ final class WebPage: NSObject, WKNavigationDelegate {
             return picture.gallery ? "<img src=\"\(escaped)\" data-gallery=\"1\">" : "<img src=\"\(escaped)\">"
         }.joined()
         let block = "<div id=\"tp-captured-images\" hidden>\(tags)</div>"
+        if let end = page.range(of: "</body>", options: [.backwards, .caseInsensitive]) {
+            return page.replacingCharacters(in: end, with: block + "</body>")
+        }
+        return page + block
+    }
+
+    private static func escape(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// Adds the single reviews as shown on the page, one element each, in the wording of the page.
+    /// Author, date and rating are part of that text; the server tells them apart.
+    static func append(reviews: [String], to page: String) -> String {
+        guard !reviews.isEmpty else { return page }
+        let block = "<div id=\"tp-captured-reviews\" hidden>" + reviews.map { "<div data-review>\(escape($0))</div>" }.joined() + "</div>"
         if let end = page.range(of: "</body>", options: [.backwards, .caseInsensitive]) {
             return page.replacingCharacters(in: end, with: block + "</body>")
         }

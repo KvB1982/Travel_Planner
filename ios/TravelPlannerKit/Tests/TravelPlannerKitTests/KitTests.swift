@@ -245,6 +245,20 @@ final class ReviewTests: XCTestCase {
         XCTAssertTrue(try detail("").hints.isEmpty)
     }
 
+    func testOtherPlatformsAndRicherSources() throws {
+        let detail = try detail("""
+        ,"otherPlatforms":{"available":true,"status":"done","searchedAt":"2026-11-15T22:50:00.000Z","note":null,
+          "suggestions":[{"id":"s1","url":"https://www.airbnb.de/rooms/1","platform":"airbnb","title":"Casa","reason":"Gleicher Ort.","confidence":"high","status":"proposed"},
+                         {"id":"s2","url":"https://x/2","platform":"other","title":null,"reason":null,"confidence":"low","status":"rejected"}]}
+        """)
+        XCTAssertEqual(detail.otherPlatforms?.open.map(\.id), ["s1"])
+        XCTAssertEqual(detail.otherPlatforms?.isRunning, false)
+        let source = try APIClient.decoder.decode(ListingSource.self, from: Data(#"{"id":"q","platform":"casamundo","url":"https://c/1","canonicalUrl":"https://c/1","primary":false,"read":false,"needsDevice":true,"title":null,"rating":null,"reviewCount":null,"lastFetchedAt":null}"#.utf8))
+        XCTAssertEqual(source.needsDevice, true)
+        let old = try APIClient.decoder.decode(ListingSource.self, from: Data(#"{"id":"q","platform":"vrbo","url":"https://f/1","canonicalUrl":"https://f/1","provenance":{},"lastFetchedAt":null}"#.utf8))
+        XCTAssertNil(old.primary)
+    }
+
     func testOddExtrasNeverBreakTheOffer() throws {
         let detail = try detail(#","photos":"kaputt","reviewSummary":17,"reviews":{"unerwartet":true}"#)
         XCTAssertEqual(detail.listing.title, "Casa")
@@ -356,6 +370,35 @@ final class DemoBackendTests: XCTestCase {
         try await demo.setHiddenWarnings(candidateId: "c-2", hidden: [])
         let restored = try await demo.candidate("c-2").hints
         XCTAssertFalse(restored.contains(where: \.hidden))
+    }
+
+    func testSuggestionAcceptedBecomesSourceAndCanBeRemoved() async throws {
+        let demo = DemoBackend()
+        try await demo.searchOtherPlatforms(candidateId: "c-1")
+        let found = try await demo.candidate("c-1")
+        let first = try XCTUnwrap(found.otherPlatforms?.open.first)
+        XCTAssertEqual(found.otherPlatforms?.open.count, 2)
+        try await demo.decide(candidateId: "c-1", suggestionId: first.id, accept: true)
+        let second = try XCTUnwrap(found.otherPlatforms?.open.last)
+        try await demo.decide(candidateId: "c-1", suggestionId: second.id, accept: false)
+        var after = try await demo.candidate("c-1")
+        XCTAssertEqual(after.sources.count, 2)
+        XCTAssertEqual(after.otherPlatforms?.open.count, 0)
+        let added = try XCTUnwrap(after.sources.last)
+        XCTAssertEqual(added.needsDevice, true)
+        try await demo.capture(candidateId: "c-1", html: String(repeating: "x", count: 600), sourceId: added.id)
+        after = try await demo.candidate("c-1")
+        XCTAssertEqual(after.sources.last?.read, true)
+        XCTAssertEqual(after.candidate.importStatus, .ready, "eine weitere Quelle ändert den Stand des Angebots nicht")
+        try await demo.removeSource(candidateId: "c-1", sourceId: added.id)
+        do {
+            try await demo.removeSource(candidateId: "c-1", sourceId: after.sources[0].id)
+            XCTFail("Die erste Quelle darf nicht entfernbar sein")
+        } catch let error as APIError {
+            XCTAssertEqual(error.code, "primary_source")
+        }
+        let end = try await demo.candidate("c-1")
+        XCTAssertEqual(end.sources.count, 1)
     }
 
     func testDeleteRemovesOfferAndUpdatesCounts() async throws {

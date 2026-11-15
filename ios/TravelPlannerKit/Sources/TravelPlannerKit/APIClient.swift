@@ -24,7 +24,16 @@ public protocol TravelBackend: Sendable {
     func candidates(tripId: String) async throws -> [CandidateSummary]
     func candidate(_ id: String) async throws -> CandidateDetail
     func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult
-    func capture(candidateId: String, html: String) async throws
+    /// Hands a page read on the device to the server. `sourceId` names the source it belongs to; nil means the leading one.
+    func capture(candidateId: String, html: String, sourceId: String?) async throws
+    /// Starts the search for the same house on other platforms. Costs money on the server, so only on request.
+    func searchOtherPlatforms(candidateId: String) async throws
+    /// Confirms or dismisses a page the search suggested.
+    func decide(candidateId: String, suggestionId: String, accept: Bool) async throws
+    /// Adds a link to the same house on another platform by hand.
+    func addSource(candidateId: String, url: String) async throws
+    /// Removes a further source with its prices and reviews. The leading source cannot be removed.
+    func removeSource(candidateId: String, sourceId: String) async throws
     /// Asks the server to read the advert again. Progress shows in `importStatus`, as after an import.
     func refresh(candidateId: String) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
@@ -206,12 +215,31 @@ public struct APIClient: TravelBackend {
         return try await send("POST", "/trips/\(tripId.pathEscaped)/imports", body: Body(url: url, html: page))
     }
 
-    public func capture(candidateId: String, html: String) async throws {
-        struct Body: Encodable { var html: String }
+    public func capture(candidateId: String, html: String, sourceId: String?) async throws {
+        struct Body: Encodable { var html: String; var sourceId: String? }
         guard html.utf8.count <= Self.maxPageBytes else {
             throw APIError(status: 0, code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen.")
         }
-        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html))
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, sourceId: sourceId))
+    }
+
+    public func searchOtherPlatforms(candidateId: String) async throws {
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/sources/search")
+    }
+
+    public func decide(candidateId: String, suggestionId: String, accept: Bool) async throws {
+        struct Body: Encodable { var decision: String }
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/suggestions/\(suggestionId.pathEscaped)",
+                           body: Body(decision: accept ? "accept" : "reject"))
+    }
+
+    public func addSource(candidateId: String, url: String) async throws {
+        struct Body: Encodable { var url: String }
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/sources", body: Body(url: url))
+    }
+
+    public func removeSource(candidateId: String, sourceId: String) async throws {
+        _ = try await data("DELETE", "/candidates/\(candidateId.pathEscaped)/sources/\(sourceId.pathEscaped)")
     }
 
     public func refresh(candidateId: String) async throws {

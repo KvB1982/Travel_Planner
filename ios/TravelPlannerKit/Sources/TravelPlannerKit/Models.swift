@@ -263,16 +263,68 @@ public struct Listing: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// One advert of the offer on one platform. The first source is the link the offer was shared with.
 public struct ListingSource: Codable, Identifiable, Hashable, Sendable {
     public var id: String
     public var platform: String
     public var url: String
     public var canonicalUrl: String
     public var lastFetchedAt: Date?
+    /// The leading source, which fills title, pictures and price of the profile. Nil on older servers.
+    public var primary: Bool?
+    /// Whether the page has been read at all.
+    public var read: Bool?
+    /// The platform turned the server away; the page has to be read on a device.
+    public var needsDevice: Bool?
+    public var title: String?
+    public var rating: Rating?
+    public var reviewCount: Double?
 
-    public init(id: String, platform: String, url: String, canonicalUrl: String, lastFetchedAt: Date? = nil) {
+    public init(id: String, platform: String, url: String, canonicalUrl: String, lastFetchedAt: Date? = nil, primary: Bool? = nil,
+                read: Bool? = nil, needsDevice: Bool? = nil, title: String? = nil, rating: Rating? = nil, reviewCount: Double? = nil) {
         self.id = id; self.platform = platform; self.url = url; self.canonicalUrl = canonicalUrl; self.lastFetchedAt = lastFetchedAt
+        self.primary = primary; self.read = read; self.needsDevice = needsDevice; self.title = title; self.rating = rating
+        self.reviewCount = reviewCount
     }
+}
+
+/// The search for the same house on other platforms, and what it found.
+public struct OtherPlatforms: Codable, Hashable, Sendable {
+    public enum Status: String, Codable, Sendable { case idle, running, done, failed }
+    public enum Confidence: String, Codable, Sendable { case high, medium, low }
+    public enum Decision: String, Codable, Sendable { case proposed, accepted, rejected }
+
+    /// A page that may show the same house. A person decides whether it does.
+    public struct Suggestion: Codable, Identifiable, Hashable, Sendable {
+        public var id: String
+        public var url: String
+        public var platform: String
+        public var title: String?
+        public var reason: String?
+        public var confidence: Confidence?
+        public var status: Decision?
+
+        public init(id: String, url: String, platform: String, title: String? = nil, reason: String? = nil,
+                    confidence: Confidence? = nil, status: Decision? = .proposed) {
+            self.id = id; self.url = url; self.platform = platform; self.title = title; self.reason = reason
+            self.confidence = confidence; self.status = status
+        }
+    }
+
+    /// False when the server cannot search (no key for the search service).
+    public var available: Bool?
+    public var status: Status?
+    public var searchedAt: Date?
+    public var note: String?
+    public var suggestions: [Suggestion]?
+
+    public init(available: Bool? = true, status: Status? = .idle, searchedAt: Date? = nil, note: String? = nil, suggestions: [Suggestion]? = []) {
+        self.available = available; self.status = status; self.searchedAt = searchedAt; self.note = note; self.suggestions = suggestions
+    }
+
+    public var isRunning: Bool { status == .running }
+    /// Suggestions still waiting for a yes or no.
+    public var open: [Suggestion] { (suggestions ?? []).filter { ($0.status ?? .proposed) == .proposed } }
 }
 
 public struct PriceSnapshot: Codable, Identifiable, Hashable, Sendable {
@@ -429,6 +481,8 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     public var reviews: Reviews?
     /// All hints with their hidden state; nil when the server only sends them inside the profile.
     public var warnings: [Hint]?
+    /// Nil on servers without the search for other platforms.
+    public var otherPlatforms: OtherPlatforms?
 
     /// Hints of the offer, taken from the profile when the server sent no list of its own.
     public var hints: [Hint] {
@@ -436,13 +490,15 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     }
 
     public init(candidate: CandidateRecord, role: MemberRole, listing: Listing, sources: [ListingSource] = [], prices: [PriceSnapshot] = [],
-                votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil, reviews: Reviews? = nil) {
+                votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil, otherPlatforms: OtherPlatforms? = nil,
+                reviews: Reviews? = nil) {
         self.candidate = candidate; self.role = role; self.listing = listing; self.sources = sources; self.prices = prices
         self.votes = votes; self.comments = comments; self.photos = photos; self.reviews = reviews
+        self.otherPlatforms = otherPlatforms
     }
 
     private enum CodingKeys: String, CodingKey {
-        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews, warnings
+        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews, warnings, otherPlatforms
     }
 
     /// The server sends the summary (`reviewSummary`) and the single reviews (`reviews`, a list) side by side.
@@ -458,6 +514,7 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
         comments = try container.decodeIfPresent([Comment].self, forKey: .comments) ?? []
         photos = (try? container.decodeIfPresent([Photo].self, forKey: .photos)) ?? nil
         warnings = (try? container.decodeIfPresent([Hint].self, forKey: .warnings)) ?? nil
+        otherPlatforms = (try? container.decodeIfPresent(OtherPlatforms.self, forKey: .otherPlatforms)) ?? nil
 
         var combined = ((try? container.decodeIfPresent(Reviews.self, forKey: .reviewSummary)) ?? nil) ?? Reviews()
         if let items = (try? container.decodeIfPresent([Reviews.Item].self, forKey: .reviews)) ?? nil {

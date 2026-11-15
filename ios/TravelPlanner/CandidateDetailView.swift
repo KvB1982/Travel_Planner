@@ -16,6 +16,8 @@ struct CandidateDetailView: View {
     @State private var actionError: String?
     @State private var confirmDelete = false
     @State private var showReviews = false
+    @State private var showAddSource = false
+    @State private var sourceLink = ""
     @AppStorage("showWarnings") private var showWarnings = false
 
     var body: some View {
@@ -31,7 +33,8 @@ struct CandidateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: model.revision) {
             await load()
-            while !Task.isCancelled, detail?.candidate.importStatus == .pending {
+            // Imports and the search for other platforms finish on the server; look again until both are done.
+            while !Task.isCancelled, detail?.candidate.importStatus == .pending || detail?.otherPlatforms?.isRunning == true {
                 try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { break }
                 await load()
@@ -47,11 +50,31 @@ struct CandidateDetailView: View {
         } message: {
             Text(actionError ?? "")
         }
+        .alert("Link hinzufügen", isPresented: $showAddSource) {
+            TextField("https://…", text: $sourceLink)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+            Button("Abbrechen", role: .cancel) { sourceLink = "" }
+            Button("Hinzufügen") {
+                let text = sourceLink
+                sourceLink = ""
+                if let url = LinkFinder.firstURL(in: text) {
+                    perform { try await $0.addSource(candidateId: candidateID, url: url.absoluteString) }
+                } else {
+                    actionError = "Das ist keine Internetadresse."
+                }
+            }
+        } message: {
+            Text("Adresse desselben Hauses auf einer anderen Plattform. Seine Bewertungen und Preise kommen dann dazu.")
+        }
         .sheet(isPresented: $showReviews) {
             ReviewList(items: detail?.reviews?.items ?? [], fallbackScale: detail?.listing.profile.rating?.scale)
         }
         .sheet(item: $captureSource) { source in
-            CaptureView(source: source, candidateID: candidateID)
+            // Only further sources are named; without a name the page counts for the leading source, on any server.
+            CaptureView(source: source, candidateID: candidateID,
+                        sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id)
         }
     }
 
@@ -229,35 +252,16 @@ struct CandidateDetailView: View {
                 }
             }
 
-            Section {
-                ForEach(detail.sources) { source in
-                    if let url = URL(string: source.url) {
-                        Button {
-                            openURL(url)
-                        } label: {
-                            Label("Bei \(Format.platformName(source.platform)) öffnen", systemImage: "safari")
-                        }
-                    }
-                }
-                if canEdit, detail.candidate.importStatus != .pending, !detail.sources.isEmpty {
-                    Button("Aktualisieren", systemImage: "arrow.clockwise") {
-                        perform { try await $0.refresh(candidateId: candidateID) }
-                    }
-                }
-                // Also offered for complete offers: reading the page here brings a current price and missing details.
-                if canEdit, detail.candidate.importStatus == .ready, let source = detail.sources.first {
-                    Button("Auf diesem Gerät aktualisieren", systemImage: "iphone.and.arrow.forward") {
-                        captureSource = source
-                    }
-                }
-                LabeledContent("Steckbrief gefüllt", value: "\(detail.listing.fillPercent) %")
-            } header: {
-                Text("Quellen")
-            } footer: {
-                if canEdit, !detail.sources.isEmpty {
-                    Text("„Aktualisieren“ lässt den Server das Inserat neu abrufen. „Auf diesem Gerät“ öffnet es hier in der App, wenn die Plattform den Server sperrt oder du den Preis für euren Zeitraum nachtragen willst.")
-                }
-            }
+            SourcesSection(
+                detail: detail, canEdit: canEdit,
+                refresh: { perform { try await $0.refresh(candidateId: candidateID) } },
+                readOnDevice: { captureSource = $0 },
+                removeSource: { source in perform { try await $0.removeSource(candidateId: candidateID, sourceId: source.id) } },
+                search: { perform { try await $0.searchOtherPlatforms(candidateId: candidateID) } },
+                decide: { suggestion, accept in
+                    perform { try await $0.decide(candidateId: candidateID, suggestionId: suggestion.id, accept: accept) }
+                },
+                addLink: { showAddSource = true })
 
             Section("Kommentare") {
                 ForEach(detail.comments) { comment in
