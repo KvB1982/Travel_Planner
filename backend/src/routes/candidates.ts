@@ -163,6 +163,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           country: listing.country,
           lat: listing.lat,
           lon: listing.lon,
+          // The position is an estimate or deliberately blurred by the platform: draw an area, not a pin.
+          locationApproximate: listing.lat !== null && (p.uncertain.includes("lat") || p.uncertain.includes("lon")),
           coverImageUrl: listing.coverImageUrl,
           // What can actually be shown; the page may advertise more than it gave away (profile.photoCount).
           photoCount: p.photos?.length || p.photoCount,

@@ -210,4 +210,4 @@ Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp
 
 ## Ungefähre Lage
 
-Stehen `"lat"` und `"lon"` in `profile.uncertain`, ist die Position nur ungefähr: entweder hat die KI sie aus dem Text abgeleitet, oder die Plattform zeigt bewusst nur die Umgebung (Airbnb, Vrbo). Die App zeichnet dann besser einen Kreis als eine Nadel. Eine von Hand korrigierte Position gilt wieder als genau.
+Stehen `"lat"` und `"lon"` in `profile.uncertain`, ist die Position nur ungefähr: entweder hat die KI sie aus dem Text abgeleitet, oder die Plattform zeigt bewusst nur die Umgebung (Airbnb, Vrbo). Die App zeichnet dann besser einen Kreis als eine Nadel. Eine von Hand korrigierte Position gilt wieder als genau. Die Liste `GET /trips/:tripId/candidates` liefert dasselbe als `listing.locationApproximate` (boolean).
