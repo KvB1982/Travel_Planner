@@ -206,7 +206,7 @@ Ein Angebot kann mehrere Quellen haben. Die erste ist der Link, mit dem es getei
 
 ## Bewertungen vom Gerät
 
-Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp-captured-reviews" hidden>` mit einem `<div data-review>` je Bewertung enthalten (Fließtext, höchstens 150 Einträge zu je 3000 Zeichen; was darüber hinausgeht, verwirft der Server). Der Server nutzt ihn für die Zusammenfassung und, wenn die Seitendaten selbst keine einzelnen Bewertungen enthalten, für `reviews.items`. Die KI sortiert aus, was keine Gästebewertung ist, und trennt Name, Datum und Note ab; der Text wird wörtlich aus dem Block geschnitten. Das Protokoll nennt je Auslesen die Zahl der Blöcke (`review blocks N`) und wie viele Bewertungen daraus wurden.
+Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp-captured-reviews" hidden>` mit einem `<div data-review>` je Bewertung enthalten (Fließtext, höchstens 150 Einträge zu je 3000 Zeichen; was darüber hinausgeht, verwirft der Server). Der Server nutzt ihn für die Zusammenfassung und, wenn die Seitendaten selbst keine einzelnen Bewertungen enthalten, für `reviews.items`. Die KI sortiert aus, was keine Gästebewertung ist, und trennt Name, Datum und Note ab; der Text wird wörtlich aus dem Block geschnitten. Das geschieht in eigenen kleinen Aufrufen zu je 20 Blöcken, getrennt vom Steckbrief. Schlägt ein Aufruf fehl, bleiben seine Blöcke unsortiert als Bewertungen erhalten (ohne Name, Datum, Note). Das Protokoll nennt je Auslesen die Zahl der Blöcke (`review blocks N`) und wie viele Bewertungen daraus wurden.
 
 ## Ungefähre Lage
 
