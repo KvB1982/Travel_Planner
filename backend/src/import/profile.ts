@@ -180,7 +180,7 @@ export const profileSchema = z.object({
         platform: nstr.default(null),
       }),
     )
-    .max(160)
+    .max(400)
     .default([]),
   /** What the reviews say, taken together. Written by the model from the reviews it was shown. */
   reviewSummary: z

@@ -238,7 +238,7 @@ export async function processImport(
       // Read before sources kept their own share: what the profile holds belongs to the leading source.
       return { platform: s.platform, extract: i === 0 ? { title: before.title, rating: before.rating, reviews: before.reviews.filter((r) => !r.platform || r.platform === s.platform), reviewSummary: before.reviewSummary } : null };
     });
-    profile.reviews = perSource.flatMap((s) => (s.extract?.reviews ?? []).map((r) => ({ ...r, platform: s.platform }))).slice(0, 160);
+    profile.reviews = perSource.flatMap((s) => (s.extract?.reviews ?? []).map((r) => ({ ...r, platform: s.platform }))).slice(0, 400);
     const told = perSource.filter((s) => s.extract?.reviewSummary.summary || s.extract?.reviews.length);
     const leading = perSource[0]?.extract?.reviewSummary;
     profile.reviewSummary = leading?.summary ? leading : (told[0]?.extract?.reviewSummary ?? profile.reviewSummary);
