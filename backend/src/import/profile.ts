@@ -161,9 +161,11 @@ export const profileSchema = z.object({
         scale: nnum.default(null),
         date: nstr.default(null),
         author: nstr.default(null),
+        /** Where the review was read. Empty on adverts read before several sources were possible. */
+        platform: nstr.default(null),
       }),
     )
-    .max(60)
+    .max(160)
     .default([]),
   /** What the reviews say, taken together. Written by the model from the reviews it was shown. */
   reviewSummary: z

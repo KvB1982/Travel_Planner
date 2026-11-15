@@ -379,3 +379,112 @@ describe("hints and comparison", () => {
     expect((await s.call("GET", `/trips/${s.tripId}/compare?ids=${a},00000000-0000-4000-8000-000000000000`, s.owner)).status).toBe(404);
   });
 });
+
+describe("the same property on other platforms", () => {
+  const perPlatform: Extractor = async ({ baseline, link }) => ({
+    profile: {
+      ...baseline,
+      title: `Titel bei ${link.platform}`,
+      bathrooms: link.platform === "airbnb" ? 2 : null,
+      rating: { value: link.platform === "airbnb" ? 4.8 : 4.2, scale: 5, count: 10 },
+      reviews: [{ id: `${link.platform}-1`, text: `Schön, sagt ein Gast bei ${link.platform}.`, title: null, rating: 5, scale: 5, date: "2026-08-01", author: "A", platform: null }],
+      reviewSummary: { summary: `Stimmen bei ${link.platform}.`, positives: ["Lage"], negatives: [], basedOn: 1 },
+      price: { ...baseline.price, totalEur: link.platform === "airbnb" ? 3500 : 3000, kind: "total" },
+      warnings: [`Hinweis von ${link.platform}`],
+    },
+    note: null,
+  });
+
+  it("proposes matches, attaches a confirmed one and joins reviews and prices", async () => {
+    const asked: string[] = [];
+    const s = await setup({
+      extractor: perPlatform,
+      searcher: async ({ profile, known }) => {
+        asked.push(`${profile.title} | ${known.map((k) => k.platform).join(",")}`);
+        return {
+          hits: [
+            { url: "https://www.airbnb.de/rooms/555666?adults=2", title: "Haus am Meer", reason: "Gleicher Ort, drei Schlafzimmer.", confidence: "high" },
+            { url: "https://www.novasol.de/ferienhaeuser/ABC999", title: "Anderes Haus", reason: "Selbe Plattform.", confidence: "low" },
+          ],
+          note: null,
+        };
+      },
+      summarizer: async (sources) => ({ summary: `Über ${sources.length} Plattformen gesehen.`, positives: ["Lage"], negatives: [], basedOn: 2 }),
+    });
+    const id = (await s.importLink(NOVASOL)).body.candidateId as string;
+
+    expect((await s.call("POST", `/candidates/${id}/sources/search`, s.owner)).status).toBe(202);
+    await s.ctx.queue.idle();
+    expect(asked).toEqual(["Titel bei novasol | novasol"]);
+    expect((await s.call("POST", `/candidates/${id}/sources/search`, s.owner)).status).toBe(429);
+
+    let detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.otherPlatforms).toMatchObject({ available: true, status: "done" });
+    // The hit on the platform that is already attached is not proposed.
+    expect(detail.body.otherPlatforms.suggestions).toHaveLength(1);
+    const suggestion = detail.body.otherPlatforms.suggestions[0];
+    expect(suggestion).toMatchObject({ platform: "airbnb", url: "https://www.airbnb.de/rooms/555666", confidence: "high", status: "proposed" });
+
+    const accepted = await s.call("POST", `/candidates/${id}/suggestions/${suggestion.id}`, s.owner, { decision: "accept" });
+    expect(accepted.status).toBe(202);
+    await s.ctx.queue.idle();
+
+    detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.sources.map((x: { platform: string; primary: boolean; read: boolean }) => [x.platform, x.primary, x.read])).toEqual([
+      ["novasol", true, true],
+      ["airbnb", false, true],
+    ]);
+    expect(detail.body.sources[1].rating).toMatchObject({ value: 4.8 });
+    // The advert keeps its name, hints and price; the further source fills gaps and adds its reviews.
+    expect(detail.body.listing).toMatchObject({ title: "Titel bei novasol", profile: { bathrooms: 2, warnings: ["Hinweis von novasol"], price: { totalEur: 3000 } } });
+    expect(detail.body.reviews.items.map((r: { platform: string }) => r.platform).sort()).toEqual(["airbnb", "novasol"]);
+    expect(detail.body.reviews.summary).toBe("Über 2 Plattformen gesehen.");
+    expect(detail.body.prices.map((p: { totalCents: number }) => p.totalCents).sort()).toEqual([300000, 350000]);
+    expect(detail.body.otherPlatforms.suggestions[0].status).toBe("accepted");
+    expect(detail.body.candidate.importStatus).toBe("ready");
+
+    // Reading the leading source again keeps the other platform's reviews.
+    await s.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
+    await s.call("POST", `/candidates/${id}/refresh`, s.owner);
+    await s.ctx.queue.idle();
+    detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.reviews.items).toHaveLength(2);
+
+    // A wrong match can be taken away again.
+    const airbnb = detail.body.sources[1].id as string;
+    expect((await s.call("DELETE", `/candidates/${id}/sources/${detail.body.sources[0].id}`, s.owner)).status).toBe(409);
+    expect((await s.call("DELETE", `/candidates/${id}/sources/${airbnb}`, s.owner)).status).toBe(204);
+    detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.sources).toHaveLength(1);
+    expect(detail.body.reviews.items.map((r: { platform: string }) => r.platform)).toEqual(["novasol"]);
+    expect(detail.body.reviews.summary).toBe("Stimmen bei novasol.");
+    expect(detail.body.prices).toHaveLength(1);
+  });
+
+  it("takes a link by hand, and a blocked platform waits for the device", async () => {
+    const s = await setup({ extractor: perPlatform, fetcher: async (url) => (url.includes("casamundo") ? page(fixture("blocked.html"), { status: 403, blocked: true }) : page(fixture("novasol.html"))) });
+    const id = (await s.importLink(NOVASOL)).body.candidateId as string;
+    expect((await s.call("POST", `/candidates/${id}/sources/search`, s.owner)).status).toBe(503);
+
+    const added = await s.call("POST", `/candidates/${id}/sources`, s.owner, { url: CASAMUNDO });
+    expect(added.status).toBe(202);
+    await s.ctx.queue.idle();
+    let detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.sources[1]).toMatchObject({ platform: "casamundo", read: false, needsDevice: true });
+    // The advert itself is not marked as incomplete because a further source was refused.
+    expect(detail.body.candidate.importStatus).toBe("ready");
+
+    const capture = await s.call("POST", `/candidates/${id}/capture`, s.owner, { html: fixture("novasol.html"), sourceId: added.body.sourceId });
+    expect(capture.status).toBe(202);
+    await s.ctx.queue.idle();
+    detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.sources[1]).toMatchObject({ read: true, needsDevice: false });
+    expect(detail.body.listing.title).toBe("Titel bei novasol");
+    expect(detail.body.reviews.items).toHaveLength(2);
+
+    // A link that is its own advert elsewhere is not swallowed.
+    const other = (await s.importLink(AIRBNB)).body.candidateId as string;
+    expect(other).not.toBe(id);
+    expect((await s.call("POST", `/candidates/${id}/sources`, s.owner, { url: AIRBNB })).status).toBe(409);
+  });
+});

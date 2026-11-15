@@ -141,6 +141,13 @@ export const listings = pgTable("listings", {
 });
 
 /** One advert of a listing on one platform. The same house can have several. */
+export interface SourceExtract {
+  title: string | null;
+  rating: Profile["rating"];
+  reviews: Profile["reviews"];
+  reviewSummary: Profile["reviewSummary"];
+}
+
 export const listingSources = pgTable(
   "listing_sources",
   {
@@ -156,6 +163,8 @@ export const listingSources = pgTable(
     provenance: jsonb("provenance").$type<Record<string, string>>().notNull().default({}),
     lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
     fetchNote: text("fetch_note"),
+    /** What this source alone said, kept so that several sources of one advert can be put together again. */
+    extract: jsonb("extract").$type<SourceExtract>(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -186,9 +195,32 @@ export const tripListings = pgTable(
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     /** Hints of the advert that this trip's members chose not to see, by their wording. */
     hiddenWarnings: jsonb("hidden_warnings").$type<string[]>().notNull().default([]),
+    /** Looking for the same property on other platforms: idle, running, done or failed. */
+    searchStatus: text("search_status").$type<"idle" | "running" | "done" | "failed">().notNull().default("idle"),
+    searchedAt: timestamp("searched_at", { withTimezone: true }),
+    searchNote: text("search_note"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("trip_listings_trip_listing_idx").on(t.tripId, t.listingId)],
+);
+
+/** A page on another platform that may show the same property. Someone has to confirm it. */
+export const sourceSuggestions = pgTable(
+  "source_suggestions",
+  {
+    id: id(),
+    tripListingId: uuid("trip_listing_id")
+      .notNull()
+      .references(() => tripListings.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    platform: text("platform").notNull(),
+    title: text("title"),
+    reason: text("reason"),
+    confidence: text("confidence").$type<"high" | "medium" | "low">().notNull().default("medium"),
+    status: text("status").$type<"proposed" | "accepted" | "rejected">().notNull().default("proposed"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("source_suggestions_candidate_url_idx").on(t.tripListingId, t.url)],
 );
 
 export const priceSnapshots = pgTable(

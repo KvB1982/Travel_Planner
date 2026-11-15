@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { dateOptions, listings, listingSources, priceSnapshots, tripListings, trips } from "../db/schema.js";
 import { extractBlocks, profileFromBlocks } from "./blocks.js";
-import type { Extractor } from "./extract.js";
+import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
 import { analyzeLink, embeddedTarget, nightsBetween, urlForStay, type LinkInfo } from "./url.js";
@@ -11,6 +11,8 @@ export interface ImportDeps {
   db: Db;
   fetcher: PageFetcher;
   extractor: Extractor;
+  /** Writes one summary over the reviews of several platforms. Without it the first source's summary stays. */
+  summarizer?: ReviewSummarizer | null;
 }
 
 export interface StartedImport {
@@ -138,8 +140,13 @@ export async function processImport(
   input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string },
 ): Promise<void> {
   const { db } = deps;
-  const setCandidate = (values: { importStatus: "ready" | "partial" | "failed"; importNote: string | null }) =>
-    db.update(tripListings).set(values).where(eq(tripListings.id, input.candidateId));
+  const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, input.listingId)).orderBy(asc(listingSources.createdAt));
+  // The link an advert was shared with leads. Further sources of the same property only add to it.
+  const secondary = sources.length > 0 && sources[0]!.id !== input.sourceId;
+  const setCandidate = async (values: { importStatus: "ready" | "partial" | "failed"; importNote: string | null }) => {
+    if (secondary) return;
+    await db.update(tripListings).set(values).where(eq(tripListings.id, input.candidateId));
+  };
 
   try {
     const stay = await tripStay(db, input.tripId);
@@ -152,8 +159,9 @@ export async function processImport(
       const target = urlForStay(input.link, stay);
       priceBelongsToTrip = target !== input.link.canonicalUrl;
       const page = await deps.fetcher(target);
-      await db.update(listingSources).set({ lastFetchedAt: new Date(), fetchNote: page.blocked ? "blocked" : `http ${page.status}` }).where(eq(listingSources.id, input.sourceId));
-      if (page.blocked || page.status >= 400 || page.html.length < 500) {
+      const refused = page.blocked || page.status >= 400 || page.html.length < 500;
+      await db.update(listingSources).set({ lastFetchedAt: new Date(), fetchNote: refused ? "blocked" : `http ${page.status}` }).where(eq(listingSources.id, input.sourceId));
+      if (refused) {
         await setCandidate({
           importStatus: "partial",
           importNote: "Die Plattform lässt den Abruf vom Server nicht zu. Öffne das Angebot in der App, dann werden die Details auf deinem Gerät ausgelesen.",
@@ -166,33 +174,68 @@ export async function processImport(
     const blocks = extractBlocks(html);
     // Shape of what arrived, for diagnosis; never content.
     console.info(
-      `import ${input.link.platform}/${input.link.externalId}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}, reviews ${blocks.reviews.length}, captured ${blocks.captured.total} marked ${blocks.captured.marked}`,
+      `import ${input.link.platform}/${input.link.externalId}${secondary ? " (further source)" : ""}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}, reviews ${blocks.reviews.length}, captured ${blocks.captured.total} marked ${blocks.captured.marked}`,
     );
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
     const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
 
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
-    // What was read from the page replaces what was only seeded from the link.
-    const profile = mergeProfiles(current?.profile ?? emptyProfile(input.link.kind), extracted, true);
+    const before = current?.profile ?? emptyProfile(input.link.kind);
+    let profile: Profile;
+    // The price this source showed. For the leading source it is the profile's own.
+    let price: Profile["price"];
+    if (secondary) {
+      // Fill gaps only. Name, text, hints, pictures and price stay those of the advert that was shared.
+      const { title: _t, summary: _s, highlights: _h, warnings: _w, price: _p, reviews: _r, reviewSummary: _rs, uncertain: _u, coverImageUrl: _c, ...facts } = extracted;
+      profile = mergeProfiles(before, before.photos.length ? { ...facts, photos: [] } : facts);
+      price = structuredClone(extracted.price);
+    } else {
+      // What was read from the page replaces what was only seeded from the link.
+      profile = mergeProfiles(before, extracted, true);
+      price = profile.price;
+    }
     if (priceBelongsToTrip) {
       // The page was asked for the trip's dates and party, so whatever price it showed belongs to those,
       // not to what the sharer had selected in the link.
-      profile.price.startDate = stay.startDate;
-      profile.price.endDate = stay.endDate;
-      profile.price.nights = nightsBetween(stay.startDate, stay.endDate);
-      if (stay.adults !== null) profile.price.persons = stay.adults + (stay.children ?? 0);
+      price.startDate = stay.startDate;
+      price.endDate = stay.endDate;
+      price.nights = nightsBetween(stay.startDate, stay.endDate);
+      if (stay.adults !== null) price.persons = stay.adults + (stay.children ?? 0);
     }
     if (input.link.searchWindow && !fromDevice) {
       // Whatever was read, a window of possible dates is not a stay.
-      profile.price.startDate = null;
-      profile.price.endDate = null;
-      profile.price.nights = null;
+      price.startDate = null;
+      price.endDate = null;
+      price.nights = null;
     }
-    profile.price.nights ??= nightsBetween(profile.price.startDate, profile.price.endDate);
-    // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
-    // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
-    const fromLink = priceBelongsToTrip ? (current?.profile.warnings ?? []).filter((w) => !input.link.warnings.includes(w)) : (current?.profile.warnings ?? []);
-    profile.warnings = [...new Set([...extracted.warnings, ...fromLink])].slice(0, 5);
+    price.nights ??= nightsBetween(price.startDate, price.endDate);
+    if (!secondary) {
+      // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
+      // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
+      const fromLink = priceBelongsToTrip ? before.warnings.filter((w) => !input.link.warnings.includes(w)) : before.warnings;
+      profile.warnings = [...new Set([...extracted.warnings, ...fromLink])].slice(0, 5);
+    }
+
+    // Reviews are kept per source and put together anew each time, so reading one platform again
+    // never loses what another one said.
+    const own = { title: extracted.title, rating: extracted.rating, reviews: extracted.reviews, reviewSummary: extracted.reviewSummary };
+    const perSource = sources.map((s, i) => {
+      if (s.id === input.sourceId) return { platform: s.platform, extract: own };
+      if (s.extract) return { platform: s.platform, extract: s.extract };
+      // Read before sources kept their own share: what the profile holds belongs to the leading source.
+      return { platform: s.platform, extract: i === 0 ? { title: before.title, rating: before.rating, reviews: before.reviews.filter((r) => !r.platform || r.platform === s.platform), reviewSummary: before.reviewSummary } : null };
+    });
+    profile.reviews = perSource.flatMap((s) => (s.extract?.reviews ?? []).map((r) => ({ ...r, platform: s.platform }))).slice(0, 160);
+    const told = perSource.filter((s) => s.extract?.reviewSummary.summary || s.extract?.reviews.length);
+    const leading = perSource[0]?.extract?.reviewSummary;
+    profile.reviewSummary = leading?.summary ? leading : (told[0]?.extract?.reviewSummary ?? profile.reviewSummary);
+    if (told.length > 1 && deps.summarizer) {
+      const overall = await deps.summarizer(told.map((s) => ({ platform: s.platform, rating: s.extract!.rating, summary: s.extract!.reviewSummary, reviews: s.extract!.reviews }))).catch((err: unknown) => {
+        console.warn(`reviews: no joint summary for ${input.link.platform}/${input.link.externalId}: ${err instanceof Error ? err.name : "error"}`);
+        return null;
+      });
+      if (overall?.summary) profile.reviewSummary = overall;
+    }
 
     await db
       .update(listings)
@@ -210,35 +253,35 @@ export async function processImport(
       .where(eq(listings.id, input.listingId));
     await db
       .update(listingSources)
-      .set({ provenance: { ...provenance, stay: "Link", details: fromDevice ? "Auf dem Gerät ausgelesen" : "Abruf vom Server" } })
+      .set({ extract: own, provenance: { ...provenance, stay: "Link", details: fromDevice ? "Auf dem Gerät ausgelesen" : "Abruf vom Server" }, ...(fromDevice ? { fetchNote: "device" } : {}) })
       .where(eq(listingSources.id, input.sourceId));
 
     // A price belongs to the trip only if it is for one of the trip's periods. A price that merely
     // came along with a shared link for other dates stays unassigned, even when the device sent the page.
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, input.tripId));
-    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === profile.price.startDate && o.endDate === profile.price.endDate);
-    const totalCents = profile.price.totalEur !== null ? Math.round(profile.price.totalEur * 100) : null;
+    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate);
+    const totalCents = price.totalEur !== null ? Math.round(price.totalEur * 100) : null;
     const [latest] = await db.select().from(priceSnapshots).where(eq(priceSnapshots.listingSourceId, input.sourceId)).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
     const unchanged =
       latest !== undefined &&
       latest.totalCents === totalCents &&
-      latest.startDate === profile.price.startDate &&
-      latest.endDate === profile.price.endDate &&
-      latest.kind === (profile.price.kind ?? "total") &&
+      latest.startDate === price.startDate &&
+      latest.endDate === price.endDate &&
+      latest.kind === (price.kind ?? "total") &&
       (latest.tripId === input.tripId) === forTrip;
     // Reading the same price again is not a new observation.
     if (totalCents !== null && !unchanged) {
       await db.insert(priceSnapshots).values({
         listingSourceId: input.sourceId,
         tripId: forTrip ? input.tripId : null,
-        startDate: profile.price.startDate,
-        endDate: profile.price.endDate,
-        nights: profile.price.nights,
-        persons: profile.price.persons,
+        startDate: price.startDate,
+        endDate: price.endDate,
+        nights: price.nights,
+        persons: price.persons,
         totalCents,
-        rangeMaxCents: profile.price.rangeMaxEur !== null ? Math.round(profile.price.rangeMaxEur * 100) : null,
-        kind: profile.price.kind ?? "total",
-        breakdown: profile.price.extraCosts.map((c) => ({ item: c.item, amountCents: c.amountEur !== null ? Math.round(c.amountEur * 100) : null })),
+        rangeMaxCents: price.rangeMaxEur !== null ? Math.round(price.rangeMaxEur * 100) : null,
+        kind: price.kind ?? "total",
+        breakdown: price.extraCosts.map((c) => ({ item: c.item, amountCents: c.amountEur !== null ? Math.round(c.amountEur * 100) : null })),
         capture: fromDevice ? "device" : "import",
         capturedBy: input.userId,
       });
@@ -251,6 +294,7 @@ export async function processImport(
         ? "Dieser Link kann nicht abgerufen werden."
         : "Beim Auslesen ist ein Fehler aufgetreten. Die Angaben lassen sich von Hand ergänzen.";
     await setCandidate({ importStatus: "failed", importNote: note });
+    if (secondary) await db.update(listingSources).set({ fetchNote: "failed" }).where(eq(listingSources.id, input.sourceId));
     if (!(err instanceof UnsafeUrlError)) throw err;
   }
 }

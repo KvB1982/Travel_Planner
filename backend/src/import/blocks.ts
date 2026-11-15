@@ -243,6 +243,8 @@ export function thumbFor(url: string): string | null {
       return u.toString();
     }
     // HomeToGo and Casamundo name the size in the first path segment.
+    // Galleries often hand out the medium size only; that is its own preview.
+    if (u.hostname === "cdn.hometogo.net" && u.pathname.startsWith("/medium/")) return u.toString();
     if (u.hostname === "cdn.hometogo.net" && u.pathname.startsWith("/large/")) {
       u.pathname = u.pathname.replace(/^\/large\//, "/medium/");
       return u.toString();
@@ -572,7 +574,7 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
   }
 
   if (blocks.reviews.length) {
-    profile.reviews = blocks.reviews.map((r) => ({ id: reviewId(r), ...r }));
+    profile.reviews = blocks.reviews.map((r) => ({ id: reviewId(r), ...r, platform: null }));
     provenance.reviews = `${profile.reviews.length} Bewertungen aus den Seitendaten`;
   }
 
