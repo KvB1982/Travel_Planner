@@ -283,10 +283,10 @@ describe("claudeExtractor", () => {
       },
     } as never;
     const { profile, note } = await claudeExtractor({ apiKey: "x", model: "m", client })({ blocks: { ...blocks, capturedReviews: captured }, link, baseline: { ...baseline, reviews: [] } });
-    expect(calls.sort()).toEqual(["read", "sort", "sort", "sort"]);
+    expect(calls.sort()).toEqual(["read", "sort", "sort", "sort", "sort", "sort"]);
     expect(note).toMatch(/abgeschnitten/);
-    // 45 blocks, one in each sorted batch dropped as no review (two batches), the failed batch kept whole.
-    expect(profile.reviews).toHaveLength(43);
+    // 45 blocks in five batches, one in each sorted batch dropped as no review, the failed batch kept whole.
+    expect(profile.reviews).toHaveLength(41);
     expect(profile.reviews[0]).toMatchObject({ author: "Gast", rating: 5, text: "Ein wirklich schöner Aufenthalt Nummer 0, gerne wieder." });
     expect(profile.reviews.find((r) => r.text.includes("Nummer 25,"))).toMatchObject({ author: null, text: expect.stringContaining("Gast 25") });
   });
