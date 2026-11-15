@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { profileSchema } from "../src/import/profile.js";
+import { germanCountry } from "../src/import/country.js";
 import { reviewsFromBlocks } from "../src/import/extract.js";
 import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
@@ -282,10 +283,10 @@ describe("claudeExtractor", () => {
       },
     } as never;
     const { profile, note } = await claudeExtractor({ apiKey: "x", model: "m", client })({ blocks: { ...blocks, capturedReviews: captured }, link, baseline: { ...baseline, reviews: [] } });
-    expect(calls.sort()).toEqual(["read", "sort", "sort", "sort"]);
+    expect(calls.sort()).toEqual(["read", "sort", "sort", "sort", "sort", "sort"]);
     expect(note).toMatch(/abgeschnitten/);
-    // 45 blocks, one in each sorted batch dropped as no review (two batches), the failed batch kept whole.
-    expect(profile.reviews).toHaveLength(43);
+    // 45 blocks in five batches, one in each sorted batch dropped as no review, the failed batch kept whole.
+    expect(profile.reviews).toHaveLength(41);
     expect(profile.reviews[0]).toMatchObject({ author: "Gast", rating: 5, text: "Ein wirklich schöner Aufenthalt Nummer 0, gerne wieder." });
     expect(profile.reviews.find((r) => r.text.includes("Nummer 25,"))).toMatchObject({ author: null, text: expect.stringContaining("Gast 25") });
   });
@@ -362,5 +363,17 @@ describe("cost items in whatever shape the model chose", () => {
       { item: "Strom", amountEur: null, note: "nach Verbrauch" },
       { item: "Bettwäsche", amountEur: 15, note: "pro Person" },
     ]);
+  });
+});
+
+describe("country names", () => {
+  it("come out in one German spelling", () => {
+    for (const raw of ["Croatia", "HR", "Hrvatska", "kroatien", " Croatie "]) expect(germanCountry(raw)).toBe("Kroatien");
+    expect(germanCountry("Spain")).toBe("Spanien");
+    expect(germanCountry("United States")).toBe("Vereinigte Staaten");
+    expect(germanCountry("Türkei")).toBe("Türkei");
+    expect(germanCountry("Atlantis")).toBe("Atlantis");
+    expect(germanCountry(null)).toBeNull();
+    expect(mergeProfiles(emptyProfile(), { country: "Italy" }).country).toBe("Italien");
   });
 });
