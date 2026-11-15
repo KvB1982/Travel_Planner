@@ -173,6 +173,28 @@ describe("import", () => {
     expect(detail.body.prices[0]).toMatchObject({ totalCents: 462000, capture: "device", tripId: s.tripId });
   });
 
+  it("does not pass a link's price off as the price of a trip with other dates, and records it once", async () => {
+    const s = await setup({ fetcher: async () => page(fixture("blocked.html"), { status: 403, blocked: true }) });
+    const other = await s.call("POST", "/trips", s.owner, { title: "Pfingsten 2027", adults: 4, children: 4, dateOptions: [{ startDate: "2027-05-15", endDate: "2027-05-29" }] });
+    const tripId = other.body.trip.id as string;
+    const res = await s.call("POST", `/trips/${tripId}/imports`, s.owner, { url: CASAMUNDO });
+    await s.ctx.queue.idle();
+    const id = res.body.candidateId as string;
+    for (let i = 0; i < 2; i++) {
+      await s.call("POST", `/candidates/${id}/capture`, s.owner, { html: fixture("novasol.html") });
+      await s.ctx.queue.idle();
+    }
+    const detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    // The August price from the link is still known, but belongs to no trip.
+    expect(detail.body.prices).toHaveLength(1);
+    expect(detail.body.prices[0]).toMatchObject({ totalCents: 462000, startDate: "2027-08-21", tripId: null });
+    const listed = await s.call("GET", `/trips/${tripId}/candidates`, s.owner);
+    expect(listed.body.candidates[0].price).toMatchObject({ forThisTrip: false });
+    // Pictures come with the detail, first one is the cover.
+    expect(detail.body.photos.map((p: { url: string }) => p.url)).toEqual(["https://images.example.test/1.jpg", "https://images.example.test/2.jpg", "https://images.example.test/3.jpg"]);
+    expect(detail.body.photos[0]).toMatchObject({ id: expect.stringMatching(/^[0-9a-f]{16}$/), thumbUrl: null, caption: null });
+  });
+
   it("uses page content sent along with the link instead of fetching", async () => {
     const s = await setup({
       fetcher: async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
-import { claudeExtractor, combine } from "../src/import/extract.js";
+import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
 import { assertPublicUrl, looksBlocked, UnsafeUrlError } from "../src/import/fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles } from "../src/import/profile.js";
 import { analyzeLink } from "../src/import/url.js";
@@ -106,6 +106,45 @@ describe("what real pages taught us", () => {
     expect(profileFromBlocks(extractBlocks(html), "hotel").profile.maxGuests).toBeNull();
   });
 
+  it("does not take a portal's home page title and picture for the advert", () => {
+    const html = `<html><head><title>Ferienhäuser online buchen – Portal</title>
+      <meta property="og:title" content="Ferienhäuser online buchen – Portal"><meta property="og:image" content="https://portal.example.test/collage.jpg">
+      <meta property="og:url" content="https://www.portal.example.test/"></head><body>Villa Sonnenschein, 4 Schlafzimmer</body></html>`;
+    const blocks = extractBlocks(html);
+    const { profile } = profileFromBlocks(blocks, "vacation_home");
+    expect(profile.title).toBeNull();
+    expect(profile.coverImageUrl).toBeNull();
+    expect(modelInput(blocks)).not.toContain("online buchen");
+    expect(modelInput(blocks)).toContain("Villa Sonnenschein");
+    // A page that names its own address keeps its metadata.
+    const own = extractBlocks(html.replace('test/"', 'test/rental/abc"'));
+    expect(profileFromBlocks(own, "vacation_home").profile.title).toMatch(/online buchen/);
+  });
+
+  it("collects the advert's gallery, one address per picture, without icons or other adverts", () => {
+    const pic = (n: number) => ({ id: n, baseUrl: `https://a0.muscache.com/im/pictures/p${n}.jpeg`, thumb: `https://a0.muscache.com/im/pictures/p${n}.jpeg?im_w=240`, accessibilityLabel: `Bild ${n}` });
+    const state = { listing: { photos: [1, 2, 3, 4, 5].map(pic), host: { images: ["https://a0.muscache.com/im/users/avatar.jpg"] } }, similar: [{ images: ["https://a0.muscache.com/im/pictures/other.jpeg"] }] };
+    const html = `<html><head><script id="data-deferred-state-0" type="application/json">${JSON.stringify(state)}</script></head>
+      <body><img src="https://cdn.example.test/logo.png"><p>Villa</p></body></html>`;
+    const blocks = extractBlocks(html);
+    expect(blocks.photos.map((p) => p.url)).toEqual([1, 2, 3, 4, 5].map((n) => `https://a0.muscache.com/im/pictures/p${n}.jpeg`));
+    expect(blocks.photos[0]!.caption).toBe("Bild 1");
+    const { profile } = profileFromBlocks(blocks, "vacation_home");
+    expect(profile.photoCount).toBe(5);
+    expect(profile.coverImageUrl).toBe("https://a0.muscache.com/im/pictures/p1.jpeg");
+    expect(profile.photos[0]).toMatchObject({ thumbUrl: "https://a0.muscache.com/im/pictures/p1.jpeg?im_w=720", caption: "Bild 1" });
+    // The model's input stays free of picture lists.
+    expect(modelInput(blocks)).not.toContain("muscache");
+  });
+
+  it("falls back to the pictures in a page rendered on the device", () => {
+    const img = (n: number) => `<img srcset="https://img.example.test/h${n}_400.jpg 400w, https://img.example.test/h${n}_1600.jpg 1600w" alt="Zimmer ${n}">`;
+    const html = `<html><body><img src="https://img.example.test/icon-pool.png" width="24">${[1, 2, 3, 4].map(img).join("")}<img src="/relative.jpg"></body></html>`;
+    const { photos } = extractBlocks(html);
+    expect(photos.map((p) => p.url)).toEqual([1, 2, 3, 4].map((n) => `https://img.example.test/h${n}_1600.jpg`));
+    expect(photos[1]!.caption).toBe("Zimmer 2");
+  });
+
   it("finds state that a page assigns in an inline script", () => {
     const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
     const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");
@@ -165,6 +204,19 @@ describe("claudeExtractor", () => {
       expect(profile).toEqual(baseline);
       expect(note).toMatch(/strukturierte Daten/);
     }
+  });
+
+  it("drops a malformed field instead of the whole answer", () => {
+    const answer = { ...emptyProfile(), title: "Haus", bedrooms: "drei", maxGuests: 8, highlights: ["Pool", 7, "Meerblick"], price: { ...emptyProfile().price, totalEur: "2.646 €", nights: 7 } };
+    const result = parseLenient(answer);
+    expect(result?.profile).toMatchObject({ title: "Haus", bedrooms: null, maxGuests: 8, highlights: ["Pool", "Meerblick"], price: { totalEur: null, nights: 7 } });
+    expect(result?.dropped.map((d) => d.split(":")[0]).sort()).toEqual(["bedrooms", "highlights.1", "price.totalEur"]);
+    // Keys the model left out, and an object where it wrote null, fall back to empty values.
+    const sparse = parseLenient({ title: "Haus", amenities: { pool: true }, price: null, rating: { value: 4.5 } });
+    expect(sparse?.profile).toMatchObject({ title: "Haus", bedrooms: null, amenities: { pool: true, wifi: null }, price: { totalEur: null, extraCosts: [] }, rating: { value: 4.5, count: null }, warnings: [] });
+    expect(sparse?.dropped).toEqual([]);
+    expect(parseLenient("kein Objekt")).toBeNull();
+    expect(parseLenient([1])).toBeNull();
   });
 
   it("never takes coordinates or ratings from prose", () => {

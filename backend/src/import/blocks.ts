@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { parse } from "node-html-parser";
 import { amenityKeys, emptyProfile, type ListingKind, type Profile } from "./profile.js";
 
@@ -9,6 +10,109 @@ export interface PageBlocks {
   /** Platform state objects such as __NEXT_DATA__, already pruned. */
   state: Record<string, unknown>;
   text: string;
+  /** Picture addresses of the advert in page order, already cleaned of icons and duplicates. */
+  photos: PagePhoto[];
+}
+
+export interface PagePhoto {
+  url: string;
+  caption: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+const IMAGE_KEYS = /^(images?|photos?|pictures?|gallery|galleryImages|media|mediaItems|imageUrls?|photoUrls?|imageList|photoList)$/i;
+const NOT_A_PHOTO = /logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
+const IMAGE_EXT = /\.(jpe?g|png|webp|avif|heic)(\?|$)/i;
+/** Preferred key when one picture comes in several sizes. */
+const SIZE_KEYS = ["original", "originalUrl", "full", "fullUrl", "xxl", "xl", "large", "largeUrl", "big", "url", "baseUrl", "src", "href", "contentUrl", "uri", "path", "medium"];
+
+const httpUrl = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const s = v.trim().replace(/^\/\//, "https://");
+  return /^https?:\/\/[^\s"'<>]+$/i.test(s) && s.length < 1500 ? s : null;
+};
+
+/** One picture out of a list entry, which is either an address or an object describing it in several sizes. */
+function photoFrom(item: unknown): PagePhoto | null {
+  const direct = httpUrl(item);
+  if (direct) return { url: direct, caption: null, width: null, height: null };
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const o = item as Record<string, unknown>;
+  let url: string | null = null;
+  for (const key of SIZE_KEYS) if ((url = httpUrl(o[key]))) break;
+  if (!url) {
+    // Unknown shape: the first address anywhere inside, one or two levels down.
+    for (const v of Object.values(o)) {
+      url = httpUrl(v) ?? (v && typeof v === "object" ? (Object.values(v).map(httpUrl).find(Boolean) ?? null) : null);
+      if (url && (IMAGE_EXT.test(url) || /im(a)?ge?s?|photo|media|cdn/i.test(url))) break;
+      url = null;
+    }
+  }
+  if (!url) return null;
+  const text = (v: unknown) => (typeof v === "string" && v.trim() && v.length < 200 && !httpUrl(v) ? v.trim() : null);
+  const size = (v: unknown) => (typeof v === "number" && v > 0 ? v : null);
+  return { url, caption: text(o.caption) ?? text(o.title) ?? text(o.alt) ?? text(o.accessibilityLabel) ?? text(o.description), width: size(o.width), height: size(o.height) };
+}
+
+/** Every list of pictures in a state object. The advert's own gallery is, as a rule, the longest one. */
+function photoLists(root: unknown): PagePhoto[][] {
+  const lists: PagePhoto[][] = [];
+  const queue: unknown[] = [root];
+  for (let i = 0; i < queue.length && i < 50_000; i++) {
+    const node = queue[i];
+    if (!node || typeof node !== "object") continue;
+    if (Array.isArray(node)) {
+      queue.push(...node);
+      continue;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (IMAGE_KEYS.test(key) && Array.isArray(value)) {
+        const found = value.map(photoFrom).filter((p): p is PagePhoto => p !== null);
+        if (found.length) lists.push(found);
+      }
+      queue.push(value);
+    }
+  }
+  return lists;
+}
+
+function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
+  const seen = new Set<string>();
+  const out: PagePhoto[] = [];
+  for (const photo of candidates) {
+    if (NOT_A_PHOTO.test(photo.url)) continue;
+    let key: string;
+    try {
+      const u = new URL(photo.url);
+      // The same picture in another size differs only in its query.
+      key = `${u.host}${u.pathname}`;
+    } catch {
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(photo);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** A stable id for a picture, so the app can cache it across imports. */
+export const photoId = (url: string): string => createHash("sha256").update(url).digest("hex").slice(0, 16);
+
+/** A smaller rendition from the platform's own image service, where its address scheme is known. */
+export function thumbFor(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (/(^|\.)muscache\.com$/.test(u.hostname)) {
+      u.searchParams.set("im_w", "720");
+      return u.toString();
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 const DROP_KEYS = /^(images?|photos?|pictures?|media|gallery|reviews?|breadcrumbs?|seo|translations?|i18n|tracking|analytics|footer|header|navigation|menu)$/i;
@@ -84,8 +188,13 @@ export function extractBlocks(html: string): PageBlocks {
     if (key && content && /^(og:|twitter:|description$)/.test(key) && !(key in og)) og[key] = content;
   }
 
+  const canonical = root.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  if (canonical) og.canonical = canonical;
+
   const jsonLd: Record<string, unknown>[] = [];
   const state: Record<string, unknown> = {};
+  /** State before pruning: pruning drops exactly the picture lists that are wanted here. */
+  const rawStates: unknown[] = [];
   for (const script of root.querySelectorAll("script")) {
     const type = script.getAttribute("type") ?? "";
     const id = script.getAttribute("id") ?? "";
@@ -93,27 +202,79 @@ export function extractBlocks(html: string): PageBlocks {
       flattenJsonLd(safeJson(script.rawText), jsonLd);
     } else if (id === "__NEXT_DATA__") {
       const data = safeJson(script.rawText) as { props?: { pageProps?: unknown } } | undefined;
+      rawStates.push(data?.props?.pageProps);
       const pruned = prune(data?.props?.pageProps);
       if (pruned) state.nextData = pruned;
     } else if (/^data-deferred-state/.test(id)) {
       // Airbnb
-      const pruned = prune(safeJson(script.rawText));
+      const raw = safeJson(script.rawText);
+      rawStates.push(raw);
+      const pruned = prune(raw);
       if (pruned) state[id] = pruned;
     } else if (id === "js-hotel-data" || (type === "application/json" && /hotel|listing|property|offer/i.test(id))) {
-      const pruned = prune(safeJson(script.rawText));
+      const raw = safeJson(script.rawText);
+      rawStates.push(raw);
+      const pruned = prune(raw);
       if (pruned) state[id] = pruned;
     } else if (!type || /javascript|module/i.test(type)) {
       for (const [name, value] of inlineState(script.rawText)) {
+        rawStates.push(value);
         const pruned = prune(value);
         if (pruned && !(name in state)) state[name] = pruned;
       }
     }
   }
 
-  root.querySelectorAll("script,style,noscript,svg,template,iframe").forEach((n) => n.remove());
+  const title = root.querySelector("title")?.text.trim() || null;
+  const imgs = root.querySelectorAll("img");
+  root.querySelectorAll("script,style,noscript,svg,template,iframe,title").forEach((n) => n.remove());
   const text = root.structuredText.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 
-  return { title: root.querySelector("title")?.text.trim() || null, og, jsonLd, state, text };
+  // Pictures: the lodging's own JSON-LD first, then the longest gallery in the page state.
+  const candidates: PagePhoto[] = [];
+  for (const node of jsonLd) {
+    if (!LODGING_TYPES.test(typeOf(node)) || /Product/i.test(typeOf(node))) continue;
+    candidates.push(...[node.image, node.photo].flat().map(photoFrom).filter((p): p is PagePhoto => p !== null));
+  }
+  const galleries = rawStates.flatMap(photoLists).sort((a, b) => b.length - a.length);
+  if (galleries[0]) candidates.push(...galleries[0]);
+  let photos = cleanPhotos(candidates);
+
+  if (photos.length < 3) {
+    // A page rendered on the device has its pictures in the document itself.
+    const fromDom: PagePhoto[] = [];
+    for (const img of imgs) {
+      const srcset = (img.getAttribute("srcset") ?? img.getAttribute("data-srcset") ?? "").split(",").map((part) => part.trim().split(/\s+/));
+      const largest = srcset.filter((p) => p[0]).sort((a, b) => (parseFloat(b[1] ?? "0") || 0) - (parseFloat(a[1] ?? "0") || 0))[0]?.[0];
+      const url = httpUrl(largest) ?? httpUrl(img.getAttribute("src")) ?? httpUrl(img.getAttribute("data-src"));
+      const width = Number(img.getAttribute("width")) || null;
+      if (!url || (width !== null && width < 200)) continue;
+      fromDom.push({ url, caption: img.getAttribute("alt")?.trim() || null, width: null, height: null });
+    }
+    const merged = cleanPhotos([...photos, ...fromDom]);
+    if (merged.length >= 3) photos = merged;
+  }
+
+  return { title, og, jsonLd, state, text, photos };
+}
+
+/**
+ * Some portals serve every page with the metadata of their home page (title,
+ * preview image, og:url pointing at "/") and fill in the advert by script.
+ * Such a title and image say nothing about the advert.
+ */
+export function hasPortalMetadata(blocks: PageBlocks): boolean {
+  for (const key of ["og:url", "canonical"]) {
+    const value = blocks.og[key];
+    if (!value) continue;
+    try {
+      // Relative values resolve against a placeholder; only the path matters.
+      if (new URL(value, "https://placeholder.invalid").pathname.replace(/\/+$/, "") === "") return true;
+    } catch {
+      // Not a URL: no evidence either way.
+    }
+  }
+  return false;
 }
 
 const LODGING_TYPES = /VacationRental|LodgingBusiness|Hotel|Resort|House|Apartment|Accommodation|BedAndBreakfast|Campground|Product/i;
@@ -229,18 +390,27 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
     provenance.rating = `JSON-LD ${typeOf(rated)}`;
   }
 
-  if (!profile.title) {
+  if (blocks.photos.length) {
+    profile.photos = blocks.photos.map((p) => ({ id: photoId(p.url), url: p.url, thumbUrl: thumbFor(p.url), width: p.width, height: p.height, caption: p.caption }));
+    profile.photoCount = Math.max(profile.photoCount ?? 0, profile.photos.length);
+    profile.coverImageUrl ??= profile.photos[0]!.url;
+    provenance.photos = `${profile.photos.length} Bilder aus den Seitendaten`;
+  }
+
+  const portalMeta = hasPortalMetadata(blocks);
+  if (portalMeta) provenance.metadata = "Seite trägt nur die Angaben des Portals";
+  if (!profile.title && !portalMeta) {
     profile.title = blocks.og["og:title"] ?? blocks.title;
     if (profile.title) provenance.title = blocks.og["og:title"] ? "Open Graph" : "Seitentitel";
   }
-  if (!profile.coverImageUrl && blocks.og["og:image"]) {
+  if (!profile.coverImageUrl && blocks.og["og:image"] && !portalMeta) {
     profile.coverImageUrl = blocks.og["og:image"];
     provenance.coverImage = "Open Graph";
   }
 
   // The headline of the advert ("… · 4 Schlafzimmer · 4 Betten · 4 Badezimmer") is what visitors see,
   // and platforms keep it more reliably than their JSON-LD.
-  const headline = [blocks.og["og:title"], blocks.og["og:description"], blocks.og["description"]].filter(Boolean).join(" · ");
+  const headline = portalMeta ? "" : [blocks.og["og:title"], blocks.og["og:description"], blocks.og["description"]].filter(Boolean).join(" · ");
   const count = (re: RegExp): number | null => {
     const m = re.exec(headline);
     return m ? Number(m[1]!.replace(",", ".")) : null;
@@ -273,8 +443,12 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
 export function modelInput(blocks: PageBlocks, limits = { state: 14_000, text: 9_000 }): string {
   const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n[gekürzt]` : s);
   const parts: string[] = [];
-  if (blocks.title) parts.push(`<title>${blocks.title}</title>`);
-  if (Object.keys(blocks.og).length) parts.push(`<meta>\n${JSON.stringify(blocks.og)}\n</meta>`);
+  if (hasPortalMetadata(blocks)) {
+    parts.push("<note>Titel, Beschreibung und Vorschaubild dieser Seite gehören zum Portal, nicht zum Angebot, und sind deshalb weggelassen.</note>");
+  } else {
+    if (blocks.title) parts.push(`<title>${blocks.title}</title>`);
+    if (Object.keys(blocks.og).length) parts.push(`<meta>\n${JSON.stringify(blocks.og)}\n</meta>`);
+  }
   if (blocks.jsonLd.length) parts.push(`<json_ld>\n${cut(JSON.stringify(prune(blocks.jsonLd) ?? []), 6_000)}\n</json_ld>`);
   if (Object.keys(blocks.state).length) parts.push(`<page_state>\n${cut(JSON.stringify(blocks.state), limits.state)}\n</page_state>`);
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);

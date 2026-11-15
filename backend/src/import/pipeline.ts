@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { dateOptions, listings, listingSources, priceSnapshots, tripListings, trips } from "../db/schema.js";
 import { extractBlocks, profileFromBlocks } from "./blocks.js";
@@ -164,6 +164,10 @@ export async function processImport(
     }
 
     const blocks = extractBlocks(html);
+    // Shape of what arrived, for diagnosis; never content.
+    console.info(
+      `import ${input.link.platform}/${input.link.externalId}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}`,
+    );
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
     const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline });
 
@@ -177,6 +181,12 @@ export async function processImport(
       profile.price.endDate = stay.endDate;
       profile.price.nights = nightsBetween(stay.startDate, stay.endDate);
       if (stay.adults !== null) profile.price.persons = stay.adults + (stay.children ?? 0);
+    }
+    if (input.link.searchWindow && !fromDevice) {
+      // Whatever was read, a window of possible dates is not a stay.
+      profile.price.startDate = null;
+      profile.price.endDate = null;
+      profile.price.nights = null;
     }
     profile.price.nights ??= nightsBetween(profile.price.startDate, profile.price.endDate);
     // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
@@ -201,15 +211,29 @@ export async function processImport(
       .set({ provenance: { ...provenance, stay: "Link", details: fromDevice ? "Auf dem Gerät ausgelesen" : "Abruf vom Server" } })
       .where(eq(listingSources.id, input.sourceId));
 
-    if (profile.price.totalEur !== null) {
+    // A price belongs to the trip only if it is for one of the trip's periods. A price that merely
+    // came along with a shared link for other dates stays unassigned, even when the device sent the page.
+    const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, input.tripId));
+    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === profile.price.startDate && o.endDate === profile.price.endDate);
+    const totalCents = profile.price.totalEur !== null ? Math.round(profile.price.totalEur * 100) : null;
+    const [latest] = await db.select().from(priceSnapshots).where(eq(priceSnapshots.listingSourceId, input.sourceId)).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
+    const unchanged =
+      latest !== undefined &&
+      latest.totalCents === totalCents &&
+      latest.startDate === profile.price.startDate &&
+      latest.endDate === profile.price.endDate &&
+      latest.kind === (profile.price.kind ?? "total") &&
+      (latest.tripId === input.tripId) === forTrip;
+    // Reading the same price again is not a new observation.
+    if (totalCents !== null && !unchanged) {
       await db.insert(priceSnapshots).values({
         listingSourceId: input.sourceId,
-        tripId: fromDevice || priceBelongsToTrip ? input.tripId : null,
+        tripId: forTrip ? input.tripId : null,
         startDate: profile.price.startDate,
         endDate: profile.price.endDate,
         nights: profile.price.nights,
         persons: profile.price.persons,
-        totalCents: Math.round(profile.price.totalEur * 100),
+        totalCents,
         rangeMaxCents: profile.price.rangeMaxEur !== null ? Math.round(profile.price.rangeMaxEur * 100) : null,
         kind: profile.price.kind ?? "total",
         breakdown: profile.price.extraCosts.map((c) => ({ item: c.item, amountCents: c.amountEur !== null ? Math.round(c.amountEur * 100) : null })),

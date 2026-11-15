@@ -117,6 +117,22 @@ export const profileSchema = z.object({
 
   photoCount: nnum,
   coverImageUrl: nstr,
+  /** The advert's own pictures in page order, first is the cover. Read from page data, never by the model. */
+  photos: z
+    .array(
+      z.object({
+        id: z.string(),
+        /** Full quality original. */
+        url: z.string(),
+        /** A smaller rendition where the platform's image service offers one. */
+        thumbUrl: nstr.default(null),
+        width: nnum.default(null),
+        height: nnum.default(null),
+        caption: nstr.default(null),
+      }),
+    )
+    .max(120)
+    .default([]),
   summary: nstr,
   highlights: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
