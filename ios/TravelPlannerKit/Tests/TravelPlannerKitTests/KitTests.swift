@@ -377,11 +377,41 @@ final class PlaceTests: XCTestCase {
     }
 }
 
+final class GroupingTests: XCTestCase {
+    private func offer(_ id: String, _ country: String?, _ region: String? = nil) -> CandidateSummary {
+        CandidateSummary(id: id, addedBy: "A", listing: ListingSummary(id: "l" + id, country: country, region: region))
+    }
+
+    func testCountriesSortedWithUnknownLast() {
+        let groups = OfferGrouping.groups([offer("1", "Kroatien"), offer("2", nil), offer("3", "Italien"), offer("4", " Kroatien "), offer("5", "Kroatien")])
+        XCTAssertEqual(groups.map(\.title), ["Italien", "Kroatien", "Land unbekannt"])
+        XCTAssertEqual(groups.first?.title, "Italien")
+        XCTAssertEqual(groups.last?.title, "Land unbekannt")
+        XCTAssertEqual(groups.first { $0.country == "Kroatien" }?.offers.map(\.id), ["1", "4", "5"], "Reihenfolge innerhalb bleibt")
+    }
+
+    func testRegionsSplitOnlyWhenThereAreSeveral() {
+        let one = OfferGrouping.groups([offer("1", "Italien", "Toskana"), offer("2", "Italien", "Toskana")])
+        XCTAssertEqual(one.map(\.title), ["Italien · Toskana"])
+        let mixed = OfferGrouping.groups([offer("1", "Italien", "Toskana"), offer("2", "Italien", nil)])
+        XCTAssertEqual(mixed.map(\.title), ["Italien"], "eine Region plus unbekannt: nicht aufteilen und nichts behaupten")
+        let several = OfferGrouping.groups([offer("1", "Italien", "Toskana"), offer("2", "Italien", "Ligurien"), offer("3", "Italien", nil), offer("4", "Italien", "Toskana")])
+        XCTAssertEqual(several.map(\.title), ["Italien · Ligurien", "Italien · Toskana", "Italien"])
+        XCTAssertEqual(several[1].offers.map(\.id), ["1", "4"])
+        XCTAssertEqual(Set(several.map(\.id)).count, 3, "Abschnitte brauchen eindeutige Kennungen")
+    }
+
+    func testCountryListForFilter() {
+        XCTAssertEqual(OfferGrouping.countries(in: [offer("1", "Kroatien"), offer("2", nil), offer("3", "Italien"), offer("4", "Kroatien"), offer("5", "  ")]),
+                       ["Italien", "Kroatien"])
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()
         let trips = try await demo.trips()
-        XCTAssertEqual(trips.first?.candidateCount, 3)
+        XCTAssertEqual(trips.first?.candidateCount, 4)
         XCTAssertEqual(trips.first?.favoriteCount, 1)
 
         try await demo.vote(candidateId: "c-1", verdict: .no, veto: true)
@@ -441,9 +471,9 @@ final class DemoBackendTests: XCTestCase {
         let demo = DemoBackend()
         try await demo.delete(candidateId: "c-1")
         let list = try await demo.candidates(tripId: "t-1")
-        XCTAssertEqual(list.map(\.id), ["c-2", "c-3"])
+        XCTAssertEqual(list.map(\.id), ["c-2", "c-3", "c-5"])
         let trips = try await demo.trips()
-        XCTAssertEqual(trips.first { $0.id == "t-1" }?.candidateCount, 2)
+        XCTAssertEqual(trips.first { $0.id == "t-1" }?.candidateCount, 3)
         XCTAssertEqual(trips.first { $0.id == "t-1" }?.favoriteCount, 0)
         do {
             try await demo.delete(candidateId: "c-1")

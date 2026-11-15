@@ -11,6 +11,8 @@ struct CandidateListView: View {
     @State private var loaded = false
     @State private var error: String?
     @State private var filter: CandidateStatus?
+    /// Shows only offers of one country; nil shows all.
+    @State private var country: String?
     @State private var showAddLink = false
     @State private var link = ""
     @State private var invite: Invite?
@@ -21,9 +23,44 @@ struct CandidateListView: View {
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
+            if let country, OfferGrouping.country(of: candidate) != country { return false }
             if let filter { return candidate.status == filter }
             return candidate.status != .rejected
         }
+    }
+
+    private var countries: [String] { OfferGrouping.countries(in: candidates) }
+
+    @ViewBuilder
+    private func row(_ candidate: CandidateSummary) -> some View {
+        CandidateRow(candidate: candidate, persons: detail?.trip.persons).tag(candidate.id)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if detail?.role.canEdit ?? false {
+                    // Not `role: .destructive`: the row must stay until the question is answered.
+                    Button("Löschen", systemImage: "trash") { pendingDelete = candidate }.tint(.red)
+                }
+            }
+    }
+
+    /// Status and country, side by side above the offers. The country menu only appears when there is a choice.
+    private var filters: some View {
+        HStack(spacing: 16) {
+            Picker("Status", selection: $filter) {
+                Text("Alle offenen").tag(CandidateStatus?.none)
+                ForEach(CandidateStatus.allCases, id: \.self) { status in
+                    Text(status.label).tag(CandidateStatus?.some(status))
+                }
+            }
+            if countries.count > 1 {
+                Picker("Land", selection: $country) {
+                    Text("Alle Länder").tag(String?.none)
+                    ForEach(countries, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+            }
+            Spacer()
+        }
+        .pickerStyle(.menu)
+        .textCase(nil)
     }
 
     var body: some View {
@@ -36,26 +73,33 @@ struct CandidateListView: View {
             if let error {
                 Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.red)
             }
-            Section {
-                ForEach(visible) { candidate in
-                    CandidateRow(candidate: candidate, persons: detail?.trip.persons).tag(candidate.id)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if detail?.role.canEdit ?? false {
-                                // Not `role: .destructive`: the row must stay until the question is answered.
-                                Button("Löschen", systemImage: "trash") { pendingDelete = candidate }.tint(.red)
-                            }
-                        }
-                }
-            } header: {
+            let groups = OfferGrouping.groups(visible)
+            if groups.count > 1 {
+                // Searching in several countries or regions at once: one section each.
                 if !candidates.isEmpty {
-                    Picker("Anzeigen", selection: $filter) {
-                        Text("Alle offenen").tag(CandidateStatus?.none)
-                        ForEach(CandidateStatus.allCases, id: \.self) { status in
-                            Text(status.label).tag(CandidateStatus?.some(status))
+                    Section { EmptyView() } header: { filters }
+                }
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.offers) { row($0) }
+                    } header: {
+                        HStack {
+                            Text(group.title)
+                            Spacer()
+                            Text("\(group.offers.count)").foregroundStyle(.secondary)
                         }
+                        .font(.subheadline.weight(.semibold))
+                        .textCase(nil)
                     }
-                    .pickerStyle(.menu)
-                    .textCase(nil)
+                }
+            } else {
+                Section {
+                    ForEach(visible) { row($0) }
+                    if visible.isEmpty && !candidates.isEmpty {
+                        Text("Kein Angebot passt zu dieser Auswahl.").foregroundStyle(.secondary)
+                    }
+                } header: {
+                    if !candidates.isEmpty { filters }
                 }
             }
         }

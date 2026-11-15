@@ -80,7 +80,8 @@ public actor DemoBackend: TravelBackend {
                                         coverImageUrl: detail.listing.coverImageUrl, fillPercent: detail.listing.fillPercent,
                                         maxGuests: profile.maxGuests, bedrooms: profile.bedrooms, bathrooms: profile.bathrooms,
                                         rating: profile.rating, platforms: detail.sources.map(\.platform),
-                                        photoCount: detail.photos.map { Double($0.count) }),
+                                        photoCount: detail.photos.map { Double($0.count) },
+                                        region: profile.region),
                 price: price.map { PriceSummary(totalCents: $0.totalCents, rangeMaxCents: $0.rangeMaxCents, kind: $0.kind, nights: $0.nights,
                                                 persons: $0.persons, startDate: $0.startDate, endDate: $0.endDate,
                                                 forThisTrip: $0.tripId == tripId, capturedAt: $0.capturedAt) },
@@ -214,6 +215,7 @@ public actor DemoBackend: TravelBackend {
             var profile = Profile()
             profile.kind = .vacationHome
             profile.title = title; profile.objectType = "Ferienhaus"; profile.place = place; profile.country = country
+            profile.region = country == "Italien" ? "Toskana" : (country == "Dänemark" ? "Jütland" : nil)
             profile.lat = lat; profile.lon = lon
             profile.maxGuests = guests; profile.bedrooms = bedrooms; profile.bathrooms = baths; profile.livingAreaSqm = sqm
             profile.sleepingPlaces = guests; profile.amenities = amenities
@@ -287,6 +289,11 @@ public actor DemoBackend: TravelBackend {
                  warnings: ["Das Inserat nennt 8 Gäste, die Reise hat 8 Personen: kein Spielraum.", "Die Endreinigung ist im Preis nicht enthalten."],
                  votes: [VoteEntry(userId: "u-2", name: "Anna", verdict: .no, veto: false)], fill: 78),
             blocked,
+            home("c-5", trip: "t-1", title: "Villa Gradina am Strand", place: "Vela Luka", country: "Kroatien", lat: 42.9614, lon: 16.7189,
+                 platform: "airbnb", guests: 10, bedrooms: 5, baths: 4, sqm: 230, total: 574_000, start: "2027-05-15", end: "2027-05-29", nights: 14,
+                 persons: 8, status: .new,
+                 amenities: ["pool": true, "airConditioning": true, "wifi": true, "dishwasher": true, "grill": true, "seaView": true, "parking": true],
+                 fill: 74),
             home("c-4", trip: "t-2", title: "Reetdachhaus hinter der Düne", place: "Henne Strand", country: "Dänemark", lat: 55.7372, lon: 8.1832,
                  platform: "novasol", guests: 12, bedrooms: 6, baths: 3, sqm: 240, total: 398_000, start: "2027-07-31", end: "2027-08-14", nights: 14,
                  persons: 11, status: .new,
