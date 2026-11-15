@@ -1,7 +1,7 @@
 # Konzept: Ferienhaus-Planer für Familie und Freunde
 
 **Arbeitstitel:** Travel Planner
-**Stand:** 15.11.2026, Version 0.3 (Server-Bestandsaufnahme eingearbeitet)
+**Stand:** 15.11.2026, Version 0.4 (Machbarkeitstest Import, Erweiterung um Hotels und Pauschalreisen)
 **Status:** Konzeptphase, noch keine Implementierung
 
 ---
@@ -41,6 +41,8 @@ Die Kernempfehlungen in Kürze:
 > In unter zehn Sekunden vom Fund zum gespeicherten, vergleichbaren Steckbrief. In unter zwei Minuten vom Vergleich zur Abstimmung in der Gruppe.
 
 ### 2.3 Abgrenzung
+
+Der Schwerpunkt liegt auf Ferienhäusern. **Hotels und Pauschalreisen** können ebenfalls gesammelt und verglichen werden, weil je nach Reise beides infrage kommt (Entscheidung vom 15.11.2026). Sie erhalten einen eigenen Steckbrief, siehe 4.2.
 
 Die App **bucht nicht** und **ersetzt keine Plattform**. Gebucht wird immer beim Anbieter, die App führt per Link dorthin. Das hält das Projekt rechtlich und technisch schlank.
 
@@ -126,6 +128,16 @@ Herzstück der Vergleichbarkeit. Jedes Haus wird, unabhängig von der Plattform,
 
 Der „echte Gesamtpreis" ist ein wesentlicher Mehrwert. Gerade bei dänischen und niederländischen Anbietern kommen Strom, Wasser und Endreinigung oft erst nachträglich dazu und verzerren jeden Vergleich.
 
+**Hotels und Pauschalreisen** nutzen dasselbe Raster für Basis, Lage, Bewertung, Kosten und Notizen. Statt Kapazität und Hausausstattung treten diese Felder hinzu:
+
+| Bereich | Felder |
+|---|---|
+| **Hotel** | Sterne, Zimmertyp, Verpflegung, Hotelausstattung (Pools, Kinderbetreuung, Strandlage) |
+| **Reise** | Veranstalter, Abflughafen, Flugzeiten, Direktflug, Reisedauer, Transfer enthalten |
+| **Preis** | Reisepreis gesamt für alle Personen, Preis pro Person, Spanne je Abflugtermin |
+
+In der Vergleichsansicht werden Ferienhäuser und Pauschalreisen getrennt gegenübergestellt. Gemeinsam vergleichbar bleiben Gesamtkosten der Reise, Lage, Bewertung und das Stimmungsbild der Gruppe. Bei Ferienhäusern rechnet die App dafür auf Wunsch geschätzte Anreisekosten hinzu.
+
 ### 4.3 Import und Erfassung
 
 | Funktion | Prio |
@@ -175,7 +187,7 @@ Der „echte Gesamtpreis" ist ein wesentlicher Mehrwert. Gerade bei dänischen u
 | Automatische regelmäßige Prüfung für Favoriten, mit Mitteilung bei Änderungen | K |
 | Hinweis „Nicht mehr verfügbar" | K |
 
-Zur Machbarkeit der automatischen Prüfung siehe Abschnitt 6.
+Zur Machbarkeit der automatischen Prüfung siehe Abschnitt 6.4.
 
 ### 4.7 Nach der Entscheidung
 
@@ -241,7 +253,32 @@ Statt Plattformen massenhaft automatisiert abzufragen, verarbeitet die App nur S
 
 Der Vorteil der KI-Extraktion: Es muss **kein eigener Parser pro Plattform** gepflegt werden. Auch die Webseite eines privaten Vermieters wird verstanden. Ändert eine Plattform ihr Layout, funktioniert der Import in aller Regel weiter. Die Kosten liegen bei einem kleinen, schnellen Modell im Bereich von etwa einem Cent pro Inserat.
 
-### 6.3 Preis- und Verfügbarkeitsverfolgung
+### 6.3 Ergebnis des Machbarkeitstests
+
+Am 15.11.2026 wurden fünf echte Links vom Server aus getestet, mit einfachem Abruf und mit einem echten Browser, je Seite höchstens fünf Abrufe. Bot-Sperren wurden nicht umgangen.
+
+| Plattform | Abruf vom Server | Ergebnis | Füllgrad des Steckbriefs |
+|---|---|---|---|
+| **Novasol** | Vollständig, schon per einfachem Abruf | Fast alle Felder aus strukturierten Daten, inklusive Bettenaufteilung und Nebenkosten. Es fehlen Bewertungen und der Preis für einen konkreten Zeitraum | 74 % |
+| **Airbnb** | Vollständig, Gesamtpreis nur mit echtem Browser | Stammdaten strukturiert, Ausstattung und Flächen nur aus dem Text des Gastgebers. Nur ein Teil der Ausstattung sichtbar | 71 % |
+| **Check24** (Pauschalreise) | Vollständig, Preise nur mit echtem Browser | Hoteldaten strukturiert, Preis, Flug und Storno aus dem sichtbaren Text | 75 % |
+| **FeWo-direkt** | Gesperrt | Nur Bruchstücke. Objekt, Zeitraum und Personen aus dem Link | 43 % |
+| **Casamundo** | Gesperrt | Nichts von der Seite. Objekt, Personen und Preis aus dem Link | 19 % |
+
+**Folgerungen für die Umsetzung:**
+
+1. Der zweigleisige Ansatz ist richtig. Für Novasol, Airbnb und Check24 genügt der geteilte Link. Für FeWo-direkt und Casamundo liest die App die Seite auf dem Gerät des Nutzers aus (Stufe 2 und 3).
+2. **Links enthalten viel.** Objekt-ID, Zeitraum, Personen und teils der Preis stehen in den Parametern und werden immer ausgewertet, auch wenn die Seite gesperrt ist.
+3. **Kurzlinks aus Apps** (FeWo-direkt) führen iPhones in den App Store. Die App löst sie selbst auf.
+4. **Zeitraum und Personen der Reise einsetzen.** Geteilte Links tragen oft falsche Werte (Airbnb: ein Gast). Die App baut den Link mit den Daten der Reise neu auf, bevor sie den Preis liest.
+5. **Nur strukturierte Blöcke an die KI.** Statt der ganzen Seite mit bis zu 1,8 MB reichen rund 10.000 Zeichen. Das hält die Kosten deutlich unter einem Cent pro Inserat.
+6. **Herkunft und Unsicherheit je Feld speichern.** Angaben aus Fließtext werden markiert, Widersprüche zwischen Quellen (zum Beispiel 4 oder 8 Gäste) werden angezeigt statt verschluckt.
+7. **Schlafplätze und Betten getrennt führen.** Ein Schlafsofa im Wohnraum ist für die Zimmerverteilung etwas anderes als ein Schlafzimmer.
+8. **Füllgrad anzeigen.** Jeder Steckbrief zeigt, wie vollständig er ist und was noch nachzutragen wäre.
+
+Noch nicht getestet ist das Auslesen auf dem Gerät. Das ist erst mit dem ersten App-Prototyp möglich und wird dort der erste Prüfpunkt.
+
+### 6.4 Preis- und Verfügbarkeitsverfolgung
 
 Preise hängen von Zeitraum und Personenzahl ab und werden von den Plattformen aktiv gegen automatische Abfragen geschützt. Deshalb ein gestuftes Vorgehen:
 
@@ -251,7 +288,7 @@ Preise hängen von Zeitraum und Personenzahl ab und werden von den Plattformen a
 
 Stufe 3 ist ausdrücklich eine spätere Ausbaustufe und sollte als Experiment verstanden werden, nicht als zugesagte Funktion. Erschwerend kommt hinzu, dass der Server im Rechenzentrum steht: Anfragen von Rechenzentrums-Adressen werden von den Plattformen besonders häufig blockiert. Der verlässliche Weg bleibt deshalb die Prüfung auf dem Gerät des Nutzers (Stufe 1 und 2).
 
-### 6.4 Rechtliche Einordnung
+### 6.5 Rechtliche Einordnung
 
 Keine Rechtsberatung, aber als Orientierung:
 
@@ -437,7 +474,7 @@ erDiagram
 | **TripMember** | Teilnahme an einer Reise | Rolle (Organisator, Mitglied, Gast), Einladungsstatus |
 | **DateOption** | Zeitraum-Variante | Von, Bis, Bezeichnung |
 | **Criterion** | Muss- oder Wunsch-Kriterium der Reise | Art, Vergleichsregel, Gewicht |
-| **Listing** | Das Haus, plattformunabhängig | Alle Steckbrief-Felder, Koordinaten, Qualität der Daten pro Feld |
+| **Listing** | Das Angebot, plattformunabhängig | Angebotsart (Ferienhaus, Hotel, Pauschalreise), alle Steckbrief-Felder, typspezifische Felder für Hotel und Reise, Koordinaten, Herkunft und Unsicherheit pro Feld, Füllgrad |
 | **ListingSource** | Ein Inserat auf einer Plattform | Plattform, Link, externe ID, Rohdaten als JSON, letzter Abruf |
 | **Photo** | Bild | Datei, Raumtyp, Reihenfolge |
 | **Amenity** | Einheitlicher Ausstattungskatalog | Schlüssel, Kategorie, Bezeichnung |
@@ -485,7 +522,8 @@ Die Angaben sind grobe Richtwerte für die Entwicklung mit KI-Unterstützung und
 - Server vorbereiten: Ubuntu-VM unter Hyper-V anlegen, Docker-Stack, Tailscale Funnel, Sicherung
 - Apple-Developer-Konto, Projektgerüst, automatischer Build
 - Klickbarer Entwurf der wichtigsten Ansichten
-- **Machbarkeitstest Import** mit je fünf echten Inseraten von Airbnb, FeWo-direkt, Novasol und Check24. Dieser Test entscheidet früh über das größte Risiko.
+- **Machbarkeitstest Import:** erledigt am 15.11.2026, Ergebnis in Abschnitt 6.3
+- Prototyp für das Auslesen auf dem Gerät (FeWo-direkt, Casamundo)
 
 ### Phase 1: MVP „Sammeln und Abstimmen" (etwa 4 bis 6 Wochen)
 
@@ -551,7 +589,8 @@ Stand 15.11.2026, nach Rückmeldung des Auftraggebers:
 | **Server** | Dedizierter Hetzner-Server mit Windows 10 und Hyper-V, 32 GB Arbeitsspeicher, dort laufen bereits weitere Projekte | Eigene Ubuntu-VM mit Docker-Stack, siehe 8.3 |
 | **Domain** | von-bleichert.com bei Strato ist aktiv | Subdomain `reisen.von-bleichert.com` für Stufe 2 der Veröffentlichung, zum Start nicht nötig |
 | **Nutzerkreis** | Zunächst höchstens 20 Personen, überwiegend iPhone | Geringe Last, ein kleiner Stack genügt. Gäste-Web bleibt für die wenigen ohne iPhone in Phase 2 |
-| **Plattformen** | Airbnb, FeWo-direkt, Novasol, Check24 | Import und Machbarkeitstest werden auf diese vier ausgerichtet |
+| **Plattformen** | Airbnb, FeWo-direkt, Novasol, Check24, dazu Casamundo | Import wird auf diese ausgerichtet, Testergebnis in 6.3 |
+| **Umfang** | Neben Ferienhäusern auch Hotels und Pauschalreisen | Eigener Steckbrief je Angebotsart, siehe 4.2 |
 | **KI-Dienst** | Claude API ist freigegeben | KI-Extraktion ist fester Bestandteil des MVP |
 | **Erste Reisen** | Pfingstferien 2027 und Sommerurlaub 2027 | Zieltermin für das MVP, siehe Roadmap |
 
