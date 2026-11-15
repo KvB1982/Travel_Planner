@@ -84,7 +84,8 @@ struct CandidateDetailView: View {
         .sheet(item: $captureSource) { source in
             // Only further sources are named; without a name the page counts for the leading source, on any server.
             CaptureView(source: source, candidateID: candidateID,
-                        sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id) { pictures, reviews in
+                        sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id,
+                        expectedPictures: expectedPictures(for: source)) { pictures, reviews in
                 sentNote = "Gesendet: \(pictures == 1 ? "1 Bild" : "\(pictures) Bilder") und \(reviews == 1 ? "1 Bewertung" : "\(reviews) Bewertungen") im Wortlaut. Der Server wertet das jetzt aus, das dauert bis zu einer Minute."
             }
         }
@@ -112,6 +113,14 @@ struct CandidateDetailView: View {
                 actionError = model.message(for: error)
             }
         }
+    }
+
+    /// Airbnb hands its photos to the server in the page data, so the count seen on the device does not matter there.
+    private func expectedPictures(for source: ListingSource) -> Int? {
+        guard let detail, source.platform != "airbnb" else { return nil }
+        let stated = Int(detail.listing.profile.photoCount ?? 0)
+        let known = max(stated, detail.photos?.count ?? 0)
+        return known > 0 ? known : nil
     }
 
     private func delete() {

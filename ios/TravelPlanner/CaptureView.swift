@@ -14,9 +14,13 @@ struct CaptureView: View {
     var sourceID: String?
     /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
     var onSent: (_ pictures: Int, _ reviews: Int) -> Void = { _, _ in }
+    /// How many photos the advert is known to have, to warn before a reading that would bring far fewer.
+    /// Nil where the server gets the photos from the page itself and the count seen here does not matter.
+    var expectedPictures: Int?
 
     @State private var page = WebPage()
     @State private var sending = false
+    @State private var confirmFewPictures = false
     @State private var error: String?
 
     var body: some View {
@@ -41,7 +45,12 @@ struct CaptureView: View {
                             .contentTransition(.numericText())
                     }
                     Button {
-                        capture()
+                        // Far fewer photos than the advert has: the gallery was not flipped through. Ask before sending.
+                        if let expectedPictures, expectedPictures >= 8, page.pictureCount * 2 < expectedPictures {
+                            confirmFewPictures = true
+                        } else {
+                            capture()
+                        }
                     } label: {
                         if sending { ProgressView() } else { Text("Übernehmen").frame(maxWidth: .infinity) }
                     }
@@ -63,6 +72,13 @@ struct CaptureView: View {
         }
         .onAppear {
             if let url = URL(string: source.url) { page.load(url) }
+        }
+        .confirmationDialog("Nur \(page.pictureCount) von etwa \(expectedPictures ?? 0) Bildern geladen", isPresented: $confirmFewPictures, titleVisibility: .visible) {
+            // No cancel role: the system would hide that button here, and it is the recommended choice.
+            Button("Erst die Galerie durchblättern") {}
+            Button("Trotzdem übernehmen") { capture() }
+        } message: {
+            Text("Übernommen werden nur Bilder, die die Seite geladen hat. Öffne die Bildergalerie des Inserats und blättere einmal bis zum Ende, der Zähler unten zählt mit.")
         }
         .task {
             // Shows the count growing while the gallery is flipped through.
