@@ -97,7 +97,8 @@ export const profileSchema = z.object({
       checkOutUntil: nstr,
       minNights: nnum,
       arrivalDays: nstr,
-      smoking: nstr,
+      // Models like to answer this one with yes or no.
+      smoking: z.preprocess((v) => (v === true ? "erlaubt" : v === false ? "nicht erlaubt" : v), z.string().nullable()).default(null),
     })
     .prefault({}),
 
