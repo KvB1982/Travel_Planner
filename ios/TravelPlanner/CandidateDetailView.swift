@@ -6,12 +6,15 @@ struct CandidateDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     let candidateID: String
+    /// Called after the offer was deleted, so the surrounding view can close it.
+    var onDeleted: () -> Void = {}
 
     @State private var detail: CandidateDetail?
     @State private var error: String?
     @State private var comment = ""
     @State private var captureSource: ListingSource?
     @State private var actionError: String?
+    @State private var confirmDelete = false
 
     var body: some View {
         Group {
@@ -31,6 +34,11 @@ struct CandidateDetailView: View {
                 if Task.isCancelled { break }
                 await load()
             }
+        }
+        .confirmationDialog("Angebot löschen?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Löschen", role: .destructive) { delete() }
+        } message: {
+            Text("Das Angebot wird mit allen Stimmen und Kommentaren aus der Reise entfernt. Das lässt sich nicht rückgängig machen.")
         }
         .alert("Das hat nicht geklappt", isPresented: .init(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK") {}
@@ -66,6 +74,19 @@ struct CandidateDetailView: View {
         }
     }
 
+    private func delete() {
+        guard let backend = model.backend else { return }
+        Task {
+            do {
+                try await backend.delete(candidateId: candidateID)
+                model.dataChanged()
+                onDeleted()
+            } catch {
+                actionError = model.message(for: error)
+            }
+        }
+    }
+
     @ViewBuilder
     private func content(_ detail: CandidateDetail) -> some View {
         let profile = detail.listing.profile
@@ -76,6 +97,11 @@ struct CandidateDetailView: View {
                     PhotoStrip(photos: detail.gallery)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                } footer: {
+                    // The advert states more pictures than were read, typically because its gallery loads them on demand.
+                    if let stated = profile.photoCount, Int(stated) > detail.gallery.count {
+                        Text("Das Inserat hat \(Format.number(stated)) Bilder, hier sind \(detail.gallery.count). Für alle: unten „Auf diesem Gerät aktualisieren“ und dort die Bildergalerie einmal durchblättern.")
+                    }
                 }
             }
             Section {
@@ -260,6 +286,8 @@ struct CandidateDetailView: View {
                             set: { status in perform { try await $0.setStatus(candidateId: candidateID, status: status) } })) {
                             ForEach(CandidateStatus.allCases, id: \.self) { Text($0.label).tag($0) }
                         }
+                        Divider()
+                        Button("Angebot löschen", systemImage: "trash", role: .destructive) { confirmDelete = true }
                     } label: {
                         Label(detail.candidate.status.label, systemImage: detail.candidate.status == .favorite ? "star.fill" : "star")
                     }

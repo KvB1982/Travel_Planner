@@ -15,6 +15,7 @@ struct CandidateListView: View {
     @State private var link = ""
     @State private var invite: Invite?
     @State private var notice: String?
+    @State private var pendingDelete: CandidateSummary?
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -36,6 +37,12 @@ struct CandidateListView: View {
             Section {
                 ForEach(visible) { candidate in
                     CandidateRow(candidate: candidate, persons: detail?.trip.persons).tag(candidate.id)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if detail?.role.canEdit ?? false {
+                                // Not `role: .destructive`: the row must stay until the question is answered.
+                                Button("Löschen", systemImage: "trash") { pendingDelete = candidate }.tint(.red)
+                            }
+                        }
                 }
             } header: {
                 if !candidates.isEmpty {
@@ -89,6 +96,12 @@ struct CandidateListView: View {
         } message: {
             Text(notice ?? "")
         }
+        .confirmationDialog("Angebot löschen?", isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible, presenting: pendingDelete) { candidate in
+            Button("Löschen", role: .destructive) { delete(candidate) }
+        } message: { candidate in
+            Text("„\(candidate.listing.title ?? "Dieses Angebot")“ wird mit allen Stimmen und Kommentaren aus der Reise entfernt. Das lässt sich nicht rückgängig machen.")
+        }
         .sheet(item: $invite) { invite in
             InviteSheet(invite: invite)
         }
@@ -132,6 +145,19 @@ struct CandidateListView: View {
                 if result.duplicate { notice = "Dieses Angebot ist schon in der Reise." }
                 model.dataChanged()
                 selection = result.candidateId
+            } catch {
+                notice = model.message(for: error)
+            }
+        }
+    }
+
+    private func delete(_ candidate: CandidateSummary) {
+        guard let backend = model.backend else { return }
+        Task {
+            do {
+                try await backend.delete(candidateId: candidate.id)
+                if selection == candidate.id { selection = nil }
+                model.dataChanged()
             } catch {
                 notice = model.message(for: error)
             }

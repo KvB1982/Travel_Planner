@@ -28,6 +28,8 @@ public protocol TravelBackend: Sendable {
     /// Asks the server to read the advert again. Progress shows in `importStatus`, as after an import.
     func refresh(candidateId: String) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
+    /// Removes the offer from its trip, with its votes and comments. Cannot be undone.
+    func delete(candidateId: String) async throws
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
     func comment(candidateId: String, body: String) async throws
     func logout() async throws
@@ -212,6 +214,10 @@ public struct APIClient: TravelBackend {
 
     public func refresh(candidateId: String) async throws {
         _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/refresh")
+    }
+
+    public func delete(candidateId: String) async throws {
+        _ = try await data("DELETE", "/candidates/\(candidateId.pathEscaped)")
     }
 
     public func setStatus(candidateId: String, status: CandidateStatus) async throws {

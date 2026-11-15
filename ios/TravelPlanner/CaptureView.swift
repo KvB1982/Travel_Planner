@@ -24,10 +24,14 @@ struct CaptureView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
-                        Text("Warte, bis das Inserat vollständig zu sehen ist. Stimmen Zeitraum und Personenzahl, tippe auf „Übernehmen“.")
+                        Text("Stelle Zeitraum und Personen ein. Für alle Bilder: Öffne die Bildergalerie des Inserats und blättere einmal durch. Dann „Übernehmen“.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                        Label(page.pictureCount == 1 ? "1 Bild erkannt" : "\(page.pictureCount) Bilder erkannt", systemImage: "photo.on.rectangle")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(page.pictureCount > 0 ? Color.accentColor : Color.secondary)
+                            .contentTransition(.numericText())
                     }
                     Button {
                         capture()
@@ -52,6 +56,13 @@ struct CaptureView: View {
         }
         .onAppear {
             if let url = URL(string: source.url) { page.load(url) }
+        }
+        .task {
+            // Shows the count growing while the gallery is flipped through.
+            while !Task.isCancelled {
+                await page.refreshPictureCount()
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
     }
 
@@ -81,11 +92,53 @@ struct CaptureView: View {
 final class WebPage: NSObject, WKNavigationDelegate {
     let webView: WKWebView
     var isLoading = false
+    /// Large pictures the page has shown so far, including ones a gallery has since swapped out.
+    var pictureCount = 0
+
+    /// Remembers every picture of photo size as it loads (phone pages serve small versions, so the bar is low;
+    /// icons and tracking pixels stay below it). Galleries keep only a few pictures in the page at a time,
+    /// so the page content alone would miss most of them.
+    private static let collector = """
+    (function () {
+      if (window.__tpImages) { return; }
+      var seen = window.__tpImages = {};
+      function note(img) {
+        try {
+          var address = img.currentSrc || img.src;
+          if (address && address.indexOf('http') === 0 && img.naturalWidth >= 240 && img.naturalHeight >= 160) { seen[address] = true; }
+        } catch (e) {}
+      }
+      document.addEventListener('load', function (event) {
+        if (event.target && event.target.tagName === 'IMG') { note(event.target); }
+      }, true);
+      window.__tpCollect = function () {
+        for (var i = 0; i < document.images.length; i++) { note(document.images[i]); }
+        return Object.keys(seen);
+      };
+    })();
+    """
+
+    /// Walks down the page once so pictures that load on scroll are fetched, then returns to the top.
+    private static let scrollThrough = """
+    var start = window.scrollY;
+    var step = Math.max(400, window.innerHeight * 0.9);
+    for (var i = 0; i < 40; i++) {
+      var before = window.scrollY;
+      window.scrollBy(0, step);
+      await new Promise(function (done) { setTimeout(done, 180); });
+      if (window.scrollY === before) { break; }
+    }
+    window.scrollTo(0, start);
+    await new Promise(function (done) { setTimeout(done, 300); });
+    return true;
+    """
 
     override init() {
         let configuration = WKWebViewConfiguration()
         // Cookies stay on the device between captures, so a consent banner only has to be answered once.
         configuration.websiteDataStore = .default()
+        configuration.userContentController.addUserScript(
+            WKUserScript(source: Self.collector, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
@@ -97,9 +150,21 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.load(URLRequest(url: url))
     }
 
-    /// The page as rendered. Adverts fill in their content by script after loading, so this waits
-    /// until the document has stopped growing; reading at once would return an empty shell.
+    private func pictures() async -> [String] {
+        let json = try? await webView.evaluateJavaScript("JSON.stringify(window.__tpCollect ? window.__tpCollect() : [])") as? String
+        guard let data = json?.data(using: .utf8), let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return list
+    }
+
+    func refreshPictureCount() async {
+        pictureCount = await pictures().count
+    }
+
+    /// The page as rendered, plus every large picture seen while it was open.
+    /// Adverts fill in their content by script after loading, so this waits until the document has
+    /// stopped growing; reading at once would return an empty shell.
     func html() async throws -> String {
+        _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         var last = -1
         var stable = 0
         for _ in 0..<16 {
@@ -112,8 +177,23 @@ final class WebPage: NSObject, WKNavigationDelegate {
             if stable >= 2 { break }
             try await Task.sleep(for: .milliseconds(500))
         }
-        let result = try await webView.evaluateJavaScript("document.documentElement.outerHTML")
-        return result as? String ?? ""
+        let page = try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
+        return Self.append(pictures: await pictures(), to: page)
+    }
+
+    /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.
+    static func append(pictures: [String], to page: String) -> String {
+        guard !pictures.isEmpty else { return page }
+        let tags = pictures.map { address in
+            let escaped = address.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
+                .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            return "<img src=\"\(escaped)\">"
+        }.joined()
+        let block = "<div id=\"tp-captured-images\" hidden>\(tags)</div>"
+        if let end = page.range(of: "</body>", options: [.backwards, .caseInsensitive]) {
+            return page.replacingCharacters(in: end, with: block + "</body>")
+        }
+        return page + block
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { isLoading = true }

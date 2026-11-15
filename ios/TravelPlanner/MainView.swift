@@ -18,7 +18,7 @@ struct MainView: View {
             }
         } detail: {
             if let candidateID {
-                CandidateDetailView(candidateID: candidateID)
+                CandidateDetailView(candidateID: candidateID) { self.candidateID = nil }
                     .id(candidateID)
             } else {
                 ContentUnavailableView("Wähle ein Angebot", systemImage: "house")

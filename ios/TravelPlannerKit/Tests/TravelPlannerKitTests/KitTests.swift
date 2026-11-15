@@ -208,6 +208,22 @@ final class DemoBackendTests: XCTestCase {
         XCTAssertEqual(list.first { $0.id == "c-1" }?.myVote?.verdict, .yes)
     }
 
+    func testDeleteRemovesOfferAndUpdatesCounts() async throws {
+        let demo = DemoBackend()
+        try await demo.delete(candidateId: "c-1")
+        let list = try await demo.candidates(tripId: "t-1")
+        XCTAssertEqual(list.map(\.id), ["c-2", "c-3"])
+        let trips = try await demo.trips()
+        XCTAssertEqual(trips.first { $0.id == "t-1" }?.candidateCount, 2)
+        XCTAssertEqual(trips.first { $0.id == "t-1" }?.favoriteCount, 0)
+        do {
+            try await demo.delete(candidateId: "c-1")
+            XCTFail("Ein gelöschtes Angebot darf nicht noch einmal löschbar sein")
+        } catch let error as APIError {
+            XCTAssertEqual(error.status, 404)
+        }
+    }
+
     func testImportMarksBlockedPlatformAndDuplicates() async throws {
         let demo = DemoBackend()
         let first = try await demo.importLink(tripId: "t-2", url: "https://www.fewo-direkt.de/ferienwohnung-ferienhaus/p123", html: nil)

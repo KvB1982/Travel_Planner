@@ -1,4 +1,5 @@
 import ImageIO
+import OSLog
 import SwiftUI
 import TravelPlannerKit
 import UIKit
@@ -35,9 +36,32 @@ final class ImageLoader {
         let session = session
         let task = Task<UIImage?, Never>.detached(priority: .userInitiated) {
             if request.url?.scheme == "demo" { return DemoPicture.draw(request.url, maxPixel: maxPixel) }
-            guard let (data, response) = try? await session.data(for: request),
-                  (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else { return nil }
-            return Self.decode(data, maxPixel: maxPixel)
+            var request = request
+            if request.value(forHTTPHeaderField: "Authorization") == nil {
+                // Image hosts of the platforms expect a browser; some refuse the bare system identifier.
+                request.setValue(Self.browserAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("image/avif,image/webp,image/jpeg,image/png,image/*;q=0.8", forHTTPHeaderField: "Accept")
+            }
+            // One more try after a short pause covers a dropped connection or a busy image host.
+            for attempt in 0..<2 {
+                if attempt > 0 { try? await Task.sleep(for: .milliseconds(700)) }
+                do {
+                    let (data, response) = try await session.data(for: request)
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+                    guard (200..<300).contains(status) else {
+                        Self.log.error("Bild \(request.url?.absoluteString ?? "?", privacy: .public): Status \(status)")
+                        if status == 404 || status == 403 || status == 410 { return nil }
+                        continue
+                    }
+                    if let image = Self.decode(data, maxPixel: maxPixel) { return image }
+                    let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "?"
+                    Self.log.error("Bild \(request.url?.absoluteString ?? "?", privacy: .public): nicht lesbar, \(data.count) Bytes, Typ \(type, privacy: .public)")
+                    return nil
+                } catch {
+                    Self.log.error("Bild \(request.url?.absoluteString ?? "?", privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            return nil
         }
         running[key as String] = task
         let image = await task.value
@@ -54,6 +78,10 @@ final class ImageLoader {
         guard cached(address, maxPixel: maxPixel) == nil else { return }
         Task { _ = await image(address, maxPixel: maxPixel, backend: backend) }
     }
+
+    nonisolated private static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Bilder")
+    nonisolated private static let browserAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 
     private func key(_ address: String, _ maxPixel: Int?) -> NSString {
         "\(maxPixel ?? 0)|\(address)" as NSString
