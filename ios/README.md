@@ -49,7 +49,7 @@ Der Steckbrief zeigt alle Bilder eines Angebots als Leiste zum Durchwischen, ein
 
 ## Bewertungen
 
-Liefert `GET /candidates/:id` ein Feld `reviews` (`summary`, `positives`, `negatives`, `basedOn`, `generatedAt`, `items`), zeigt der Steckbrief die Zusammenfassung mit Gelobtem und Kritisiertem und öffnet auf Wunsch die Einzelbewertungen, bei fremdsprachigen mit Übersetzung und Original. Die Zusammenfassung ist als automatisch erstellt gekennzeichnet.
+Liefert `GET /candidates/:id` die Felder `reviewSummary` (`summary`, `positives`, `negatives`, `basedOn`) und `reviews` (Liste der Einzelbewertungen), zeigt der Steckbrief die Zusammenfassung mit Gelobtem und Kritisiertem und öffnet auf Wunsch die Einzelbewertungen, bei fremdsprachigen mit Übersetzung und Original. Die Zusammenfassung ist als automatisch erstellt gekennzeichnet.
 
 ## Löschen und Aktualisieren
 

@@ -362,7 +362,7 @@ public struct Reviews: Codable, Hashable, Sendable {
     public struct Item: Codable, Identifiable, Hashable, Sendable {
         public var id: String
         public var author: String?
-        /// Day of the review or stay, "2026-08-14".
+        /// Day of the review, "2026-08-14", or the page's own wording ("August 2026") where it gives no exact day.
         public var date: String?
         public var rating: Double?
         public var scale: Double?
@@ -404,7 +404,7 @@ public struct Reviews: Codable, Hashable, Sendable {
 }
 
 /// `GET /candidates/:id`.
-public struct CandidateDetail: Codable, Hashable, Sendable {
+public struct CandidateDetail: Decodable, Hashable, Sendable {
     public var candidate: CandidateRecord
     public var role: MemberRole
     public var listing: Listing
@@ -421,6 +421,33 @@ public struct CandidateDetail: Codable, Hashable, Sendable {
                 votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil, reviews: Reviews? = nil) {
         self.candidate = candidate; self.role = role; self.listing = listing; self.sources = sources; self.prices = prices
         self.votes = votes; self.comments = comments; self.photos = photos; self.reviews = reviews
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews
+    }
+
+    /// The server sends the summary (`reviewSummary`) and the single reviews (`reviews`, a list) side by side.
+    /// Pictures and reviews are extras: if their shape is ever off, the offer itself must still open.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        candidate = try container.decode(CandidateRecord.self, forKey: .candidate)
+        role = try container.decode(MemberRole.self, forKey: .role)
+        listing = try container.decode(Listing.self, forKey: .listing)
+        sources = try container.decodeIfPresent([ListingSource].self, forKey: .sources) ?? []
+        prices = try container.decodeIfPresent([PriceSnapshot].self, forKey: .prices) ?? []
+        votes = try container.decodeIfPresent(VoteOverview.self, forKey: .votes) ?? .init()
+        comments = try container.decodeIfPresent([Comment].self, forKey: .comments) ?? []
+        photos = (try? container.decodeIfPresent([Photo].self, forKey: .photos)) ?? nil
+
+        var combined = ((try? container.decodeIfPresent(Reviews.self, forKey: .reviewSummary)) ?? nil) ?? Reviews()
+        if let items = (try? container.decodeIfPresent([Reviews.Item].self, forKey: .reviews)) ?? nil {
+            combined.items = items
+        } else if let whole = (try? container.decodeIfPresent(Reviews.self, forKey: .reviews)) ?? nil {
+            // Older shape: everything inside one `reviews` object.
+            combined = whole
+        }
+        reviews = combined.isEmpty ? nil : combined
     }
 
     /// All pictures; falls back to the cover image alone when the server sent no list.

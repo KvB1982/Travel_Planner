@@ -47,7 +47,7 @@ struct CandidateDetailView: View {
             Text(actionError ?? "")
         }
         .sheet(isPresented: $showReviews) {
-            ReviewList(items: detail?.reviews?.items ?? [])
+            ReviewList(items: detail?.reviews?.items ?? [], fallbackScale: detail?.listing.profile.rating?.scale)
         }
         .sheet(item: $captureSource) { source in
             CaptureView(source: source, candidateID: candidateID)

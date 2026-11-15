@@ -65,12 +65,14 @@ struct ReviewsSection: View {
 
 struct ReviewList: View {
     let items: [Reviews.Item]
+    /// Scale of the overall rating, used for reviews that do not name their own.
+    var fallbackScale: Double?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List(items) { item in
-                ReviewRow(item: item)
+                ReviewRow(item: item, fallbackScale: fallbackScale)
             }
             .navigationTitle(items.count == 1 ? "1 Bewertung" : "\(items.count) Bewertungen")
             .navigationBarTitleDisplayMode(.inline)
@@ -81,6 +83,7 @@ struct ReviewList: View {
 
 private struct ReviewRow: View {
     let item: Reviews.Item
+    var fallbackScale: Double?
     @State private var showOriginal = false
 
     var body: some View {
@@ -89,7 +92,7 @@ private struct ReviewRow: View {
                 if let rating = item.rating {
                     HStack(spacing: 4) {
                         Image(systemName: "star.fill").foregroundStyle(.yellow)
-                        Text(item.scale.map { "\(Format.number(rating)) von \(Format.number($0))" } ?? Format.number(rating))
+                        Text((item.scale ?? fallbackScale).map { "\(Format.number(rating)) von \(Format.number($0))" } ?? Format.number(rating))
                     }
                     .font(.subheadline.weight(.semibold))
                     .accessibilityElement(children: .combine)
@@ -126,8 +129,9 @@ private struct ReviewRow: View {
         var parts: [String] = []
         if let author = item.author, !author.isEmpty { parts.append(author) }
         if let stay = item.stayType, !stay.isEmpty { parts.append(stay) }
-        if let date = item.date, let day = Format.day(date) {
-            parts.append(day.formatted(.dateTime.month(.abbreviated).year().locale(Locale(identifier: "de_DE"))))
+        if let date = item.date, !date.isEmpty {
+            // An exact day is shortened to month and year; anything else is the page's own wording and shown as is.
+            parts.append(Format.day(date).map { $0.formatted(.dateTime.month(.abbreviated).year().locale(Locale(identifier: "de_DE"))) } ?? date)
         }
         if let platform = item.platform { parts.append(Format.platformName(platform)) }
         return parts.joined(separator: " · ")

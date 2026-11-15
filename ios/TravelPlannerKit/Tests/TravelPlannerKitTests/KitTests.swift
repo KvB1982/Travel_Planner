@@ -210,9 +210,39 @@ final class ReviewTests: XCTestCase {
         XCTAssertTrue(try APIClient.decoder.decode(Reviews.self, from: Data("{}".utf8)).isEmpty)
     }
 
-    func testDetailWithNullReviews() throws {
-        struct Wrapper: Decodable { var reviews: Reviews? }
-        XCTAssertNil(try APIClient.decoder.decode(Wrapper.self, from: Data(#"{"reviews":null}"#.utf8)).reviews)
+    private func detail(_ extra: String) throws -> CandidateDetail {
+        try APIClient.decoder.decode(CandidateDetail.self, from: Data("""
+        {"candidate":{"id":"c1","tripId":"t1","listingId":"l1","status":"new","importStatus":"ready","importNote":null,"addedBy":"u1",
+           "rejectionReason":null,"notes":null,"tags":[],"createdAt":"2026-11-15T09:17:52.123Z"},
+         "role":"member","listing":{"id":"l1","kind":"vacation_home","title":"Casa","place":null,"country":null,"lat":null,"lon":null,
+           "coverImageUrl":null,"fillPercent":40,"profile":{}},
+         "sources":[],"prices":[],"votes":{"yes":0,"maybe":0,"no":0,"vetoes":0,"entries":[]},"comments":[]\(extra)}
+        """.utf8))
+    }
+
+    func testServerShapeSummaryAndListSideBySide() throws {
+        let detail = try detail("""
+        ,"photos":[],"reviewSummary":{"summary":"Ruhig.","positives":["Pool","Lage"],"negatives":["Liegen kosten extra"],"basedOn":20},
+        "reviews":[{"id":"3b1f","text":"Gut","title":null,"rating":8.5,"scale":10,"date":"2026-08-14","author":"Jörg"},
+                   {"id":"9c2e","text":"Okay","title":null,"rating":null,"scale":null,"date":"August 2026","author":null}]
+        """)
+        XCTAssertEqual(detail.reviews?.summary, "Ruhig.")
+        XCTAssertEqual(detail.reviews?.basedOn, 20)
+        XCTAssertEqual(detail.reviews?.items?.count, 2)
+        XCTAssertEqual(detail.reviews?.items?[1].date, "August 2026")
+    }
+
+    func testOfferWithoutReviewsHasNone() throws {
+        XCTAssertNil(try detail("").reviews)
+        XCTAssertNil(try detail(#","reviewSummary":{"summary":null,"positives":[],"negatives":[],"basedOn":0},"reviews":[]"#).reviews)
+        XCTAssertNil(try detail(#","reviewSummary":null,"reviews":null"#).reviews)
+    }
+
+    func testOddExtrasNeverBreakTheOffer() throws {
+        let detail = try detail(#","photos":"kaputt","reviewSummary":17,"reviews":{"unerwartet":true}"#)
+        XCTAssertEqual(detail.listing.title, "Casa")
+        XCTAssertNil(detail.photos)
+        XCTAssertNil(detail.reviews)
     }
 }
 

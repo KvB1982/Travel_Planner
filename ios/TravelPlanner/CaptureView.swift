@@ -24,11 +24,11 @@ struct CaptureView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
-                        Text("Stelle Zeitraum und Personen ein. Für alle Bilder: Öffne die Bildergalerie des Inserats und blättere einmal durch. Dann „Übernehmen“.")
+                        Text("Stelle Zeitraum und Personen ein. Für alle Bilder und Bewertungen: Blättere die Bildergalerie des Inserats einmal durch und klappe die Bewertungen auf. Dann „Übernehmen“.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                        Label(page.pictureCount == 1 ? "1 Bild erkannt" : "\(page.pictureCount) Bilder erkannt", systemImage: "photo.on.rectangle")
+                        Label(page.pictureCount == 1 ? "1 Bild des Inserats erkannt" : "\(page.pictureCount) Bilder des Inserats erkannt", systemImage: "photo.on.rectangle")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(page.pictureCount > 0 ? Color.accentColor : Color.secondary)
                             .contentTransition(.numericText())
@@ -102,10 +102,41 @@ final class WebPage: NSObject, WKNavigationDelegate {
     (function () {
       if (window.__tpImages) { return; }
       var seen = window.__tpImages = {};
+      // A photo belongs to the advert's own gallery unless it is part of a card that leads to another page
+      // (similar adverts, recommendations) or sits in the page's navigation or footer. Anything in an open dialog counts.
+      function elsewhere(link) {
+        try {
+          var target = new URL(link.getAttribute('href'), location.href);
+          if (target.protocol !== 'http:' && target.protocol !== 'https:') { return false; }
+          return target.origin !== location.origin || target.pathname !== location.pathname;
+        } catch (e) { return false; }
+      }
+      function own(img) {
+        try {
+          if (img.closest('[role="dialog"], [aria-modal="true"], dialog')) { return true; }
+          if (img.closest('nav, footer, header')) { return false; }
+          var link = img.closest('a[href]');
+          if (link && elsewhere(link)) { return false; }
+          // Cards often lay the link over the picture instead of wrapping it: look at the boxes around the
+          // picture for a link that leads away. A card is the picture plus a few lines of text, so the search
+          // stops once a box is much taller than the picture. Width says nothing: sliders are many pictures wide.
+          var box = img.getBoundingClientRect();
+          var parent = img.parentElement;
+          for (var level = 0; parent && parent !== document.body && level < 10; level++) {
+            if (box.height > 0 && parent.getBoundingClientRect().height > box.height * 2.5) { break; }
+            var links = parent.querySelectorAll('a[href]');
+            for (var i = 0; i < links.length; i++) { if (elsewhere(links[i])) { return false; } }
+            parent = parent.parentElement;
+          }
+          return true;
+        } catch (e) { return false; }
+      }
       function note(img) {
         try {
           var address = img.currentSrc || img.src;
-          if (address && address.indexOf('http') === 0 && img.naturalWidth >= 240 && img.naturalHeight >= 160) { seen[address] = true; }
+          if (address && address.indexOf('http') === 0 && img.naturalWidth >= 240 && img.naturalHeight >= 160) {
+            seen[address] = seen[address] === true || own(img);
+          }
         } catch (e) {}
       }
       document.addEventListener('load', function (event) {
@@ -113,9 +144,29 @@ final class WebPage: NSObject, WKNavigationDelegate {
       }, true);
       window.__tpCollect = function () {
         for (var i = 0; i < document.images.length; i++) { note(document.images[i]); }
-        return Object.keys(seen);
+        return Object.keys(seen).map(function (address) { return { url: address, gallery: seen[address] === true }; });
       };
     })();
+    """
+
+    /// Opens a collapsed list of reviews, so their text is part of the page that gets sent.
+    /// Only real buttons with a short, unmistakable label are pressed, and never links that lead elsewhere.
+    private static let expandReviews = """
+    var pressed = 0;
+    var candidates = document.querySelectorAll('button, [role="button"]');
+    for (var i = 0; i < candidates.length && pressed < 2; i++) {
+      var element = candidates[i];
+      var label = (element.innerText || element.getAttribute('aria-label') || '').trim();
+      if (label.length === 0 || label.length > 60) { continue; }
+      if (!/(bewertung|rezension|review)/i.test(label)) { continue; }
+      if (!/(alle|mehr|weitere|anzeigen|ansehen|lesen|show|more|all)/i.test(label)) { continue; }
+      if (/(schreiben|abgeben|verfassen|write|melden|report)/i.test(label)) { continue; }
+      if (element.closest('a[href]') || element.disabled || element.offsetParent === null) { continue; }
+      element.click();
+      pressed++;
+      await new Promise(function (done) { setTimeout(done, 1500); });
+    }
+    return pressed;
     """
 
     /// Walks down the page once so pictures that load on scroll are fetched, then returns to the top.
@@ -150,14 +201,20 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.load(URLRequest(url: url))
     }
 
-    private func pictures() async -> [String] {
+    struct Picture: Decodable, Equatable {
+        var url: String
+        var gallery: Bool
+    }
+
+    private func pictures() async -> [Picture] {
         let json = try? await webView.evaluateJavaScript("JSON.stringify(window.__tpCollect ? window.__tpCollect() : [])") as? String
-        guard let data = json?.data(using: .utf8), let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        guard let data = json?.data(using: .utf8), let list = try? JSONDecoder().decode([Picture].self, from: data) else { return [] }
         return list
     }
 
     func refreshPictureCount() async {
-        pictureCount = await pictures().count
+        // The count shown is the advert's own photos; pictures of other adverts on the page are not promised.
+        pictureCount = await pictures().filter(\.gallery).count
     }
 
     /// The page as rendered, plus every large picture seen while it was open.
@@ -165,6 +222,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
     /// stopped growing; reading at once would return an empty shell.
     func html() async throws -> String {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
+        _ = try? await webView.callAsyncJavaScript(Self.expandReviews, contentWorld: .page)
         var last = -1
         var stable = 0
         for _ in 0..<16 {
@@ -182,12 +240,13 @@ final class WebPage: NSObject, WKNavigationDelegate {
     }
 
     /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.
-    static func append(pictures: [String], to page: String) -> String {
+    /// `data-gallery="1"` marks the advert's own photos, so the server can leave out those of similar adverts.
+    static func append(pictures: [Picture], to page: String) -> String {
         guard !pictures.isEmpty else { return page }
-        let tags = pictures.map { address in
-            let escaped = address.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
+        let tags = pictures.map { picture in
+            let escaped = picture.url.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;")
                 .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-            return "<img src=\"\(escaped)\">"
+            return picture.gallery ? "<img src=\"\(escaped)\" data-gallery=\"1\">" : "<img src=\"\(escaped)\">"
         }.joined()
         let block = "<div id=\"tp-captured-images\" hidden>\(tags)</div>"
         if let end = page.range(of: "</body>", options: [.backwards, .caseInsensitive]) {
