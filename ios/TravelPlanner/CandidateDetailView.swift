@@ -64,14 +64,15 @@ struct CandidateDetailView: View {
         let profile = detail.listing.profile
         let canEdit = detail.role.canEdit
         List {
+            if !detail.gallery.isEmpty {
+                Section {
+                    PhotoStrip(photos: detail.gallery)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    if detail.listing.coverImageUrl != nil {
-                        CoverImage(url: detail.listing.coverImageUrl)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
                     Text(detail.listing.title ?? "Angebot").font(.title2.weight(.semibold))
                     Text(headline(detail)).foregroundStyle(.secondary)
                     if let summary = profile.summary { Text(summary).font(.callout) }

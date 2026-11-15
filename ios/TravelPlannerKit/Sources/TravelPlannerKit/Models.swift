@@ -334,6 +334,27 @@ public struct Comment: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// One picture of an offer. `url` is the full-quality image, `thumbUrl` a small version for strips and lists.
+/// Both may be absolute or start with "/" (then relative to the server address).
+public struct Photo: Codable, Identifiable, Hashable, Sendable {
+    public var id: String
+    public var url: String
+    public var thumbUrl: String?
+    public var width: Double?
+    public var height: Double?
+    public var caption: String?
+
+    public init(id: String, url: String, thumbUrl: String? = nil, width: Double? = nil, height: Double? = nil, caption: String? = nil) {
+        self.id = id; self.url = url; self.thumbUrl = thumbUrl; self.width = width; self.height = height; self.caption = caption
+    }
+
+    /// Width divided by height, when the server knows the size.
+    public var aspectRatio: Double? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        return width / height
+    }
+}
+
 /// `GET /candidates/:id`.
 public struct CandidateDetail: Codable, Hashable, Sendable {
     public var candidate: CandidateRecord
@@ -343,11 +364,20 @@ public struct CandidateDetail: Codable, Hashable, Sendable {
     public var prices: [PriceSnapshot]
     public var votes: VoteOverview
     public var comments: [Comment]
+    /// In the order of the advert. Missing on servers that do not import pictures yet.
+    public var photos: [Photo]?
 
     public init(candidate: CandidateRecord, role: MemberRole, listing: Listing, sources: [ListingSource] = [], prices: [PriceSnapshot] = [],
-                votes: VoteOverview = .init(), comments: [Comment] = []) {
+                votes: VoteOverview = .init(), comments: [Comment] = [], photos: [Photo]? = nil) {
         self.candidate = candidate; self.role = role; self.listing = listing; self.sources = sources; self.prices = prices
-        self.votes = votes; self.comments = comments
+        self.votes = votes; self.comments = comments; self.photos = photos
+    }
+
+    /// All pictures; falls back to the cover image alone when the server sent no list.
+    public var gallery: [Photo] {
+        if let photos, !photos.isEmpty { return photos }
+        if let cover = listing.coverImageUrl, !cover.isEmpty { return [Photo(id: "cover", url: cover)] }
+        return []
     }
 }
 

@@ -279,22 +279,7 @@ struct CoverImage: View {
     let url: String?
 
     var body: some View {
-        if let url, let address = URL(string: url) {
-            AsyncImage(url: address) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    placeholder
-                }
-            }
-        } else {
-            placeholder
-        }
-    }
-
-    private var placeholder: some View {
-        Rectangle().fill(.quaternary).overlay {
-            Image(systemName: "house").foregroundStyle(.secondary)
-        }
+        // Clear color fixes the size; the picture fills it and is cropped.
+        Color.clear.overlay { RemoteImage(address: url, maxPixel: PhotoSize.thumb * 2) }.clipped()
     }
 }

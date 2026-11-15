@@ -144,6 +144,52 @@ final class HelperTests: XCTestCase {
     }
 }
 
+final class PhotoTests: XCTestCase {
+    let client = APIClient(baseURL: URL(string: "https://reisen.example/api")!, token: "geheim")
+
+    func testOwnServerGetsTokenForRelativeAndAbsoluteAddresses() {
+        let relative = client.imageRequest(for: "/media/a.jpg")
+        XCTAssertEqual(relative?.url?.absoluteString, "https://reisen.example/api/media/a.jpg")
+        XCTAssertEqual(relative?.value(forHTTPHeaderField: "Authorization"), "Bearer geheim")
+        let absolute = client.imageRequest(for: "https://reisen.example/media/a.jpg")
+        XCTAssertEqual(absolute?.value(forHTTPHeaderField: "Authorization"), "Bearer geheim")
+    }
+
+    func testForeignHostsNeverSeeTheToken() {
+        for address in ["https://a0.muscache.com/im/x.jpg", "https://reisen.example.evil.com/a.jpg", "http://reisen.example/a.jpg",
+                        "https://reisen.example:8443/a.jpg"] {
+            let request = client.imageRequest(for: address)
+            XCTAssertNotNil(request, address)
+            XCTAssertNil(request?.value(forHTTPHeaderField: "Authorization"), address)
+        }
+    }
+
+    func testUnusableAddresses() {
+        XCTAssertNil(client.imageRequest(for: "file:///etc/passwd"))
+        XCTAssertNil(client.imageRequest(for: "//cdn.example/a.jpg"))
+        XCTAssertNil(client.imageRequest(for: ""))
+    }
+
+    func testGalleryFallsBackToCover() throws {
+        let record = CandidateRecord(id: "c", tripId: "t", listingId: "l")
+        var detail = CandidateDetail(candidate: record, role: .member, listing: Listing(id: "l", coverImageUrl: "https://x/cover.jpg"))
+        XCTAssertEqual(detail.gallery.map(\.url), ["https://x/cover.jpg"])
+        detail.photos = [Photo(id: "1", url: "/m/1.jpg", thumbUrl: "/m/1t.jpg", width: 4000, height: 3000), Photo(id: "2", url: "/m/2.jpg")]
+        XCTAssertEqual(detail.gallery.count, 2)
+        XCTAssertEqual(detail.gallery[0].aspectRatio ?? 0, 4.0 / 3.0, accuracy: 0.001)
+        XCTAssertNil(detail.gallery[1].aspectRatio)
+        detail.listing.coverImageUrl = nil
+        detail.photos = []
+        XCTAssertTrue(detail.gallery.isEmpty)
+    }
+
+    func testPhotosDecode() throws {
+        let photos = try APIClient.decoder.decode([Photo].self, from: Data(#"[{"id":"p1","url":"/media/1.jpg","thumbUrl":null,"width":null,"height":null,"caption":null},{"id":"p2","url":"https://x/2.jpg","thumbUrl":"/media/2t.jpg","width":4000,"height":3000,"caption":"Pool"}]"#.utf8))
+        XCTAssertEqual(photos.count, 2)
+        XCTAssertEqual(photos[1].caption, "Pool")
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()

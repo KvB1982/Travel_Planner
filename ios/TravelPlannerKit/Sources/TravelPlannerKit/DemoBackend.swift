@@ -30,6 +30,11 @@ public actor DemoBackend: TravelBackend {
 
     public func me() async throws -> User { user }
 
+    /// Sample pictures are drawn by the app itself (`demo://photo/<n>`), so the demo needs no network.
+    public nonisolated func imageRequest(for address: String) -> URLRequest? {
+        URL(string: address).map { URLRequest(url: $0) }
+    }
+
     public func logout() async throws {}
 
     public func trips() async throws -> [Trip] {
@@ -158,7 +163,13 @@ public actor DemoBackend: TravelBackend {
             profile.highlights = ["Großer Garten", "Zwei Wohnbereiche"]
             profile.warnings = warnings
             profile.uncertain = uncertain
-            let listing = Listing(id: "l-\(id)", title: title, place: place, country: country, lat: lat, lon: lon, profile: profile, fillPercent: fill)
+            let number = Int(id.dropFirst(2)) ?? 1
+            let photos = (0..<(number == 3 ? 0 : 6 + number * 3)).map { index in
+                Photo(id: "\(id)-\(index)", url: "demo://photo/\(number * 100 + index)?full=1", thumbUrl: "demo://photo/\(number * 100 + index)",
+                      width: index % 4 == 3 ? 3000 : 4000, height: index % 4 == 3 ? 4000 : 3000)
+            }
+            let listing = Listing(id: "l-\(id)", title: title, place: place, country: country, lat: lat, lon: lon,
+                                  coverImageUrl: photos.first?.thumbUrl, profile: profile, fillPercent: fill)
             let record = CandidateRecord(id: id, tripId: trip, listingId: listing.id, status: status)
             let price = PriceSnapshot(id: "p-\(id)", tripId: trip, startDate: start, endDate: end, nights: nights, persons: persons, totalCents: total,
                                       breakdown: [.init(item: "Miete", amountCents: total - 18_000), .init(item: "Endreinigung", amountCents: 18_000)])
@@ -170,7 +181,7 @@ public actor DemoBackend: TravelBackend {
                 prices: [price, older],
                 votes: VoteOverview(yes: votes.filter { $0.verdict == .yes }.count, maybe: votes.filter { $0.verdict == .maybe }.count,
                                     no: votes.filter { $0.verdict == .no }.count, vetoes: votes.filter(\.veto).count, entries: votes),
-                comments: comments)
+                comments: comments, photos: photos)
         }
 
         var blocked = home("c-3", trip: "t-1", title: "Podere mit Blick auf San Gimignano", place: "San Gimignano", country: "Italien",

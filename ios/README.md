@@ -43,6 +43,10 @@ Für ein echtes Gerät und TestFlight muss in Xcode bei beiden Targets unter „
 
 FeWo-direkt und Casamundo sperren den Abruf vom Server. Solche Angebote kommen mit `importStatus: "partial"` an. Im Steckbrief öffnet „Auf diesem Gerät auslesen“ das Inserat in einer Web-Ansicht, „Übernehmen“ schickt den geladenen Seiteninhalt an `POST /candidates/:id/capture`. Beim Teilen aus Safari liefert `GetPage.js` den Seiteninhalt gleich mit, dann entfällt dieser Schritt.
 
+## Bilder
+
+Der Steckbrief zeigt alle Bilder eines Angebots als Leiste zum Durchwischen, ein Tipp öffnet das Vollbild in voller Qualität mit Zoom. Erwartet wird in `GET /candidates/:id` ein Feld `photos` mit `id`, `url` (Original), `thumbUrl`, `width`, `height`, `caption`. Fehlt es, erscheint nur das Titelbild. Adressen dürfen absolut sein oder mit `/` beginnen. Den Anmelde-Token schickt die App nur an Bildadressen auf dem eigenen Server mit, nie an fremde Hosts. Geladene Bilder bleiben auf dem Gerät zwischengespeichert.
+
 ## Noch nicht enthalten
 
 Vergleich, Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.

@@ -29,6 +29,8 @@ public protocol TravelBackend: Sendable {
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
     func comment(candidateId: String, body: String) async throws
     func logout() async throws
+    /// The request that loads a picture, or nil when the address is unusable.
+    func imageRequest(for address: String) -> URLRequest?
 }
 
 public struct APIClient: TravelBackend {
@@ -116,6 +118,25 @@ public struct APIClient: TravelBackend {
         } catch {
             throw APIError(status: 200, code: "decoding", message: "Die Antwort des Servers konnte nicht gelesen werden. (\(error))")
         }
+    }
+
+    // MARK: Pictures
+
+    /// Pictures stored on our own server need the sign-in; a platform's image host must never see the token.
+    public func imageRequest(for address: String) -> URLRequest? {
+        let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url: URL?
+        if text.hasPrefix("/") && !text.hasPrefix("//") {
+            url = URL(string: baseURL.absoluteString.trimmingSuffix("/") + text)
+        } else {
+            url = URL(string: text)
+        }
+        guard let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", let host = url.host() else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        let sameServer = host.lowercased() == baseURL.host()?.lowercased() && url.port == baseURL.port && scheme == baseURL.scheme?.lowercased()
+        if sameServer, let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return request
     }
 
     // MARK: Sign-in (no token needed)
