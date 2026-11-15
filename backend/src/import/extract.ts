@@ -37,7 +37,7 @@ Der Nutzer liefert Auszüge einer Seite in XML-Tags: Metadaten, JSON-LD, Zustand
 Antworte ausschließlich mit einem JSON-Objekt in genau der vorgegebenen Struktur, ohne Einleitung und ohne Markdown.
 
 Regeln:
-- Trage nur ein, was in den Daten belegt ist. Was nicht belegt ist, bleibt null oder eine leere Liste. Schätze nichts und ergänze nichts aus Allgemeinwissen. Eine Ausnahme sind region und country, wenn sie sich aus Ortsangabe oder Koordinaten eindeutig ergeben.
+- Trage nur ein, was in den Daten belegt ist. Was nicht belegt ist, bleibt null oder eine leere Liste. Schätze nichts und ergänze nichts aus Allgemeinwissen. Eine Ausnahme sind region und country, wenn sie sich aus Ortsangabe oder Koordinaten eindeutig ergeben. country ist der deutsche Ländername ("Kroatien"), region die Region oder Insel in ihrer üblichen deutschen Schreibweise.
 - Ausstattung: true nur, wenn sie genannt ist. false nur, wenn sie ausdrücklich ausgeschlossen ist. Sonst null.
 - beds zählt Betten, sleepingPlaces zählt Schlafplätze. Ein Doppelbett ist ein Bett und zwei Schlafplätze. Ein Schlafsofa zählt als Schlafplatz und gehört mit Raum in bedDetails.
 - bedDetails ist eine Liste von Objekten der Form {"room": "Schlafzimmer 1", "beds": "1 Doppelbett"}, ein Eintrag je Raum mit Schlafgelegenheit.

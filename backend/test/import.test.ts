@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { profileSchema } from "../src/import/profile.js";
+import { germanCountry } from "../src/import/country.js";
 import { reviewsFromBlocks } from "../src/import/extract.js";
 import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
@@ -362,5 +363,17 @@ describe("cost items in whatever shape the model chose", () => {
       { item: "Strom", amountEur: null, note: "nach Verbrauch" },
       { item: "Bettwäsche", amountEur: 15, note: "pro Person" },
     ]);
+  });
+});
+
+describe("country names", () => {
+  it("come out in one German spelling", () => {
+    for (const raw of ["Croatia", "HR", "Hrvatska", "kroatien", " Croatie "]) expect(germanCountry(raw)).toBe("Kroatien");
+    expect(germanCountry("Spain")).toBe("Spanien");
+    expect(germanCountry("United States")).toBe("Vereinigte Staaten");
+    expect(germanCountry("Türkei")).toBe("Türkei");
+    expect(germanCountry("Atlantis")).toBe("Atlantis");
+    expect(germanCountry(null)).toBeNull();
+    expect(mergeProfiles(emptyProfile(), { country: "Italy" }).country).toBe("Italien");
   });
 });

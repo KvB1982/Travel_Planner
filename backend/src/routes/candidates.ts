@@ -160,6 +160,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           kind: listing.kind,
           title: listing.title,
           place: listing.place,
+          region: p.region,
           country: listing.country,
           lat: listing.lat,
           lon: listing.lon,

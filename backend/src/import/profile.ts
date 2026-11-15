@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { germanCountry } from "./country.js";
 
 /**
  * The standardised listing profile ("Steckbrief"). Every offer, whatever the
@@ -297,6 +298,7 @@ export function mergeProfiles(base: Profile, incoming: Partial<Profile>, overrid
     return override ? b : a;
   };
   const merged = merge(base, incoming) as Profile;
+  merged.country = germanCountry(merged.country);
   merged.uncertain = [...new Set([...(base.uncertain ?? []), ...(incoming.uncertain ?? [])])];
   return profileSchema.parse(merged);
 }
