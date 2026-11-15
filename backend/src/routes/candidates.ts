@@ -6,6 +6,7 @@ import { comments, dateOptions, listings, listingSources, priceSnapshots, tripLi
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { processImport, startImport } from "../import/pipeline.js";
 import { analyzeLink } from "../import/url.js";
+import { compare } from "../compare.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
 import { logActivity } from "./trips.js";
 
@@ -38,6 +39,11 @@ function reviewsFor(listing: typeof listings.$inferSelect | undefined, platform:
     generatedAt: listing?.updatedAt ?? null,
     items: items.map((r) => ({ ...r, platform })),
   };
+}
+
+/** The advert's hints with the trip's choice to hide them; hidden ones stay retrievable. */
+function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: string[]) {
+  return (listing?.profile.warnings ?? []).map((text) => ({ text, hidden: hidden.includes(text) }));
 }
 
 export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -105,11 +111,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(202).send({ candidateId: candidate.id });
   });
 
-  app.get("/trips/:tripId/candidates", async (req) => {
-    const uid = userId(req);
-    const tripId = uuidParam((req.params as { tripId: string }).tripId);
-    await requireMember(db, tripId, uid);
-
+  /** The candidates of a trip as the list shows them, each with its advert for callers that need more. */
+  async function loadCandidates(tripId: string, uid: string) {
     const rows = await db
       .select({ candidate: tripListings, listing: listings, addedByName: users.name })
       .from(tripListings)
@@ -117,7 +120,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       .innerJoin(users, eq(users.id, tripListings.addedBy))
       .where(eq(tripListings.tripId, tripId))
       .orderBy(desc(tripListings.createdAt));
-    if (rows.length === 0) return { candidates: [] };
+    if (rows.length === 0) return [];
 
     const candidateIds = rows.map((r) => r.candidate.id);
     const listingIds = rows.map((r) => r.listing.id);
@@ -133,46 +136,71 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const forThisTrip = (p: (typeof prices)[number]) =>
       p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || options.some((o) => o.startDate === p.startDate && o.endDate === p.endDate));
 
-    return {
-      candidates: rows.map(({ candidate, listing, addedByName }) => {
-        const mine = allVotes.filter((v) => v.tripListingId === candidate.id);
-        const own = sources.filter((s) => s.listingId === listing.id);
-        const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
-        // A price captured for this trip's dates beats one that came with the shared link.
-        const price = ownPrices.find(forThisTrip) ?? ownPrices[0] ?? null;
-        const p = listing.profile;
-        return {
-          id: candidate.id,
-          status: candidate.status,
-          importStatus: candidate.importStatus,
-          importNote: candidate.importNote,
-          tags: candidate.tags,
-          addedBy: addedByName,
-          createdAt: candidate.createdAt,
-          listing: {
-            id: listing.id,
-            kind: listing.kind,
-            title: listing.title,
-            place: listing.place,
-            country: listing.country,
-            lat: listing.lat,
-            lon: listing.lon,
-            coverImageUrl: listing.coverImageUrl,
-            // What can actually be shown; the page may advertise more than it gave away (profile.photoCount).
-            photoCount: p.photos?.length || p.photoCount,
-            fillPercent: listing.fillPercent,
-            maxGuests: p.maxGuests,
-            bedrooms: p.bedrooms,
-            bathrooms: p.bathrooms,
-            rating: p.rating,
-            platforms: own.map((s) => s.platform),
-          },
-          price: price && { totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
-          votes: tally(mine),
-          myVote: mine.find((v) => v.userId === uid) ?? null,
-        };
-      }),
-    };
+    return rows.map(({ candidate, listing, addedByName }) => {
+      const mine = allVotes.filter((v) => v.tripListingId === candidate.id);
+      const own = sources.filter((s) => s.listingId === listing.id);
+      const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
+      // A price captured for this trip's dates beats one that came with the shared link.
+      const price = ownPrices.find(forThisTrip) ?? ownPrices[0] ?? null;
+      const p = listing.profile;
+      const entry = {
+        id: candidate.id,
+        status: candidate.status,
+        importStatus: candidate.importStatus,
+        importNote: candidate.importNote,
+        tags: candidate.tags,
+        addedBy: addedByName,
+        createdAt: candidate.createdAt,
+        listing: {
+          id: listing.id,
+          kind: listing.kind,
+          title: listing.title,
+          place: listing.place,
+          country: listing.country,
+          lat: listing.lat,
+          lon: listing.lon,
+          coverImageUrl: listing.coverImageUrl,
+          // What can actually be shown; the page may advertise more than it gave away (profile.photoCount).
+          photoCount: p.photos?.length || p.photoCount,
+          fillPercent: listing.fillPercent,
+          maxGuests: p.maxGuests,
+          bedrooms: p.bedrooms,
+          bathrooms: p.bathrooms,
+          rating: p.rating,
+          platforms: own.map((s) => s.platform),
+          // Hints still shown for this trip; hidden ones are not counted.
+          warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
+        },
+        price: price && { totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
+        votes: tally(mine),
+        myVote: mine.find((v) => v.userId === uid) ?? null,
+      };
+      return { entry, profile: p, hiddenWarnings: candidate.hiddenWarnings };
+    });
+  }
+
+  app.get("/trips/:tripId/candidates", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    return { candidates: (await loadCandidates(tripId, uid)).map((c) => c.entry) };
+  });
+
+  /**
+   * Side by side: chosen candidates of a trip (or all that are not rejected) with one row per
+   * criterion, and which of them is ahead in each. Nothing is weighed up or decided here.
+   */
+  app.get("/trips/:tripId/compare", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    const raw = (req.query as { ids?: string }).ids;
+    const ids = raw ? raw.split(",").map((v) => uuidParam(v.trim())) : null;
+    const all = await loadCandidates(tripId, uid);
+    const chosen = ids ? ids.map((id) => all.find((c) => c.entry.id === id)).filter((c) => c !== undefined) : all.filter((c) => c.entry.status !== "rejected");
+    if (ids && chosen.length !== ids.length) throw new HttpError(404, "not_found", "Mindestens ein Angebot gehört nicht zu dieser Reise.");
+    if (chosen.length > 12) throw new HttpError(400, "invalid_request", "Höchstens zwölf Angebote lassen sich nebeneinander vergleichen.");
+    return compare(chosen);
   });
 
   app.get("/candidates/:candidateId", async (req) => {
@@ -202,6 +230,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       photos: listing?.profile.photos ?? [],
       // What guests say: the model's summary and the single reviews, newest first where the page dates them.
       reviews: reviewsFor(listing, sources[0]?.platform ?? null),
+      // Every hint with whether this trip hid it. `listing.profile.warnings` stays the full, unfiltered list.
+      warnings: warningsFor(listing, candidate.hiddenWarnings),
       sources: sources.map((s) => ({ id: s.id, platform: s.platform, url: s.url, canonicalUrl: s.canonicalUrl, provenance: s.provenance, lastFetchedAt: s.lastFetchedAt })),
       prices,
       votes: { ...tally(voteRows), entries: voteRows },
@@ -236,6 +266,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           rejectionReason: z.string().trim().max(500).nullable(),
           notes: z.string().max(5000).nullable(),
           tags: z.array(z.string().trim().min(1).max(40)).max(20),
+          hiddenWarnings: z.array(z.string().max(1000)).max(40),
         })
         .partial(),
       req.body,

@@ -135,3 +135,30 @@ Die Liste `GET /trips/:id/candidates` enthält weiter `coverImageUrl` und zusät
 - `items` sind die einzelnen Bewertungen im Wortlaut der Seite, höchstens 40, neueste zuerst, wenn alle ein ISO-Datum haben, sonst in der Reihenfolge der Seite. `rating` steht in der Skala der Plattform; `scale` ist `null`, wenn die Seite sie nicht nennt, dann gilt `profile.rating.scale`. `date` ist ein ISO-Datum (`JJJJ-MM-TT`), wo die Seite eines liefert, sonst ihr Wortlaut ("August 2026") oder `null`. `author` ist der Anzeigename von der Seite oder `null`. `items` kann leer sein, obwohl es eine Zusammenfassung gibt: Einzelne Bewertungen kommen nur aus den Daten der Seite, die Zusammenfassung auch aus dem sichtbaren Text.
 - Beim Auslesen auf dem Gerät lohnt es, die Bewertungsliste vorher aufzuklappen.
 - Die Gesamtnote steht weiter in `profile.rating` (`value`, `scale`, `count`).
+
+## Hinweise ausblenden
+
+Hinweise gehören zum Angebot (`listing.profile.warnings`) und werden bei jedem Auslesen neu geschrieben. Ausblenden merkt sich deshalb die Reise, nicht das Angebot:
+
+- `PATCH /candidates/:id` mit `{"hiddenWarnings": ["Wortlaut des Hinweises", …]}` ersetzt die Liste der ausgeblendeten Hinweise (höchstens 40). `[]` blendet alles wieder ein. Gilt für alle Mitglieder der Reise, ab Rolle Mitglied.
+- `GET /candidates/:id` liefert `warnings: [{ "text": "…", "hidden": false }]` mit allen Hinweisen in der Reihenfolge des Steckbriefs. `listing.profile.warnings` bleibt die ungefilterte Liste.
+- `GET /trips/:tripId/candidates` liefert je Angebot `listing.warningCount`, die Zahl der noch sichtbaren Hinweise.
+- Ausgeblendet wird nach Wortlaut. Schreibt die KI einen Hinweis beim Aktualisieren anders, erscheint er wieder. Hinweise nicht über `PATCH …/profile` löschen: das nächste Auslesen bringt sie zurück.
+
+## Vergleich
+
+`GET /trips/:tripId/compare?ids=<id>,<id>,…` stellt Angebote einer Reise nebeneinander. Ohne `ids` alle, die nicht abgelehnt sind. Höchstens zwölf; `404`, wenn eine Id nicht zur Reise gehört.
+
+```json
+{
+  "candidates": [ { "id": "…", "listing": { … }, "price": { … }, "votes": { … }, "bestCount": 7, "summary": "…", "highlights": ["…"], "warnings": ["…"], "reviewSummary": { "summary": "…", "positives": [], "negatives": [] } } ],
+  "criteria": [ { "key": "price.total", "label": "Gesamtpreis", "group": "price", "format": "eur", "better": "lower", "values": [3000, 4200], "best": ["<id>"] } ]
+}
+```
+
+- `candidates` hat die Felder der Liste, dazu Kurztext, Höhepunkte, sichtbare Hinweise und die Zusammenfassung der Bewertungen (`null`, wenn es keine gibt). Reihenfolge wie in `ids`.
+- `criteria` ist eine Zeile je Kriterium, `values` läuft parallel zu `candidates`. `null` heißt unbekannt. Zeilen ohne einen einzigen Wert fehlen, ebenso Ausstattung, die kein Angebot hat.
+- `group`: `price`, `space`, `rating`, `location`, `amenities`, `rules`, `votes`. `format`: `eur`, `number`, `sqm`, `meters`, `km`, `rating` (auf eine Skala von 10 umgerechnet), `boolean`, `text`.
+- `better` ist `higher`, `lower`, `true` oder `null` (nicht wertbar). `best` nennt die Angebote, die in der Zeile vorn liegen; leer, wenn weniger als zwei Werte bekannt oder alle gleich sind.
+- Preise zählen nur, wenn sie als Gesamtpreis für den Zeitraum dieser Reise vorliegen (`price.forThisTrip`), sonst steht `null` in den Preiszeilen.
+- `bestCount` zählt, in wie vielen Zeilen ein Angebot vorn liegt. Das ist ungewichtet und nur eine erste Orientierung.

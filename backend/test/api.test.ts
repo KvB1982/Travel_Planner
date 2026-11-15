@@ -332,3 +332,50 @@ describe("working with candidates", () => {
     expect(list.body.candidates[0].price).toMatchObject({ totalCents: 498000, forThisTrip: true, nights: 7 });
   });
 });
+
+describe("hints and comparison", () => {
+  it("hides single hints for a trip without losing them", async () => {
+    const s = await setup();
+    const id = (await s.importLink(NOVASOL)).body.candidateId as string;
+    await s.call("PATCH", `/candidates/${id}/profile`, s.owner, { warnings: ["Endreinigung kostet extra", "Pool nicht beheizt"] });
+    expect((await s.call("PATCH", `/candidates/${id}`, s.owner, { hiddenWarnings: ["Pool nicht beheizt"] })).status).toBe(200);
+
+    const detail = await s.call("GET", `/candidates/${id}`, s.owner);
+    expect(detail.body.warnings).toEqual([
+      { text: "Endreinigung kostet extra", hidden: false },
+      { text: "Pool nicht beheizt", hidden: true },
+    ]);
+    expect(detail.body.listing.profile.warnings).toHaveLength(2);
+    const list = await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner);
+    expect(list.body.candidates[0].listing.warningCount).toBe(1);
+
+    await s.call("PATCH", `/candidates/${id}`, s.owner, { hiddenWarnings: [] });
+    expect((await s.call("GET", `/candidates/${id}`, s.owner)).body.warnings.every((w: { hidden: boolean }) => !w.hidden)).toBe(true);
+  });
+
+  it("sets candidates side by side and marks who is ahead", async () => {
+    const s = await setup();
+    const a = (await s.importLink(NOVASOL)).body.candidateId as string;
+    const b = (await s.importLink(CASAMUNDO)).body.candidateId as string;
+    await s.call("PATCH", `/candidates/${a}/profile`, s.owner, { bedrooms: 3, amenities: { pool: true, sauna: false }, rating: { value: 4.5, scale: 5, count: 10 } });
+    await s.call("PATCH", `/candidates/${b}/profile`, s.owner, { bedrooms: 5, amenities: { pool: false, sauna: false }, rating: { value: 8, scale: 10, count: 40 } });
+    await s.call("POST", `/candidates/${a}/prices`, s.owner, { totalCents: 300000, startDate: "2027-08-21", endDate: "2027-08-28", persons: 8 });
+    await s.call("POST", `/candidates/${b}/prices`, s.owner, { totalCents: 420000, startDate: "2027-08-21", endDate: "2027-08-28", persons: 8 });
+
+    const res = await s.call("GET", `/trips/${s.tripId}/compare?ids=${a},${b}`, s.owner);
+    expect(res.status).toBe(200);
+    expect(res.body.candidates.map((c: { id: string }) => c.id)).toEqual([a, b]);
+    const row = (key: string) => res.body.criteria.find((r: { key: string }) => r.key === key);
+    expect(row("price.total")).toMatchObject({ values: [3000, 4200], best: [a], format: "eur" });
+    expect(row("price.perNight").values[0]).toBeCloseTo(428.57);
+    expect(row("bedrooms")).toMatchObject({ values: [3, 5], best: [b] });
+    expect(row("rating")).toMatchObject({ values: [9, 8], best: [a] });
+    expect(row("amenities.pool")).toMatchObject({ values: [true, false], best: [a] });
+    expect(row("amenities.sauna")).toBeUndefined();
+    expect(res.body.candidates[0].bestCount).toBeGreaterThan(0);
+
+    await s.call("PATCH", `/candidates/${b}`, s.owner, { status: "rejected" });
+    expect((await s.call("GET", `/trips/${s.tripId}/compare`, s.owner)).body.candidates).toHaveLength(1);
+    expect((await s.call("GET", `/trips/${s.tripId}/compare?ids=${a},00000000-0000-4000-8000-000000000000`, s.owner)).status).toBe(404);
+  });
+});
