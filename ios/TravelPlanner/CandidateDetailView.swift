@@ -147,7 +147,8 @@ struct CandidateDetailView: View {
             priceSection(detail)
 
             if let reviews = detail.reviews, !reviews.isEmpty {
-                ReviewsSection(reviews: reviews, rating: profile.rating) { showReviews = true }
+                ReviewsSection(reviews: reviews, rating: profile.rating, showAll: { showReviews = true },
+                               readOnDevice: canEdit ? detail.sources.first.map { source in { captureSource = source } } : nil)
             }
 
             Section("Eckdaten") {

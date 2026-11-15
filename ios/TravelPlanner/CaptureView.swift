@@ -166,6 +166,28 @@ final class WebPage: NSObject, WKNavigationDelegate {
       pressed++;
       await new Promise(function (done) { setTimeout(done, 1500); });
     }
+    // Review lists load more entries as one scrolls. Scroll the opened list to its end until nothing new arrives.
+    var dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog[open]');
+    for (var d = 0; d < dialogs.length; d++) {
+      if (!/(bewertung|rezension|review)/i.test(dialogs[d].innerText || '')) { continue; }
+      var boxes = [dialogs[d]].concat(Array.prototype.slice.call(dialogs[d].querySelectorAll('*')));
+      var list = null;
+      for (var b = 0; b < boxes.length; b++) {
+        var box = boxes[b];
+        if (box.scrollHeight > box.clientHeight + 200 && (!list || box.scrollHeight > list.scrollHeight)) {
+          var flow = getComputedStyle(box).overflowY;
+          if (flow === 'auto' || flow === 'scroll') { list = box; }
+        }
+      }
+      if (!list) { continue; }
+      var still = 0;
+      for (var round = 0; round < 30 && still < 3; round++) {
+        var before = list.scrollHeight;
+        list.scrollTop = list.scrollHeight;
+        await new Promise(function (done) { setTimeout(done, 500); });
+        still = list.scrollHeight === before ? still + 1 : 0;
+      }
+    }
     return pressed;
     """
 

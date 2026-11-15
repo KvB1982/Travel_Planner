@@ -7,6 +7,8 @@ struct ReviewsSection: View {
     let rating: Rating?
     /// Opens the list of single reviews. The sheet belongs to the surrounding screen, not to a list row.
     var showAll: () -> Void
+    /// Starts reading the advert on this device, offered when the single reviews are missing. Nil hides the offer.
+    var readOnDevice: (() -> Void)?
 
     var body: some View {
         Section {
@@ -25,8 +27,13 @@ struct ReviewsSection: View {
             points(reviews.positives, symbol: "hand.thumbsup.fill", color: .green, label: "Gelobt")
             points(reviews.negatives, symbol: "hand.thumbsdown.fill", color: .orange, label: "Kritisiert")
             if let items = reviews.items, !items.isEmpty {
-                Button(items.count == 1 ? "Die Bewertung lesen" : "Alle \(items.count) Bewertungen lesen", systemImage: "text.bubble") {
+                Button(items.count == 1 ? "Die Bewertung lesen" : "\(items.count) Bewertungen im Wortlaut lesen", systemImage: "text.bubble") {
                     showAll()
+                }
+            } else if let readOnDevice {
+                // The server often gets only an excerpt; the full list loads on the advert's page itself.
+                Button("Einzelne Bewertungen auf diesem Gerät holen", systemImage: "iphone.and.arrow.forward") {
+                    readOnDevice()
                 }
             }
         } header: {
@@ -41,9 +48,14 @@ struct ReviewsSection: View {
     /// Says where the summary comes from, so nobody mistakes it for the platform's own text.
     private var basis: String {
         var text = "Automatisch zusammengefasst"
-        if let count = reviews.basedOn, count > 0 { text += " aus \(Format.number(count)) Bewertungen" }
+        if let count = reviews.basedOn, count > 0 {
+            text += count == 1 ? " aus einer Bewertung" : " aus \(Format.number(count)) Bewertungen"
+        }
         if let date = reviews.generatedAt { text += ", Stand \(date.formatted(date: .abbreviated, time: .omitted))" }
-        return text + ". Im Zweifel die Einzelbewertungen lesen."
+        if (reviews.items ?? []).isEmpty {
+            return text + ". Die einzelnen Bewertungen liegen noch nicht vor."
+        }
+        return text + ". Im Zweifel die einzelnen Bewertungen lesen."
     }
 
     @ViewBuilder
