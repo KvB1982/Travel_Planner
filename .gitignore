@@ -4,3 +4,10 @@ dist/
 *.log
 .DS_Store
 backend/data/
+
+# Xcode and Swift
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+*.xcuserstate
