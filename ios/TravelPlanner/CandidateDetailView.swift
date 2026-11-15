@@ -283,12 +283,14 @@ struct CandidateDetailView: View {
             if let current, let text = Format.price(totalCents: current.totalCents, rangeMaxCents: current.rangeMaxCents, kind: current.kind) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(text).font(.title3.weight(.semibold))
-                    if let perNight = Format.perPersonNight(totalCents: current.totalCents, persons: current.persons, nights: current.nights) {
+                    // A price for other dates or another party says nothing about this trip's cost per person.
+                    if current.tripId == tripID,
+                       let perNight = Format.perPersonNight(totalCents: current.totalCents, persons: current.persons, nights: current.nights) {
                         Text(perNight).font(.subheadline).foregroundStyle(.secondary)
                     }
                     Text(priceContext(current)).font(.footnote).foregroundStyle(.secondary)
                     if current.tripId != tripID {
-                        Text("Dieser Preis wurde nicht für eure Reise abgefragt.").font(.footnote).foregroundStyle(.orange)
+                        Text("Dieser Preis gilt für einen anderen Zeitraum als eure Reise.").font(.footnote).foregroundStyle(.orange)
                     }
                 }
                 ForEach(current.breakdown ?? [], id: \.self) { line in

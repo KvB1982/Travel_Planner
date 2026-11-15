@@ -97,7 +97,21 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.load(URLRequest(url: url))
     }
 
+    /// The page as rendered. Adverts fill in their content by script after loading, so this waits
+    /// until the document has stopped growing; reading at once would return an empty shell.
     func html() async throws -> String {
+        var last = -1
+        var stable = 0
+        for _ in 0..<16 {
+            let state = try await webView.evaluateJavaScript("document.readyState + '|' + document.documentElement.outerHTML.length") as? String ?? ""
+            let parts = state.split(separator: "|")
+            let length = parts.count == 2 ? Int(parts[1]) ?? 0 : 0
+            // Small changes (timers, counters) are ignored; a still-rendering page grows by far more.
+            stable = parts.first == "complete" && last >= 0 && abs(length - last) < 2_000 ? stable + 1 : 0
+            last = length
+            if stable >= 2 { break }
+            try await Task.sleep(for: .milliseconds(500))
+        }
         let result = try await webView.evaluateJavaScript("document.documentElement.outerHTML")
         return result as? String ?? ""
     }

@@ -192,10 +192,12 @@ public struct ListingSummary: Codable, Hashable, Sendable {
     public var bathrooms: Double?
     public var rating: Rating?
     public var platforms: [String]
+    public var photoCount: Double?
 
     public init(id: String, kind: ListingKind = .vacationHome, title: String? = nil, place: String? = nil, country: String? = nil,
                 lat: Double? = nil, lon: Double? = nil, coverImageUrl: String? = nil, fillPercent: Int = 0, maxGuests: Double? = nil,
-                bedrooms: Double? = nil, bathrooms: Double? = nil, rating: Rating? = nil, platforms: [String] = []) {
+                bedrooms: Double? = nil, bathrooms: Double? = nil, rating: Rating? = nil, platforms: [String] = [], photoCount: Double? = nil) {
+        self.photoCount = photoCount
         self.id = id; self.kind = kind; self.title = title; self.place = place; self.country = country; self.lat = lat; self.lon = lon
         self.coverImageUrl = coverImageUrl; self.fillPercent = fillPercent; self.maxGuests = maxGuests; self.bedrooms = bedrooms
         self.bathrooms = bathrooms; self.rating = rating; self.platforms = platforms

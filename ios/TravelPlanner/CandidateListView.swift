@@ -209,6 +209,17 @@ private struct CandidateRow: View {
             CoverImage(url: candidate.listing.coverImageUrl)
                 .frame(width: 88, height: 66)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .bottomTrailing) {
+                    if let count = candidate.listing.photoCount, count > 1 {
+                        Text(Format.number(count))
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(4)
+                            .accessibilityLabel("\(Format.number(count)) Bilder")
+                    }
+                }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if candidate.status == .favorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
@@ -230,7 +241,9 @@ private struct CandidateRow: View {
                     if let price = candidate.price, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
                         Text(text).font(.subheadline.weight(.semibold))
                         if !price.forThisTrip {
-                            Text("anderer Zeitraum").font(.caption).foregroundStyle(.orange)
+                            // Not asked for this trip's dates, so say which dates the price belongs to.
+                            Text(Format.dateRange(price.startDate, price.endDate) ?? "anderer Zeitraum")
+                                .font(.caption).foregroundStyle(.orange).lineLimit(1)
                         }
                     }
                     Spacer()
