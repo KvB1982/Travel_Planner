@@ -115,14 +115,17 @@ export function thumbFor(url: string): string | null {
   return null;
 }
 
-const DROP_KEYS = /^(images?|photos?|pictures?|media|gallery|reviews?|breadcrumbs?|seo|translations?|i18n|tracking|analytics|footer|header|navigation|menu)$/i;
+// Picture lists (collected separately), single reviews, and what real pages carry as ballast:
+// A/B test configuration, editorial building blocks, page chrome, monitoring.
+const DROP_KEYS =
+  /^(images?|photos?|pictures?|media|gallery|reviews?|ratingList|breadcrumbs?|seo|translations?|i18n|tracking|.*analytics.*|footer|header|unparsedHeader|globalHeader.*|navigation|menu|optimizely.*|contentful.*|experiment.*|hrefLang.*|appConfig|notification.*|inlineNotification.*|newsletter.*|.*datadog.*|.*performance.*|cookie.*|consent.*)$/i;
 
 /** Shrink a state object to what describes the property: no image lists, no review bodies, no giant arrays. */
 export function prune(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return undefined;
   if (typeof value === "string") {
     if (/^https?:\/\/\S+\.(jpe?g|png|webp|avif|gif|svg)(\?\S*)?$/i.test(value)) return undefined;
-    return value.length > 600 ? `${value.slice(0, 600)}…` : value;
+    return value.length > 1500 ? `${value.slice(0, 1500)}…` : value;
   }
   if (typeof value !== "object") return value;
   if (depth > 12) return undefined;
@@ -439,8 +442,54 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
   return { profile, provenance };
 }
 
+const DIGEST_SKIP_KEYS = /^(__typename|id|ids?|.*Id|.*ID|.*Key|key|slug|token|hash|icon.*|.*Icon|color.*|.*Color|url|.*Url|.*URL|href|src|logging.*|.*Logging.*|tracking.*|analytics.*|experiment.*|locale|currency|timezone|timestamp|createdAt|updatedAt|style.*|className|testId|anchor|ctaType|screenId|sectionId|sectionComponentType|sectionContentStatus)$/;
+const DIGEST_NUMBER_KEYS = /bed|bath|room|guest|capacity|person|occup|sleep|^lat|^lng|^lon|latitude|longitude|price|amount|total|fee|deposit|rating|review|score|count|size|area|sqm|star|distance|night|min|max|year|floor/i;
+
+/**
+ * Pages that render in the browser keep everything in one enormous state
+ * object, most of it layout and bookkeeping. This keeps what a person would
+ * read: the texts, and the numbers whose name says what they count, in page
+ * order, each once.
+ */
+export function digestState(state: unknown, budget = 30_000): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  let used = 0;
+  const add = (line: string): boolean => {
+    if (seen.has(line)) return true;
+    seen.add(line);
+    used += line.length + 1;
+    if (used > budget) return false;
+    lines.push(line);
+    return true;
+  };
+  const isProse = (v: string) => {
+    const t = v.trim();
+    if (t.length < 2 || /^https?:\/\//i.test(t) || /^data:/i.test(t)) return false;
+    // Enum names, ids, encoded blobs: no spaces and no lower-case word in sight.
+    if (!/\s/.test(t) && (t.length > 30 || /^[A-Z0-9_]+$/.test(t) || /^[A-Za-z0-9+/=_-]{16,}$/.test(t))) return false;
+    return /\p{L}{2}/u.test(t) || /\d/.test(t);
+  };
+  const walk = (node: unknown, key: string, depth: number): boolean => {
+    if (node === null || node === undefined || depth > 40) return true;
+    if (typeof node === "string") return isProse(node) ? add(`${key}: ${node.trim().replace(/\s+/g, " ")}`) : true;
+    if (typeof node === "number" || typeof node === "boolean") return DIGEST_NUMBER_KEYS.test(key) ? add(`${key}: ${node}`) : true;
+    if (Array.isArray(node)) {
+      for (const item of node) if (!walk(item, key, depth + 1)) return false;
+      return true;
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (DIGEST_SKIP_KEYS.test(k)) continue;
+      if (!walk(v, k, depth + 1)) return false;
+    }
+    return true;
+  };
+  const complete = walk(state, "state", 0);
+  return complete ? lines.join("\n") : `${lines.join("\n")}\n[gekürzt]`;
+}
+
 /** The compact input for the language model: structured data first, then the visible text. */
-export function modelInput(blocks: PageBlocks, limits = { state: 14_000, text: 9_000 }): string {
+export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest: 40_000, text: 14_000 }): string {
   const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n[gekürzt]` : s);
   const parts: string[] = [];
   if (hasPortalMetadata(blocks)) {
@@ -450,7 +499,11 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, text: 9
     if (Object.keys(blocks.og).length) parts.push(`<meta>\n${JSON.stringify(blocks.og)}\n</meta>`);
   }
   if (blocks.jsonLd.length) parts.push(`<json_ld>\n${cut(JSON.stringify(prune(blocks.jsonLd) ?? []), 6_000)}\n</json_ld>`);
-  if (Object.keys(blocks.state).length) parts.push(`<page_state>\n${cut(JSON.stringify(blocks.state), limits.state)}\n</page_state>`);
+  if (Object.keys(blocks.state).length) {
+    const json = JSON.stringify(blocks.state);
+    // A state that fits is passed as it is; a large one as its readable digest instead of an arbitrary first slice.
+    parts.push(json.length <= limits.state ? `<page_state>\n${json}\n</page_state>` : `<page_state format="Auszug: Schlüssel und Wert je Zeile, in Seitenreihenfolge">\n${digestState(blocks.state, limits.digest)}\n</page_state>`);
+  }
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);
   return parts.join("\n\n");
 }

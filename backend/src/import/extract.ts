@@ -10,7 +10,13 @@ export interface ExtractionResult {
 }
 
 /** Turns page blocks into a profile. `baseline` is what was read without a model. */
-export type Extractor = (input: { blocks: PageBlocks; link: LinkInfo; baseline: Profile }) => Promise<ExtractionResult>;
+export type Extractor = (input: {
+  blocks: PageBlocks;
+  link: LinkInfo;
+  baseline: Profile;
+  /** Set when the page was requested for the trip's own dates and party instead of those in the shared link. */
+  requestedFor?: { startDate: string | null; endDate: string | null; adults: number | null; children: number | null };
+}) => Promise<ExtractionResult>;
 
 /** Used when no API key is configured: the structured data alone. */
 export const baselineExtractor: Extractor = async ({ baseline }) => ({
@@ -39,10 +45,18 @@ Regeln:
 - uncertain: die Feldpfade (zum Beispiel "livingAreaSqm" oder "amenities.grill"), deren Wert du aus Fließtext abgeleitet hast oder die zwischen Quellen widersprüchlich sind. Werte aus JSON-LD oder Zustandsdaten gehören nicht hinein.
 - Wenn eine Angabe in mehreren Quellen unterschiedlich ist, nimm den Wert, den die Seite dem Besucher sichtbar anzeigt, und nenne den Widerspruch in warnings.`;
 
-function userPrompt(input: { blocks: PageBlocks; link: LinkInfo; baseline: Profile }): string {
+function userPrompt(input: Parameters<Extractor>[0]): string {
   const { link } = input;
   const stay = link.stay;
-  const context = [
+  const r = input.requestedFor;
+  const context = r
+    ? [
+        `Plattform: ${link.platform}`,
+        `Angebotsart laut Link: ${link.kind}`,
+        // What the sharer had selected no longer matters, and must not turn up as a contradiction.
+        `Die Seite wurde für die Reise der Gruppe abgerufen: ${r.startDate} bis ${r.endDate}, ${r.adults ?? "?"} Erwachsene, ${r.children ?? 0} Kinder. Das ist der maßgebliche Zeitraum; erwähne ihn nicht als Abweichung.`,
+      ].join("\n")
+    : [
     `Plattform: ${link.platform}`,
     `Angebotsart laut Link: ${link.kind}`,
     stay.startDate && stay.endDate

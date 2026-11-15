@@ -217,8 +217,8 @@ describe("import", () => {
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
     expect(detail.body.candidate.importStatus).toBe("ready");
     expect(detail.body.listing.profile).toMatchObject({ sleepingPlaces: 8, summary: "Villa am Meer.", uncertain: ["sleepingPlaces"] });
-    // The hint from the link (one guest) stays next to what the page showed.
-    expect(detail.body.listing.profile.warnings).toHaveLength(2);
+    // The page was read for the trip, so the sharer's single guest is no longer worth a hint.
+    expect(detail.body.listing.profile.warnings).toEqual(["Der vierte Schlafplatz ist ein Schlafsofa."]);
     expect(detail.body.prices[0]).toMatchObject({ totalCents: 264600, kind: "from", capture: "import" });
   });
 

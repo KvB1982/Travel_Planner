@@ -169,7 +169,7 @@ export async function processImport(
       `import ${input.link.platform}/${input.link.externalId}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}`,
     );
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
-    const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline });
+    const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
 
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
     // What was read from the page replaces what was only seeded from the link.
@@ -190,7 +190,9 @@ export async function processImport(
     }
     profile.price.nights ??= nightsBetween(profile.price.startDate, profile.price.endDate);
     // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
-    profile.warnings = [...new Set([...(current?.profile.warnings ?? []), ...extracted.warnings])].slice(0, 6);
+    // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
+    const fromLink = priceBelongsToTrip ? (current?.profile.warnings ?? []).filter((w) => !input.link.warnings.includes(w)) : (current?.profile.warnings ?? []);
+    profile.warnings = [...new Set([...fromLink, ...extracted.warnings])].slice(0, 5);
 
     await db
       .update(listings)
