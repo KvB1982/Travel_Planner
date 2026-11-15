@@ -178,6 +178,12 @@ export async function processImport(
       profile.price.nights = nightsBetween(stay.startDate, stay.endDate);
       if (stay.adults !== null) profile.price.persons = stay.adults + (stay.children ?? 0);
     }
+    if (input.link.searchWindow && !fromDevice) {
+      // Whatever was read, a window of possible dates is not a stay.
+      profile.price.startDate = null;
+      profile.price.endDate = null;
+      profile.price.nights = null;
+    }
     profile.price.nights ??= nightsBetween(profile.price.startDate, profile.price.endDate);
     // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
     profile.warnings = [...new Set([...(current?.profile.warnings ?? []), ...extracted.warnings])].slice(0, 6);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
-import { claudeExtractor, combine } from "../src/import/extract.js";
+import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
 import { assertPublicUrl, looksBlocked, UnsafeUrlError } from "../src/import/fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles } from "../src/import/profile.js";
 import { analyzeLink } from "../src/import/url.js";
@@ -165,6 +165,15 @@ describe("claudeExtractor", () => {
       expect(profile).toEqual(baseline);
       expect(note).toMatch(/strukturierte Daten/);
     }
+  });
+
+  it("drops a malformed field instead of the whole answer", () => {
+    const answer = { ...emptyProfile(), title: "Haus", bedrooms: "drei", maxGuests: 8, highlights: ["Pool", 7, "Meerblick"], price: { ...emptyProfile().price, totalEur: "2.646 €", nights: 7 } };
+    const result = parseLenient(answer);
+    expect(result?.profile).toMatchObject({ title: "Haus", bedrooms: null, maxGuests: 8, highlights: ["Pool", "Meerblick"], price: { totalEur: null, nights: 7 } });
+    expect(result?.dropped.map((d) => d.split(":")[0]).sort()).toEqual(["bedrooms", "highlights.1", "price.totalEur"]);
+    expect(parseLenient("kein Objekt")).toBeNull();
+    expect(parseLenient([1])).toBeNull();
   });
 
   it("never takes coordinates or ratings from prose", () => {

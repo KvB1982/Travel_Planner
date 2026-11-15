@@ -34,6 +34,8 @@ Regeln:
 - summary: höchstens zwei Sätze in eigenen Worten auf Deutsch. Übernimm keine Formulierungen der Seite.
 - highlights: höchstens vier kurze Stichworte, was dieses Angebot auszeichnet.
 - warnings: höchstens vier kurze Hinweise auf Deutsch zu dem, was eine Reisegruppe wissen sollte: Widersprüche zwischen Quellen (zum Beispiel unterschiedliche Gästezahlen), fehlende oder unklare Nebenkosten, ein Preis für eine andere Personenzahl, Besonderheiten bei Schlafplätzen oder Lage.
+- Hinweise aus <link_context> ("Hinweis zum Link") stehen bereits im Steckbrief. Wiederhole sie nicht in warnings, auch nicht umformuliert.
+- Ist der Zeitraum im Link als Suchfenster gekennzeichnet, bleiben price.startDate, price.endDate und price.nights null.
 - uncertain: die Feldpfade (zum Beispiel "livingAreaSqm" oder "amenities.grill"), deren Wert du aus Fließtext abgeleitet hast oder die zwischen Quellen widersprüchlich sind. Werte aus JSON-LD oder Zustandsdaten gehören nicht hinein.
 - Wenn eine Angabe in mehreren Quellen unterschiedlich ist, nimm den Wert, den die Seite dem Besucher sichtbar anzeigt, und nenne den Widerspruch in warnings.`;
 
@@ -43,7 +45,9 @@ function userPrompt(input: { blocks: PageBlocks; link: LinkInfo; baseline: Profi
   const context = [
     `Plattform: ${link.platform}`,
     `Angebotsart laut Link: ${link.kind}`,
-    stay.startDate && stay.endDate ? `Zeitraum im Link: ${stay.startDate} bis ${stay.endDate}` : "Zeitraum im Link: keiner",
+    stay.startDate && stay.endDate
+      ? `Zeitraum im Link: ${stay.startDate} bis ${stay.endDate}${link.searchWindow ? " (Suchfenster, kein fester Aufenthalt)" : ""}`
+      : "Zeitraum im Link: keiner",
     stay.adults !== null ? `Personen im Link: ${stay.adults} Erwachsene, ${stay.children ?? 0} Kinder` : "Personen im Link: keine Angabe",
     ...link.warnings.map((w) => `Hinweis zum Link: ${w}`),
   ].join("\n");
@@ -68,6 +72,38 @@ function parseJsonObject(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Validate the model's answer field by field. One malformed value (a string
+ * where a number belongs, an over-long text) must not cost the whole reading:
+ * the offending field is dropped and falls back to its empty default.
+ */
+export function parseLenient(raw: unknown): { profile: Profile; dropped: string[] } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const data = structuredClone(raw) as Record<string, unknown>;
+  const dropped: string[] = [];
+  for (let round = 0; round < 8; round++) {
+    const parsed = profileSchema.safeParse(data);
+    if (parsed.success) return { profile: parsed.data, dropped };
+    let changed = false;
+    // Deepest paths last to first, so removing array items does not shift the ones still to go.
+    const issues = [...parsed.error.issues].sort((a, b) => b.path.join(".").localeCompare(a.path.join("."), "en", { numeric: true }));
+    for (const issue of issues) {
+      if (issue.path.length === 0) return null;
+      let parent: unknown = data;
+      for (const key of issue.path.slice(0, -1)) parent = parent && typeof parent === "object" ? (parent as Record<PropertyKey, unknown>)[key as PropertyKey] : undefined;
+      if (!parent || typeof parent !== "object") continue;
+      const last = issue.path.at(-1) as PropertyKey;
+      if (!(last in parent)) continue;
+      if (Array.isArray(parent)) parent.splice(Number(last), 1);
+      else delete (parent as Record<PropertyKey, unknown>)[last];
+      dropped.push(`${issue.path.join(".")}: ${issue.code}`);
+      changed = true;
+    }
+    if (!changed) return null;
+  }
+  return null;
 }
 
 /**
@@ -106,11 +142,16 @@ export function claudeExtractor(options: { apiKey: string; model: string; client
       if (response.stop_reason === "max_tokens") return fallback("Die KI-Auswertung wurde abgeschnitten. Übernommen wurden nur strukturierte Daten.");
 
       const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-      const parsed = profileSchema.safeParse(parseJsonObject(text));
-      if (!parsed.success) return fallback("Die KI-Auswertung lieferte kein gültiges Ergebnis. Übernommen wurden nur strukturierte Daten.");
+      const parsed = parseLenient(parseJsonObject(text));
+      if (!parsed) {
+        console.warn(`extraction: unusable answer for ${input.link.platform}/${input.link.externalId} (${text.length} chars, stop ${response.stop_reason})`);
+        return fallback("Die KI-Auswertung lieferte kein gültiges Ergebnis. Übernommen wurden nur strukturierte Daten.");
+      }
+      // Field names and error codes only, never page content.
+      if (parsed.dropped.length) console.warn(`extraction: dropped fields for ${input.link.platform}/${input.link.externalId}: ${parsed.dropped.join("; ")}`);
 
       // The kind from the link is authoritative; the model must not turn a package into a house.
-      return { profile: combine(input.baseline, { ...parsed.data, kind: input.link.kind }), note: null };
+      return { profile: combine(input.baseline, { ...parsed.profile, kind: input.link.kind }), note: null };
     } catch (err) {
       if (err instanceof Anthropic.AuthenticationError) return fallback("Der Schlüssel für die KI-Auswertung ist ungültig. Übernommen wurden nur strukturierte Daten.");
       if (err instanceof Anthropic.RateLimitError) return fallback("Die KI-Auswertung ist gerade ausgelastet. Übernommen wurden nur strukturierte Daten, ein erneuter Import holt den Rest nach.");
