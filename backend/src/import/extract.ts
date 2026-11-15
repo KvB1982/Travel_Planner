@@ -161,6 +161,8 @@ export function combine(baseline: Profile, fromModel: Profile): Profile {
   const merged = mergeProfiles(fromModel, baseline);
   merged.lat = baseline.lat ?? fromModel.lat;
   merged.lon = baseline.lon ?? fromModel.lon;
+  // A position the model worked out from text is an estimate, not a pin.
+  if (baseline.lat === null && merged.lat !== null) merged.uncertain = [...new Set([...merged.uncertain, "lat", "lon"])];
   if (baseline.rating.value !== null) merged.rating = baseline.rating;
   if (baseline.coverImageUrl) merged.coverImageUrl = baseline.coverImageUrl;
   // Picture addresses are copied from page data, never written by the model.

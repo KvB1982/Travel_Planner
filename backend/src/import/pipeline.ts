@@ -7,6 +7,8 @@ import { UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
 import { analyzeLink, embeddedTarget, nightsBetween, urlForStay, type LinkInfo } from "./url.js";
 
+const APPROXIMATE_POSITION = new Set(["airbnb", "vrbo"]);
+
 export interface ImportDeps {
   db: Db;
   fetcher: PageFetcher;
@@ -215,6 +217,9 @@ export async function processImport(
       const fromLink = priceBelongsToTrip ? before.warnings.filter((w) => !input.link.warnings.includes(w)) : before.warnings;
       profile.warnings = [...new Set([...extracted.warnings, ...fromLink])].slice(0, 5);
     }
+
+    // These platforms show the neighbourhood, not the house, until someone has booked.
+    if (!secondary && profile.lat !== null && APPROXIMATE_POSITION.has(input.link.platform)) profile.uncertain = [...new Set([...profile.uncertain, "lat", "lon"])];
 
     // Reviews are kept per source and put together anew each time, so reading one platform again
     // never loses what another one said.

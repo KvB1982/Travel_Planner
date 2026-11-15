@@ -207,3 +207,7 @@ Ein Angebot kann mehrere Quellen haben. Die erste ist der Link, mit dem es getei
 ## Bewertungen vom Gerät
 
 Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp-captured-reviews" hidden>` mit einem `<div data-review>` je Bewertung enthalten (Fließtext, höchstens 60 Einträge zu je 3000 Zeichen). Der Server nutzt ihn für die Zusammenfassung und, wenn die Seitendaten selbst keine einzelnen Bewertungen enthalten, für `reviews.items`. Die KI sortiert aus, was keine Gästebewertung ist, und trennt Name, Datum und Note ab; der Text wird wörtlich aus dem Block geschnitten. Das Protokoll nennt je Auslesen die Zahl der Blöcke (`review blocks N`) und wie viele Bewertungen daraus wurden.
+
+## Ungefähre Lage
+
+Stehen `"lat"` und `"lon"` in `profile.uncertain`, ist die Position nur ungefähr: entweder hat die KI sie aus dem Text abgeleitet, oder die Plattform zeigt bewusst nur die Umgebung (Airbnb, Vrbo). Die App zeichnet dann besser einen Kreis als eine Nadel. Eine von Hand korrigierte Position gilt wieder als genau.
