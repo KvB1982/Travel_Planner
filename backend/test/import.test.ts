@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { profileSchema } from "../src/import/profile.js";
+import { reviewsFromBlocks } from "../src/import/extract.js";
 import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
 import { assertPublicUrl, looksBlocked, UnsafeUrlError } from "../src/import/fetch.js";
@@ -296,5 +298,44 @@ describe("fetch safety", () => {
     expect(looksBlocked(200, fixture("blocked.html"))).toBe(true);
     expect(looksBlocked(429, "")).toBe(true);
     expect(looksBlocked(200, fixture("novasol.html"))).toBe(false);
+  });
+});
+
+describe("reviews collected on the device", () => {
+  const html = `<html><head><title>Haus</title></head><body><p>${"Text der Seite. ".repeat(40)}</p>
+    <div id="tp-captured-reviews" hidden>
+      <div data-review>Jörg\nAugust 2026\n5 Sterne\nWunderbares Haus direkt am Meer, wir kommen wieder.\nAntwort des Gastgebers: Danke!</div>
+      <div data-review>Häufige Fragen: Gibt es WLAN? Ja, im ganzen Haus.</div>
+      <div data-review>kurz</div>
+    </div></body></html>`;
+
+  it("takes the blocks out of the page text and hands them to the model by number", () => {
+    const blocks = extractBlocks(html);
+    expect(blocks.capturedReviews).toHaveLength(2);
+    expect(blocks.text).not.toContain("Wunderbares Haus");
+    expect(modelInput(blocks)).toContain('<block i="0">Jörg August 2026 5 Sterne Wunderbares Haus');
+  });
+
+  it("cuts the guest's words from the block and drops what is no review", () => {
+    const blocks = extractBlocks(html).capturedReviews;
+    const reviews = reviewsFromBlocks(blocks, [
+      { i: 0, keep: true, author: "Jörg", date: "August 2026", rating: 5, scale: 5, start: "Wunderbares Haus direkt am Meer,", end: "wir kommen wieder." },
+      { i: 1, keep: false },
+      { i: 7, keep: true },
+    ]);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]).toMatchObject({ author: "Jörg", date: "August 2026", rating: 5, scale: 5, text: "Wunderbares Haus direkt am Meer, wir kommen wieder." });
+  });
+});
+
+describe("cost items in whatever shape the model chose", () => {
+  it("keeps them", () => {
+    const parsed = profileSchema.parse({ price: { extraCosts: ["Kurtaxe", { name: "Endreinigung", amount: "120,50 €" }, { item: "Strom", amountEur: "nach Verbrauch" }, { item: "Bettwäsche", amountEur: 15, note: "pro Person" }] } });
+    expect(parsed.price.extraCosts).toEqual([
+      { item: "Kurtaxe", amountEur: null, note: null },
+      { item: "Endreinigung", amountEur: 120.5, note: null },
+      { item: "Strom", amountEur: null, note: "nach Verbrauch" },
+      { item: "Bettwäsche", amountEur: 15, note: "pro Person" },
+    ]);
   });
 });

@@ -203,3 +203,7 @@ Ein Angebot kann mehrere Quellen haben. Die erste ist der Link, mit dem es getei
 - `rating` ist die Note dieser Plattform (`value`, `scale`, `count`), `title` der Titel dort, `reviewCount` die Zahl der dort gelesenen Einzelbewertungen. Alle drei sind `null`, solange die Quelle nicht gelesen ist.
 - `prices[].listingSourceId` sagt, von welcher Quelle ein Preis stammt. So lassen sich Preise je Plattform nebeneinanderstellen.
 - `reviews.items[].platform` nennt die Herkunft jeder Bewertung. `reviews.summary` läuft über alle Plattformen, sobald mehr als eine Bewertungen geliefert hat.
+
+## Bewertungen vom Gerät
+
+Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp-captured-reviews" hidden>` mit einem `<div data-review>` je Bewertung enthalten (Fließtext, höchstens 60 Einträge zu je 3000 Zeichen). Der Server nutzt ihn für die Zusammenfassung und, wenn die Seitendaten selbst keine einzelnen Bewertungen enthalten, für `reviews.items`. Die KI sortiert aus, was keine Gästebewertung ist, und trennt Name, Datum und Note ab; der Text wird wörtlich aus dem Block geschnitten. Das Protokoll nennt je Auslesen die Zahl der Blöcke (`review blocks N`) und wie viele Bewertungen daraus wurden.

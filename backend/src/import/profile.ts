@@ -112,7 +112,22 @@ export const profileSchema = z.object({
       kind: z.enum(["total", "from", "range"]).nullable().default(null),
       rangeMaxEur: nnum,
       included: z.array(z.string()).default([]),
-      extraCosts: z.array(z.object({ item: z.string(), amountEur: z.number().nullable(), note: nstr })).default([]),
+      extraCosts: z
+        .array(
+          // Models vary the shape of these entries; none of that should cost the group a cost item.
+          z.preprocess((v) => {
+            if (typeof v === "string") return { item: v, amountEur: null, note: null };
+            if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+            const o = v as Record<string, unknown>;
+            const item = o.item ?? o.name ?? o.label ?? o.title ?? o.description ?? o.position;
+            const rawAmount = o.amountEur ?? o.amount ?? o.priceEur ?? o.price ?? o.eur ?? null;
+            const parsed = typeof rawAmount === "string" ? Number(rawAmount.replace(/[^0-9,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".")) : rawAmount;
+            const amountEur = typeof parsed === "number" && Number.isFinite(parsed) && !(typeof rawAmount === "string" && !/\d/.test(rawAmount)) ? parsed : null;
+            const note = typeof o.note === "string" ? o.note : typeof rawAmount === "string" && amountEur === null ? rawAmount : null;
+            return { item: typeof item === "string" ? item : item === undefined || item === null ? item : String(item), amountEur, note };
+          }, z.object({ item: z.string(), amountEur: z.number().nullable(), note: nstr })),
+        )
+        .default([]),
       depositEur: nnum,
     })
     .prefault({}),

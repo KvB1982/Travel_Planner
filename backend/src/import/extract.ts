@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { modelInput, type PageBlocks } from "./blocks.js";
 import { emptyProfile, mergeProfiles, profileSchema, type Profile } from "./profile.js";
 import type { LinkInfo } from "./url.js";
@@ -41,9 +42,10 @@ Regeln:
 - beds zählt Betten, sleepingPlaces zählt Schlafplätze. Ein Doppelbett ist ein Bett und zwei Schlafplätze. Ein Schlafsofa zählt als Schlafplatz und gehört mit Raum in bedDetails.
 - bedDetails ist eine Liste von Objekten der Form {"room": "Schlafzimmer 1", "beds": "1 Doppelbett"}, ein Eintrag je Raum mit Schlafgelegenheit.
 - Entfernungen in Metern, Flughafen in Kilometern. Fahrzeiten sind keine Entfernungen: lass das Feld dann null und nenne die Fahrzeit in warnings.
-- price: Beträge in Euro als Zahl. kind ist "total" bei einem Gesamtpreis für einen konkreten Zeitraum, "from" bei einem Ab-Preis, "range" bei einer Preisspanne. Nenne unter included, was laut Seite im Preis enthalten ist, und unter extraCosts jede zusätzliche oder verbrauchsabhängige Position (Endreinigung, Bettwäsche, Strom, Wasser, Kurtaxe, Servicegebühr). amountEur ist null, wenn kein Betrag genannt ist, dann steht in note zum Beispiel "nach Verbrauch".
+- price: Beträge in Euro als Zahl. kind ist "total" bei einem Gesamtpreis für einen konkreten Zeitraum, "from" bei einem Ab-Preis, "range" bei einer Preisspanne. Nenne unter included, was laut Seite im Preis enthalten ist, und unter extraCosts jede zusätzliche oder verbrauchsabhängige Position (Endreinigung, Bettwäsche, Strom, Wasser, Kurtaxe, Servicegebühr). Jede Position hat die Form {"item": "Endreinigung", "amountEur": 120, "note": null}. amountEur ist eine Zahl oder null, wenn kein Betrag genannt ist, dann steht in note zum Beispiel "nach Verbrauch".
 - packageTrip nur bei Hotels und Pauschalreisen füllen.
-- reviewSummary: fasse zusammen, was Gäste sagen, wenn einzelne Bewertungen vorliegen (in <reviews> oder im sichtbaren Text). summary: zwei bis drei Sätze auf Deutsch in eigenen Worten, ausgewogen, auch wenn die Bewertungen in anderen Sprachen sind. positives und negatives: je höchstens vier kurze Stichpunkte, nur was mehrfach oder mit Nachdruck genannt wird; ein einzelner Ausreißer wird als solcher bezeichnet. basedOn: die Zahl der Bewertungen, die du gelesen hast. Ohne einzelne Bewertungen bleibt summary null und die Listen leer; die reine Punktzahl ist keine Zusammenfassung.
+- reviewSummary: fasse zusammen, was Gäste sagen, wenn einzelne Bewertungen vorliegen (in <reviews>, in <captured_reviews> oder im sichtbaren Text). summary: zwei bis drei Sätze auf Deutsch in eigenen Worten, ausgewogen, auch wenn die Bewertungen in anderen Sprachen sind. positives und negatives: je höchstens vier kurze Stichpunkte, nur was mehrfach oder mit Nachdruck genannt wird; ein einzelner Ausreißer wird als solcher bezeichnet. basedOn: die Zahl der Bewertungen, die du gelesen hast. Ohne einzelne Bewertungen bleibt summary null und die Listen leer; die reine Punktzahl ist keine Zusammenfassung.
+- reviewItems: nur wenn <captured_reviews> vorliegt, sonst eine leere Liste. Das sind Textblöcke, die das Gerät auf der Seite als Bewertungen eingesammelt hat, jeweils mit Name, Datum, Sternen und Text als Fließtext. Gib für jeden Block ein Objekt {"i": Nummer, "keep": true oder false, "author": Name oder null, "date": Datum als JJJJ-MM-TT, wenn es vollständig dasteht, sonst im Wortlaut ("August 2026") oder null, "rating": Zahl oder null, "scale": Skala der Note oder null, "start": die ersten fünf Wörter des eigentlichen Bewertungstexts wörtlich, "end": die letzten fünf Wörter des Bewertungstexts wörtlich}. keep ist false, wenn der Block keine Gästebewertung ist (Fragen und Antworten, Hausregeln, Werbung) oder eine andere schon enthält. Die Antwort des Vermieters gehört nicht zum Bewertungstext. Schreibe den Text nicht ab und nicht um.
 - summary: höchstens zwei Sätze in eigenen Worten auf Deutsch. Übernimm keine Formulierungen der Seite.
 - highlights: höchstens vier kurze Stichworte, was dieses Angebot auszeichnet.
 - warnings: höchstens vier kurze Hinweise auf Deutsch zu dem, was eine Reisegruppe wissen sollte: Widersprüche zwischen Quellen (zum Beispiel unterschiedliche Gästezahlen), fehlende oder unklare Nebenkosten, ein Preis für eine andere Personenzahl, Besonderheiten bei Schlafplätzen oder Lage.
@@ -81,7 +83,7 @@ ${context}
 
 Fülle diese Struktur. Die Schlüssel und ihre Reihenfolge bleiben unverändert:
 
-${JSON.stringify({ ...emptyProfile(link.kind), photos: undefined, reviews: undefined }, null, 1)}`;
+${JSON.stringify({ ...emptyProfile(link.kind), photos: undefined, reviews: undefined, ...(input.blocks.capturedReviews.length ? { reviewItems: [] } : {}) }, null, 1)}`;
 }
 
 function parseJsonObject(text: string): unknown {
@@ -172,6 +174,36 @@ export function combine(baseline: Profile, fromModel: Profile): Profile {
   return merged;
 }
 
+/**
+ * Single reviews from the text blocks the device collected. The model only says which blocks are
+ * reviews, who wrote them and where the guest's own words begin and end; the words are cut from
+ * the block itself, never taken from the model.
+ */
+export function reviewsFromBlocks(blocks: string[], items: unknown): Profile["reviews"] {
+  if (!Array.isArray(items)) return [];
+  const out: Profile["reviews"] = [];
+  const seen = new Set<number>();
+  for (const raw of items as Record<string, unknown>[]) {
+    if (!raw || typeof raw !== "object" || raw.keep !== true || typeof raw.i !== "number" || seen.has(raw.i)) continue;
+    const block = blocks[raw.i];
+    if (!block) continue;
+    seen.add(raw.i);
+    const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    let text = block;
+    const start = str(raw.start, 200);
+    const end = str(raw.end, 200);
+    const from = start ? block.indexOf(start) : -1;
+    if (from > 0) text = text.slice(from);
+    const to = end ? text.lastIndexOf(end) : -1;
+    if (to >= 0) text = text.slice(0, to + end!.length);
+    text = text.trim();
+    if (text.length < 10) text = block;
+    out.push({ id: createHash("sha1").update(block).digest("hex").slice(0, 16), text, title: null, rating: num(raw.rating), scale: num(raw.scale), date: str(raw.date, 40), author: str(raw.author, 80), platform: null });
+  }
+  return out.slice(0, 60);
+}
+
 export function claudeExtractor(options: { apiKey: string; model: string; client?: Anthropic }): Extractor {
   const client = options.client ?? new Anthropic({ apiKey: options.apiKey });
 
@@ -203,7 +235,13 @@ export function claudeExtractor(options: { apiKey: string; model: string; client
       if (parsed.dropped.length) console.warn(`extraction: dropped fields for ${input.link.platform}/${input.link.externalId}: ${parsed.dropped.join("; ")}`);
 
       // The kind from the link is authoritative; the model must not turn a package into a house.
-      return { profile: combine(input.baseline, { ...parsed.profile, kind: input.link.kind }), note: null };
+      const profile = combine(input.baseline, { ...parsed.profile, kind: input.link.kind });
+      // Page data is the better source for single reviews. Where it has none, the blocks the device collected serve.
+      if (profile.reviews.length === 0 && input.blocks.capturedReviews.length) {
+        profile.reviews = reviewsFromBlocks(input.blocks.capturedReviews, (json as { reviewItems?: unknown }).reviewItems);
+        console.info(`extraction: ${profile.reviews.length} reviews from ${input.blocks.capturedReviews.length} captured blocks for ${input.link.platform}/${input.link.externalId}`);
+      }
+      return { profile, note: null };
     } catch (err) {
       if (err instanceof Anthropic.AuthenticationError) return fallback("Der Schlüssel für die KI-Auswertung ist ungültig. Übernommen wurden nur strukturierte Daten.");
       if (err instanceof Anthropic.RateLimitError) return fallback("Die KI-Auswertung ist gerade ausgelastet. Übernommen wurden nur strukturierte Daten, ein erneuter Import holt den Rest nach.");
