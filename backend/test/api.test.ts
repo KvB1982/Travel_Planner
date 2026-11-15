@@ -1,3 +1,4 @@
+import { listingSources } from "../src/db/schema.js";
 import { describe, expect, it } from "vitest";
 import { emptyProfile } from "../src/import/profile.js";
 import type { Extractor } from "../src/import/extract.js";
@@ -140,6 +141,18 @@ describe("import", () => {
     expect(detail.body.listing.profile.warnings.join(" ")).toMatch(/11 bis 25 Tagen/);
   });
 
+  it("reads an advert again on request, but not twice within a minute", async () => {
+    const s = await setup();
+    const id = (await s.importLink(NOVASOL)).body.candidateId as string;
+    expect((await s.call("POST", `/candidates/${id}/refresh`, s.owner)).status).toBe(429);
+    await s.ctx.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
+    const before = s.requested.length;
+    expect((await s.call("POST", `/candidates/${id}/refresh`, s.owner)).status).toBe(202);
+    await s.ctx.queue.idle();
+    expect(s.requested.length).toBe(before + 1);
+    expect((await s.call("GET", `/candidates/${id}`, s.owner)).body.candidate.importStatus).toBe("partial");
+  });
+
   it("recognises the same advert shared twice", async () => {
     const s = await setup();
     const first = await s.importLink(NOVASOL);
@@ -217,8 +230,8 @@ describe("import", () => {
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
     expect(detail.body.candidate.importStatus).toBe("ready");
     expect(detail.body.listing.profile).toMatchObject({ sleepingPlaces: 8, summary: "Villa am Meer.", uncertain: ["sleepingPlaces"] });
-    // The hint from the link (one guest) stays next to what the page showed.
-    expect(detail.body.listing.profile.warnings).toHaveLength(2);
+    // The page was read for the trip, so the sharer's single guest is no longer worth a hint.
+    expect(detail.body.listing.profile.warnings).toEqual(["Der vierte Schlafplatz ist ein Schlafsofa."]);
     expect(detail.body.prices[0]).toMatchObject({ totalCents: 264600, kind: "from", capture: "import" });
   });
 

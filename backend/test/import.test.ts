@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
+import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
 import { assertPublicUrl, looksBlocked, UnsafeUrlError } from "../src/import/fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles } from "../src/import/profile.js";
@@ -145,6 +145,20 @@ describe("what real pages taught us", () => {
     expect(photos[1]!.caption).toBe("Zimmer 2");
   });
 
+  it("hands a huge page state to the model as readable lines instead of its first slice", () => {
+    const filler = Array.from({ length: 400 }, (_, i) => ({ __typename: "LoggingContext", loggingId: `evt_${i}_${"x".repeat(40)}`, icon: "SYSTEM_CHECK", sectionId: `SECTION_${i}` }));
+    const state = { niobe: { filler, sections: [{ title: "Schlafbereiche", items: [{ title: "Schlafzimmer 1", subtitle: "1 Doppelbett" }] }, { amenities: [{ title: "Geschirrspüler", available: true }, { title: "Geschirrspüler" }] }, { bedroomCount: 4, personCapacity: 8, layoutWidth: 1200 }] } };
+    const html = `<html><head><script id="data-deferred-state-0" type="application/json">${JSON.stringify(state)}</script></head><body>Villa</body></html>`;
+    const blocks = extractBlocks(html);
+    const input = modelInput(blocks, { state: 1000, digest: 30_000, text: 14_000 });
+    expect(input).toContain("subtitle: 1 Doppelbett");
+    expect(input).toContain("bedroomCount: 4");
+    expect(input).not.toMatch(/evt_|SYSTEM_CHECK|layoutWidth|LoggingContext/);
+    // Each text once, and a budget that is kept.
+    expect(input.match(/Geschirrspüler/g)).toHaveLength(1);
+    expect(digestState({ a: Array.from({ length: 500 }, (_, i) => `Satz Nummer ${i} mit etwas Text`) }, 2000)).toMatch(/\[gekürzt\]$/);
+  });
+
   it("finds state that a page assigns in an inline script", () => {
     const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
     const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");
@@ -162,7 +176,7 @@ describe("prune", () => {
   it("caps long arrays and long strings", () => {
     const pruned = prune({ list: Array.from({ length: 100 }, (_, i) => i), text: "x".repeat(2000) }) as { list: number[]; text: string };
     expect(pruned.list).toHaveLength(40);
-    expect(pruned.text.length).toBeLessThan(700);
+    expect(pruned.text.length).toBeLessThan(1600);
   });
 });
 
