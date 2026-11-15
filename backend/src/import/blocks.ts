@@ -16,6 +16,8 @@ export interface PageBlocks {
   reviews: PageReview[];
   /** How many pictures the app handed over, and how many it marked as the advert's gallery. */
   captured: { total: number; marked: number };
+  /** Review blocks the app collected from the opened page, as running text: name, date, stars and all. */
+  capturedReviews: string[];
 }
 
 export interface PageReview {
@@ -377,6 +379,13 @@ export function extractBlocks(html: string): PageBlocks {
   const captured = (marked.length >= 3 ? marked : capturedImgs).map((img) => httpUrl(img.getAttribute("src"))).filter((u): u is string => u !== null).map(originalOf);
   const capturedIsGallery = marked.length >= 3;
   capturedBlock?.remove();
+  // Reviews the app saw on the page, one element each. Taken out so they do not count as page text twice.
+  const reviewBlock = root.querySelector("#tp-captured-reviews");
+  const capturedReviews = [...new Set((reviewBlock?.querySelectorAll("[data-review]") ?? []).map((n) => n.text.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim()))]
+    .filter((t) => t.length >= 20)
+    .slice(0, 60)
+    .map((t) => t.slice(0, 3000));
+  reviewBlock?.remove();
   const imgs = root.querySelectorAll("img");
   root.querySelectorAll("script,style,noscript,svg,template,iframe,title").forEach((n) => n.remove());
   const text = root.structuredText.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
@@ -431,7 +440,7 @@ export function extractBlocks(html: string): PageBlocks {
     if (merged.length > photos.length) photos = merged;
   }
 
-  return { title, og, jsonLd, state, text, photos, reviews, captured: { total: capturedImgs.length, marked: marked.length } };
+  return { title, og, jsonLd, state, text, photos, reviews, captured: { total: capturedImgs.length, marked: marked.length }, capturedReviews };
 }
 
 /**
@@ -693,6 +702,17 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest:
       lines.push(line);
     }
     parts.push(`<reviews count="${blocks.reviews.length}">\n${lines.join("\n")}\n</reviews>`);
+  }
+  if (blocks.capturedReviews.length) {
+    const lines: string[] = [];
+    let used = 0;
+    for (const [i, text] of blocks.capturedReviews.entries()) {
+      const line = `<block i="${i}">${text.replace(/\s+/g, " ").slice(0, 1200)}</block>`;
+      if (used + line.length > 30_000) break;
+      used += line.length;
+      lines.push(line);
+    }
+    parts.push(`<captured_reviews count="${lines.length}">\n${lines.join("\n")}\n</captured_reviews>`);
   }
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);
   return parts.join("\n\n");
