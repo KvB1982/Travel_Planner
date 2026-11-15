@@ -17,6 +17,7 @@ struct CandidateDetailView: View {
     @State private var confirmDelete = false
     @State private var showReviews = false
     @State private var showAddSource = false
+    @State private var mapTarget: MapTarget?
     @State private var sourceLink = ""
     @AppStorage("showWarnings") private var showWarnings = false
 
@@ -67,6 +68,9 @@ struct CandidateDetailView: View {
             }
         } message: {
             Text("Adresse desselben Hauses auf einer anderen Plattform. Seine Bewertungen und Preise kommen dann dazu.")
+        }
+        .sheet(item: $mapTarget) { target in
+            LocationMapView(title: target.title, hint: target.hint, place: target.place)
         }
         .sheet(isPresented: $showReviews) {
             ReviewList(items: detail?.reviews?.items ?? [], fallbackScale: detail?.listing.profile.rating?.scale)
@@ -144,6 +148,9 @@ struct CandidateDetailView: View {
             importSection(detail, canEdit: canEdit)
 
             hintsSection(detail, canEdit: canEdit)
+
+            // High up on purpose: where the house is decides more than most of the rows below.
+            LocationSection(detail: detail) { mapTarget = $0 }
 
             Section("Deine Stimme") {
                 let mine = detail.votes.entries.first { $0.userId == model.user?.id }
@@ -228,7 +235,7 @@ struct CandidateDetailView: View {
             }
 
             if let distances = profile.distances {
-                Section("Lage") {
+                Section("Entfernungen") {
                     distance("Strand", distances.beachM, "distances.beachM", profile)
                     distance("Meer", distances.seaM, "distances.seaM", profile)
                     distance("Ort", distances.townM, "distances.townM", profile)

@@ -17,6 +17,7 @@ struct CandidateListView: View {
     @State private var notice: String?
     @State private var pendingDelete: CandidateSummary?
     @State private var showCompare = false
+    @State private var showMap = false
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -76,6 +77,11 @@ struct CandidateListView: View {
                     Button("Link hinzufügen", systemImage: "plus") { showAddLink = true }
                 }
             }
+            if !candidates.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Karte", systemImage: "map") { showMap = true }
+                }
+            }
             if candidates.count > 1 {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Vergleichen", systemImage: "rectangle.split.3x1") { showCompare = true }
@@ -107,6 +113,10 @@ struct CandidateListView: View {
             Button("Löschen", role: .destructive) { delete(candidate) }
         } message: { candidate in
             Text("„\(candidate.listing.title ?? "Dieses Angebot")“ wird mit allen Stimmen und Kommentaren aus der Reise entfernt. Das lässt sich nicht rückgängig machen.")
+        }
+        .fullScreenCover(isPresented: $showMap) {
+            // Rejected offers stay off the map unless the list is filtered to show them.
+            TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .fullScreenCover(isPresented: $showCompare) {
             CompareView(candidates: candidates, persons: detail?.trip.persons)

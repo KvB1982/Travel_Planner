@@ -289,26 +289,58 @@ final class WebPage: NSObject, WKNavigationDelegate {
         pictureCount = await pictures().filter(\.gallery).count
     }
 
-    /// The page as rendered, plus every large picture seen while it was open.
-    /// Adverts fill in their content by script after loading, so this waits until the document has
-    /// stopped growing; reading at once would return an empty shell.
-    func html() async throws -> String {
-        _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
-        _ = try? await webView.callAsyncJavaScript(Self.expandReviews, contentWorld: .page)
+    /// Waits until the document has stopped growing. Adverts fill in their content by script after loading;
+    /// reading at once would return an empty shell.
+    private func settle() async {
         var last = -1
         var stable = 0
         for _ in 0..<16 {
-            let state = try await webView.evaluateJavaScript("document.readyState + '|' + document.documentElement.outerHTML.length") as? String ?? ""
+            let state = (try? await webView.evaluateJavaScript("document.readyState + '|' + document.documentElement.outerHTML.length") as? String) ?? ""
             let parts = state.split(separator: "|")
             let length = parts.count == 2 ? Int(parts[1]) ?? 0 : 0
             // Small changes (timers, counters) are ignored; a still-rendering page grows by far more.
             stable = parts.first == "complete" && last >= 0 && abs(length - last) < 2_000 ? stable + 1 : 0
             last = length
             if stable >= 2 { break }
-            try await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(500))
         }
-        let page = try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
-        return Self.append(reviews: await reviewTexts(), to: Self.append(pictures: await pictures(), to: page))
+    }
+
+    private func outerHTML() async throws -> String {
+        try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
+    }
+
+    /// The page as rendered, plus every photo seen while it was open and the single reviews.
+    ///
+    /// The advert itself is read first. Only then are the reviews opened, because on some sites that
+    /// leads to a page of its own: the advert and the photos collected so far must not be lost to it.
+    func html() async throws -> String {
+        _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
+        await settle()
+        let advert = try await outerHTML()
+        let photos = await pictures()
+        let mark = UUID().uuidString
+        _ = try? await webView.evaluateJavaScript("window.__tpDocument = '\(mark)'; true")
+
+        _ = try? await webView.callAsyncJavaScript(Self.expandReviews, contentWorld: .page)
+        await settle()
+        let reviews = await reviewTexts()
+        let samePage = ((try? await webView.evaluateJavaScript("window.__tpDocument || ''") as? String) ?? "") == mark
+
+        var page = advert
+        var all = photos
+        if samePage {
+            // Reviews opened inside the advert: take the page as it is now, it holds everything.
+            page = (try? await outerHTML()) ?? advert
+            for photo in await pictures() {
+                if let index = all.firstIndex(where: { $0.url == photo.url }) {
+                    all[index].gallery = all[index].gallery || photo.gallery
+                } else {
+                    all.append(photo)
+                }
+            }
+        }
+        return Self.append(reviews: reviews, to: Self.append(pictures: all, to: page))
     }
 
     /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.

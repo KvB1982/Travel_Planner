@@ -65,6 +65,10 @@ Hinweise im Steckbrief sind eingeklappt. Einzelne lassen sich per Wischen ausble
 
 Im Steckbrief startet „Auf anderen Plattformen suchen“ die Suche des Servers (`POST /candidates/:id/sources/search`, kostenpflichtig, daher nur auf Knopfdruck). Treffer erscheinen als Vorschläge mit Begründung und werden einzeln bestätigt oder abgelehnt; Links lassen sich auch von Hand hinzufügen. Jede Quelle zeigt Plattform, Note und Lesestand und lässt sich einzeln auf dem Gerät auslesen (`sourceId` beim Capture). Beim Auslesen schickt die App die aufgeklappten Einzelbewertungen im Wortlaut als `tp-captured-reviews` mit.
 
+## Karten
+
+Mit Apple Karten (MapKit, ohne Schlüssel und ohne Kosten). Der Steckbrief zeigt die Lage mit einem Ausschnitt von rund 30 km; ein Tipp öffnet die große Karte mit Satellitenansicht, festen Ausschnitten (Haus, Umgebung, Region) und dem Absprung zu Apple Karten oder Google Maps. Fehlen Koordinaten, sucht die App den Ortsnamen und zeigt einen Kreis als ungefähre Lage. „Karte“ in der Angebotsliste zeigt alle Angebote der Reise mit Preis; ein Tipp wählt aus, „Öffnen“ springt zum Steckbrief.
+
 ## Noch nicht enthalten
 
-Karte, Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.
+Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.

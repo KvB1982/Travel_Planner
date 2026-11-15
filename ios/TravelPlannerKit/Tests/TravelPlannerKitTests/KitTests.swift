@@ -341,6 +341,34 @@ final class ComparisonTests: XCTestCase {
     }
 }
 
+final class PlaceTests: XCTestCase {
+    func testCoordinatesAndQuery() {
+        let hint = PlaceHint(latitude: 43.47, longitude: 11.29, place: "Castellina in Chianti", region: "Toskana", country: "Italien")
+        XCTAssertTrue(hint.hasCoordinates)
+        XCTAssertEqual(hint.query, "Castellina in Chianti, Toskana, Italien")
+    }
+
+    func testBrokenCoordinatesAreIgnored() {
+        XCTAssertFalse(PlaceHint(latitude: 0, longitude: 0, place: "Vela Luka", region: nil, country: "Kroatien").hasCoordinates)
+        XCTAssertFalse(PlaceHint(latitude: 143, longitude: 11, place: nil, region: nil, country: nil).hasCoordinates)
+        XCTAssertFalse(PlaceHint(latitude: 43, longitude: nil, place: nil, region: nil, country: nil).hasCoordinates)
+        XCTAssertTrue(PlaceHint(latitude: nil, longitude: nil, place: " ", region: nil, country: nil).isEmpty)
+    }
+
+    func testQuerySkipsRepeatsAndBlanks() {
+        XCTAssertEqual(PlaceHint(latitude: nil, longitude: nil, place: "Korčula", region: "korčula", country: " Kroatien ").query, "Korčula, Kroatien")
+        XCTAssertEqual(PlaceHint(latitude: nil, longitude: nil, place: nil, region: nil, country: "Dänemark").query, "Dänemark")
+    }
+
+    func testGoogleMapsLinks() {
+        XCTAssertEqual(MapLinks.googleMaps(latitude: 43.4701, longitude: 11.2893)?.absoluteString,
+                       "https://www.google.com/maps/search/?api=1&query=43.470100,11.289300")
+        XCTAssertEqual(MapLinks.googleMaps(query: "Vela Luka, Kroatien")?.absoluteString,
+                       "https://www.google.com/maps/search/?api=1&query=Vela%20Luka,%20Kroatien")
+        XCTAssertNil(MapLinks.googleMaps())
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()
