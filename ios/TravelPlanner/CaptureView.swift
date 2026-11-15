@@ -28,11 +28,13 @@ struct CaptureView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
-                        Text("Stelle Zeitraum und Personen ein. Für alle Bilder und Bewertungen: Blättere die Bildergalerie des Inserats einmal durch und klappe die Bewertungen auf. Dann „Übernehmen“.")
+                        Text(sending
+                             ? "Die Seite wird durchgescrollt, die Bewertungen werden aufgeklappt und alle geladen. Das dauert bis zu einer halben Minute."
+                             : "Stelle Zeitraum und Personen ein. Für alle Bilder: Blättere die Bildergalerie des Inserats einmal durch. Die Bewertungen klappt die App beim Übernehmen selbst auf.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                        Label("\(page.pictureCount == 1 ? "1 Bild" : "\(page.pictureCount) Bilder") · \(page.reviewCount == 1 ? "1 Bewertung" : "\(page.reviewCount) Bewertungen") erkannt",
+                        Label("\(page.pictureCount == 1 ? "1 Bild" : "\(page.pictureCount) Bilder") · \(page.reviewCount == 1 ? "1 Bewertung" : "\(page.reviewCount) Bewertungen") bisher geladen",
                               systemImage: "checklist")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(page.pictureCount + page.reviewCount > 0 ? Color.accentColor : Color.secondary)
