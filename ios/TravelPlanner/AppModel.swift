@@ -23,6 +23,16 @@ final class AppModel {
             backend = client
         }
         Task { await loadUser() }
+        #if DEBUG
+        // For trying the on-device reading against a real advert without typing in the simulator:
+        // launch with `-demoLink <address>` while the sample data is active.
+        if isDemo, let link = UserDefaults.standard.string(forKey: "demoLink"), let backend {
+            Task {
+                _ = try? await backend.importLink(tripId: "t-1", url: link, html: nil)
+                dataChanged()
+            }
+        }
+        #endif
     }
 
     func dataChanged() { revision += 1 }

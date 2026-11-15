@@ -18,6 +18,7 @@ struct CandidateDetailView: View {
     @State private var showReviews = false
     @State private var showAddSource = false
     @State private var mapTarget: MapTarget?
+    @State private var sentNote: String?
     @State private var sourceLink = ""
     @AppStorage("showWarnings") private var showWarnings = false
 
@@ -69,6 +70,11 @@ struct CandidateDetailView: View {
         } message: {
             Text("Adresse desselben Hauses auf einer anderen Plattform. Seine Bewertungen und Preise kommen dann dazu.")
         }
+        .alert("Seite übernommen", isPresented: .init(get: { sentNote != nil }, set: { if !$0 { sentNote = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(sentNote ?? "")
+        }
         .sheet(item: $mapTarget) { target in
             LocationMapView(title: target.title, hint: target.hint, place: target.place)
         }
@@ -78,7 +84,9 @@ struct CandidateDetailView: View {
         .sheet(item: $captureSource) { source in
             // Only further sources are named; without a name the page counts for the leading source, on any server.
             CaptureView(source: source, candidateID: candidateID,
-                        sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id)
+                        sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id) { pictures, reviews in
+                sentNote = "Gesendet: \(pictures == 1 ? "1 Bild" : "\(pictures) Bilder") und \(reviews == 1 ? "1 Bewertung" : "\(reviews) Bewertungen") im Wortlaut. Der Server wertet das jetzt aus, das dauert bis zu einer Minute."
+            }
         }
     }
 

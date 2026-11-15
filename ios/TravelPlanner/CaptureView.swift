@@ -12,6 +12,8 @@ struct CaptureView: View {
     let candidateID: String
     /// Set when the page belongs to a further source of the offer, not the leading one.
     var sourceID: String?
+    /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
+    var onSent: (_ pictures: Int, _ reviews: Int) -> Void = { _, _ in }
 
     @State private var page = WebPage()
     @State private var sending = false
@@ -30,9 +32,10 @@ struct CaptureView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                        Label(page.pictureCount == 1 ? "1 Bild des Inserats erkannt" : "\(page.pictureCount) Bilder des Inserats erkannt", systemImage: "photo.on.rectangle")
+                        Label("\(page.pictureCount == 1 ? "1 Bild" : "\(page.pictureCount) Bilder") · \(page.reviewCount == 1 ? "1 Bewertung" : "\(page.reviewCount) Bewertungen") erkannt",
+                              systemImage: "checklist")
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(page.pictureCount > 0 ? Color.accentColor : Color.secondary)
+                            .foregroundStyle(page.pictureCount + page.reviewCount > 0 ? Color.accentColor : Color.secondary)
                             .contentTransition(.numericText())
                     }
                     Button {
@@ -74,12 +77,13 @@ struct CaptureView: View {
         error = nil
         Task {
             do {
-                let html = try await page.html()
-                guard html.count >= 500 else {
+                let captured = try await page.capture()
+                guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
-                try await backend.capture(candidateId: candidateID, html: html, sourceId: sourceID)
+                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID)
                 model.dataChanged()
+                onSent(captured.pictures, captured.reviews)
                 dismiss()
             } catch {
                 self.error = model.message(for: error)
@@ -96,6 +100,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
     var isLoading = false
     /// Large pictures the page has shown so far, including ones a gallery has since swapped out.
     var pictureCount = 0
+    /// Single reviews that can be read off the page as it is right now.
+    var reviewCount = 0
 
     /// Remembers every picture of photo size as it loads (phone pages serve small versions, so the bar is low;
     /// icons and tracking pixels stay below it). Galleries keep only a few pictures in the page at a time,
@@ -145,7 +151,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
         if (event.target && event.target.tagName === 'IMG') { note(event.target); }
       }, true);
       // The single reviews as shown on the page: the longest run of similar neighbouring blocks of text
-      // inside something that talks about reviews. Cards that link to other adverts are not reviews.
+      // inside something that talks about reviews.
       window.__tpReviews = function () {
         try {
           var roots = Array.prototype.slice.call(document.querySelectorAll(
@@ -164,9 +170,9 @@ final class WebPage: NSObject, WKNavigationDelegate {
                 var child = parent.children[c];
                 var text = (child.innerText || '').trim();
                 if (text.length < 60 || text.length > 6000) { continue; }
-                var links = child.querySelectorAll('a[href]'), away = false;
-                for (var l = 0; l < links.length; l++) { if (elsewhere(links[l])) { away = true; break; } }
-                if (away) { continue; }
+                // Reviews link to the guest's profile, so links say nothing here. What gives away a card of
+                // another advert is a price per night.
+                if (/(€|eur|chf|\\$)\\s?\\d|\\d\\s?(€|eur|chf)/i.test(text) && /(nacht|nächte|night)/i.test(text)) { continue; }
                 if (tag && tag !== child.tagName) { same = false; }
                 tag = child.tagName;
                 texts.push(text.slice(0, 3000));
@@ -287,6 +293,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
     func refreshPictureCount() async {
         // The count shown is the advert's own photos; pictures of other adverts on the page are not promised.
         pictureCount = await pictures().filter(\.gallery).count
+        reviewCount = await reviewTexts().count
     }
 
     /// Waits until the document has stopped growing. Adverts fill in their content by script after loading;
@@ -314,7 +321,13 @@ final class WebPage: NSObject, WKNavigationDelegate {
     ///
     /// The advert itself is read first. Only then are the reviews opened, because on some sites that
     /// leads to a page of its own: the advert and the photos collected so far must not be lost to it.
-    func html() async throws -> String {
+    struct Captured {
+        var html: String
+        var pictures: Int
+        var reviews: Int
+    }
+
+    func capture() async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()
@@ -340,7 +353,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
                 }
             }
         }
-        return Self.append(reviews: reviews, to: Self.append(pictures: all, to: page))
+        return Captured(html: Self.append(reviews: reviews, to: Self.append(pictures: all, to: page)),
+                        pictures: all.filter(\.gallery).count, reviews: reviews.count)
     }
 
     /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.
