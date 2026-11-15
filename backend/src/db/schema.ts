@@ -184,6 +184,8 @@ export const tripListings = pgTable(
     rejectionReason: text("rejection_reason"),
     notes: text("notes"),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** Hints of the advert that this trip's members chose not to see, by their wording. */
+    hiddenWarnings: jsonb("hidden_warnings").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("trip_listings_trip_listing_idx").on(t.tripId, t.listingId)],

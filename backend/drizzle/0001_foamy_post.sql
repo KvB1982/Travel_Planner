@@ -1,0 +1,1 @@
+ALTER TABLE "trip_listings" ADD COLUMN "hidden_warnings" jsonb DEFAULT '[]'::jsonb NOT NULL;
