@@ -113,16 +113,25 @@ Jeder Preis ist ein eigener Eintrag mit Zeitpunkt, Zeitraum, Personenzahl und He
 
 Die Liste `GET /trips/:id/candidates` enthält weiter `coverImageUrl` und zusätzlich `photoCount`.
 
+- Beim Auslesen auf dem Gerät: Bilder im Block `tp-captured-images` übernimmt der Server nur dann vollständig, wenn mindestens drei davon `data-gallery="1"` tragen oder die Seite selbst weniger als drei Bilder in ihren Daten hat. Sonst dienen sie nur als größere Fassung der Bilder, die die Seite ohnehin nennt. Die App markiert deshalb die Bilder der Galerie des Angebots.
+
 ## Bewertungen
 
-`GET /candidates/:id` liefert zusätzlich:
+`GET /candidates/:id` liefert zusätzlich `reviews`, entweder `null` oder:
 
 ```json
-"reviewSummary": { "summary": "Zwei bis drei Sätze …", "positives": ["Pool", "Lage"], "negatives": ["Liegen kosten extra"], "basedOn": 20 },
-"reviews": [ { "id": "3b1f…", "text": "…", "title": null, "rating": 8.5, "scale": 10, "date": "2026-08-14", "author": "Jörg" } ]
+"reviews": {
+  "summary": "Zwei bis drei Sätze …",
+  "positives": ["Pool", "Lage"],
+  "negatives": ["Liegen kosten extra"],
+  "basedOn": 20,
+  "generatedAt": "2026-11-15T18:02:11.000Z",
+  "items": [ { "id": "3b1f…", "author": "Jörg", "date": "2026-08-14", "rating": 8.5, "scale": 10, "title": null, "text": "…", "platform": "check24" } ]
+}
 ```
 
-- `reviewSummary` schreibt die KI aus den einzelnen Bewertungen der Seite, auf Deutsch, auch wenn die Bewertungen in anderen Sprachen sind. `positives` und `negatives` haben je höchstens vier Stichpunkte. `summary` ist `null`, wenn die Seite keine einzelnen Bewertungen hergab. `basedOn` ist die Zahl der gelesenen Bewertungen.
-- `reviews` sind die einzelnen Bewertungen im Wortlaut der Seite, höchstens 40, in der Reihenfolge der Seite. `rating` steht in der Skala der Plattform; `scale` ist `null`, wenn die Seite sie nicht nennt, dann gilt die Skala aus `profile.rating.scale`. `date` ist ein ISO-Datum (`JJJJ-MM-TT`), wo die Seite eines liefert, sonst ihr Wortlaut ("August 2026") oder `null`. `author` ist der Anzeigename von der Seite oder `null`.
-- Beide Felder sind leer bei Angeboten, die vor dieser Funktion importiert wurden; "Aktualisieren" oder erneutes Auslesen auf dem Gerät füllt sie.
+- `reviews` ist `null`, wenn weder einzelne Bewertungen noch eine Zusammenfassung vorliegen, etwa bei Angeboten, die vor dieser Funktion importiert wurden. "Aktualisieren" oder erneutes Auslesen auf dem Gerät füllt das Feld.
+- `summary`, `positives` und `negatives` schreibt die KI aus den Bewertungen der Seite, auf Deutsch, auch wenn die Bewertungen in anderen Sprachen sind. `positives` und `negatives` haben je höchstens vier Stichpunkte. `summary` kann `null` sein. `basedOn` ist die Zahl der zugrunde liegenden Bewertungen, `generatedAt` der Zeitpunkt des Auslesens.
+- `items` sind die einzelnen Bewertungen im Wortlaut der Seite, höchstens 40, neueste zuerst, wenn alle ein ISO-Datum haben, sonst in der Reihenfolge der Seite. `rating` steht in der Skala der Plattform; `scale` ist `null`, wenn die Seite sie nicht nennt, dann gilt `profile.rating.scale`. `date` ist ein ISO-Datum (`JJJJ-MM-TT`), wo die Seite eines liefert, sonst ihr Wortlaut ("August 2026") oder `null`. `author` ist der Anzeigename von der Seite oder `null`. `items` kann leer sein, obwohl es eine Zusammenfassung gibt: Einzelne Bewertungen kommen nur aus den Daten der Seite, die Zusammenfassung auch aus dem sichtbaren Text.
+- Beim Auslesen auf dem Gerät lohnt es, die Bewertungsliste vorher aufzuklappen.
 - Die Gesamtnote steht weiter in `profile.rating` (`value`, `scale`, `count`).

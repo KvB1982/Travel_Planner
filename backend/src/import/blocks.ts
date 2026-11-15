@@ -210,6 +210,25 @@ function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
   return out;
 }
 
+/** Mobile pages load reduced renditions; where the image service's scheme is known, ask for the original. */
+export function originalOf(url: string): string {
+  try {
+    const u = new URL(url);
+    if (/(^|\.)muscache\.com$/.test(u.hostname)) {
+      u.searchParams.delete("im_w");
+      u.searchParams.delete("im_q");
+      return u.toString();
+    }
+    if (/(^|\.)(media\.vrbo\.com|trvl-media\.com)$/.test(u.hostname)) {
+      for (const key of ["impolicy", "rw", "rh", "ra", "w", "h", "q"]) u.searchParams.delete(key);
+      return u.toString();
+    }
+  } catch {
+    // fall through
+  }
+  return url;
+}
+
 /** A stable id for a picture, so the app can cache it across imports. */
 export const photoId = (url: string): string => createHash("sha256").update(url).digest("hex").slice(0, 16);
 
@@ -348,7 +367,11 @@ export function extractBlocks(html: string): PageBlocks {
   const title = root.querySelector("title")?.text.trim() || null;
   // The app appends the large pictures it saw load, in order, in a hidden block of its own.
   const capturedBlock = root.querySelector("#tp-captured-images");
-  const captured = (capturedBlock?.querySelectorAll("img") ?? []).map((img) => httpUrl(img.getAttribute("src"))).filter((u): u is string => u !== null);
+  const capturedImgs = capturedBlock?.querySelectorAll("img") ?? [];
+  // If the app could tell which of them sat in the advert's own gallery, only those count.
+  const marked = capturedImgs.filter((img) => img.getAttribute("data-gallery") === "1");
+  const captured = (marked.length >= 3 ? marked : capturedImgs).map((img) => httpUrl(img.getAttribute("src"))).filter((u): u is string => u !== null).map(originalOf);
+  const capturedIsGallery = marked.length >= 3;
   capturedBlock?.remove();
   const imgs = root.querySelectorAll("img");
   root.querySelectorAll("script,style,noscript,svg,template,iframe,title").forEach((n) => n.remove());
@@ -374,11 +397,18 @@ export function extractBlocks(html: string): PageBlocks {
   if (galleries[0]) candidates.push(...galleries[0]);
   let photos = cleanPhotos(candidates);
   if (captured.length) {
-    // What the device actually displayed leads; page data may add captions and larger renditions.
-    const seenOnDevice = cleanPhotos([...captured.map((url) => ({ url, caption: null, width: null, height: null })), ...photos]);
-    if (seenOnDevice.length >= photos.length) photos = seenOnDevice;
+    const seen = cleanPhotos(captured.map((url) => ({ url, caption: null, width: null, height: null })));
+    if (capturedIsGallery || photos.length < 3) {
+      // Nothing better to go by: what the device displayed is the gallery. Without the app's mark this
+      // may include pictures of other adverts shown on the page.
+      const merged = cleanPhotos([...seen, ...photos]);
+      if (merged.length >= photos.length) photos = merged;
+    } else {
+      // The page's own data says which pictures belong to the advert; the device only contributes
+      // larger renditions of those, never the "similar adverts" it also saw.
+      photos = cleanPhotos([...photos, ...seen.filter((p) => photos.some((q) => photoKey(q.url)?.key === photoKey(p.url)?.key))]);
+    }
   }
-
   if (photos.length < 3) {
     // A page rendered on the device has its pictures in the document itself.
     const fromDom: PagePhoto[] = [];
