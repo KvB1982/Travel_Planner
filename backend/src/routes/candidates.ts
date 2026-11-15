@@ -1,8 +1,8 @@
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { comments, listings, listingSources, priceSnapshots, tripListings, users, votes } from "../db/schema.js";
+import { comments, dateOptions, listings, listingSources, priceSnapshots, tripListings, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { processImport, startImport } from "../import/pipeline.js";
 import { analyzeLink } from "../import/url.js";
@@ -110,13 +110,19 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       ? await db.select().from(priceSnapshots).where(inArray(priceSnapshots.listingSourceId, sources.map((s) => s.id))).orderBy(desc(priceSnapshots.capturedAt))
       : [];
 
+    // A price counts for this trip when it was recorded for it and its dates are one of the trip's periods.
+    // Prices typed in by hand always count: whoever enters one knows what it is for.
+    const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId));
+    const forThisTrip = (p: (typeof prices)[number]) =>
+      p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || options.some((o) => o.startDate === p.startDate && o.endDate === p.endDate));
+
     return {
       candidates: rows.map(({ candidate, listing, addedByName }) => {
         const mine = allVotes.filter((v) => v.tripListingId === candidate.id);
         const own = sources.filter((s) => s.listingId === listing.id);
         const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
         // A price captured for this trip's dates beats one that came with the shared link.
-        const price = ownPrices.find((p) => p.tripId === tripId) ?? ownPrices[0] ?? null;
+        const price = ownPrices.find(forThisTrip) ?? ownPrices[0] ?? null;
         const p = listing.profile;
         return {
           id: candidate.id,
@@ -135,7 +141,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
             lat: listing.lat,
             lon: listing.lon,
             coverImageUrl: listing.coverImageUrl,
-            photoCount: p.photoCount,
+            // What can actually be shown; the page may advertise more than it gave away (profile.photoCount).
+            photoCount: p.photos?.length || p.photoCount,
             fillPercent: listing.fillPercent,
             maxGuests: p.maxGuests,
             bedrooms: p.bedrooms,
@@ -143,7 +150,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
             rating: p.rating,
             platforms: own.map((s) => s.platform),
           },
-          price: price && { totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: price.tripId === tripId, capturedAt: price.capturedAt },
+          price: price && { totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
           votes: tally(mine),
           myVote: mine.find((v) => v.userId === uid) ?? null,
         };
@@ -181,6 +188,23 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       votes: { ...tally(voteRows), entries: voteRows },
       comments: commentRows,
     };
+  });
+
+  /**
+   * Take an advert out of a trip, with its votes and comments. The advert itself and
+   * its price history stay known, so sharing the link again brings it straight back.
+   */
+  app.delete("/candidates/:candidateId", async (req, reply) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
+    await db.transaction(async (tx) => {
+      await tx.delete(votes).where(eq(votes.tripListingId, candidate.id));
+      await tx.delete(comments).where(eq(comments.tripListingId, candidate.id));
+      await tx.delete(priceSnapshots).where(and(eq(priceSnapshots.tripId, candidate.tripId), inArray(priceSnapshots.listingSourceId, tx.select({ id: listingSources.id }).from(listingSources).where(eq(listingSources.listingId, candidate.listingId)))));
+      await tx.delete(tripListings).where(eq(tripListings.id, candidate.id));
+    });
+    await logActivity(ctx, candidate.tripId, uid, "candidate_removed", { listingId: candidate.listingId });
+    return reply.code(204).send();
   });
 
   app.patch("/candidates/:candidateId", async (req) => {

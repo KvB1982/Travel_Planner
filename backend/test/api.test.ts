@@ -153,6 +153,21 @@ describe("import", () => {
     expect((await s.call("GET", `/candidates/${id}`, s.owner)).body.candidate.importStatus).toBe("partial");
   });
 
+  it("removes an advert from a trip and lets the same link be shared again", async () => {
+    const s = await setup();
+    const id = (await s.importLink(NOVASOL)).body.candidateId as string;
+    await s.call("PUT", `/candidates/${id}/vote`, s.owner, { verdict: "yes" });
+    await s.call("POST", `/candidates/${id}/comments`, s.owner, { body: "Hm." });
+    const guest = await s.join("guest", "Gast");
+    expect((await s.call("DELETE", `/candidates/${id}`, guest)).status).toBe(403);
+    expect((await s.call("DELETE", `/candidates/${id}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/candidates/${id}`, s.owner)).status).toBe(404);
+    expect((await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates).toHaveLength(0);
+    const again = await s.importLink(NOVASOL);
+    expect(again.body.candidateId).not.toBe(id);
+    expect((await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates).toHaveLength(1);
+  });
+
   it("recognises the same advert shared twice", async () => {
     const s = await setup();
     const first = await s.importLink(NOVASOL);

@@ -57,6 +57,7 @@ Ein Angebot innerhalb einer Reise heißt in der Schnittstelle `candidate`.
 | GET | `/trips/:id/candidates` | Liste mit Kerndaten, aktuellem Preis, Stimmen und eigener Stimme. |
 | GET | `/candidates/:id` | Vollständiger Steckbrief, Quellen, Preisverlauf, Stimmen, Kommentare, dazu `photos`. |
 | PATCH | `/candidates/:id` | `status` (`new`, `shortlist`, `favorite`, `rejected`, `booked`), `rejectionReason`, `notes`, `tags`. |
+| DELETE | `/candidates/:id` | Angebot aus der Reise entfernen, samt Stimmen, Kommentaren und den für diese Reise erfassten Preisen. Antwort 204. Mitglieder und Organisatoren, keine Gäste. Derselbe Link kann danach neu geteilt werden. |
 | PATCH | `/candidates/:id/profile` | Steckbrief von Hand korrigieren. Nur die geänderten Felder senden. |
 | POST | `/candidates/:id/capture` | Auf dem Gerät ausgelesenen Seiteninhalt nachreichen: `html`. |
 | POST | `/candidates/:id/refresh` | Angebot erneut vom Server abrufen und auswerten (ohne Inhalt). Antwort 202, danach wie beim Import auf `importStatus` warten. 429, wenn der letzte Abruf weniger als eine Minute her ist. |

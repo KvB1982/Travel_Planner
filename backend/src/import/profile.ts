@@ -52,7 +52,23 @@ export const profileSchema = z.object({
   beds: nnum,
   /** Sleeping places counted separately from beds: a sofa bed is a place, not a bedroom bed. */
   sleepingPlaces: nnum,
-  bedDetails: z.array(z.object({ room: z.string(), beds: z.string() })).default([]),
+  // Models tend to write a line per room ("Schlafzimmer 1: 1 Doppelbett") instead of an object; both are taken.
+  bedDetails: z
+    .array(
+      z.preprocess((v) => {
+        if (typeof v === "string") {
+          const i = v.indexOf(":");
+          return i > 0 ? { room: v.slice(0, i).trim(), beds: v.slice(i + 1).trim() } : { room: "", beds: v.trim() };
+        }
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          const o = v as Record<string, unknown>;
+          const text = (x: unknown) => (Array.isArray(x) ? x.join(", ") : typeof x === "string" || typeof x === "number" ? String(x) : "");
+          return { room: text(o.room ?? o.name ?? o.title ?? o.raum ?? o.zimmer), beds: text(o.beds ?? o.bed ?? o.description ?? o.betten ?? o.subtitle) };
+        }
+        return v;
+      }, z.object({ room: z.string(), beds: z.string().min(1) })),
+    )
+    .default([]),
   bathrooms: nnum,
   livingAreaSqm: nnum,
   plotSqm: nnum,

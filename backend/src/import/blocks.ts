@@ -22,7 +22,7 @@ export interface PagePhoto {
 }
 
 const IMAGE_KEYS = /^(images?|photos?|pictures?|gallery|galleryImages|media|mediaItems|imageUrls?|photoUrls?|imageList|photoList)$/i;
-const NOT_A_PHOTO = /logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
+const NOT_A_PHOTO = /bat\.bing\.|doubleclick|google-analytics|googletagmanager|googleadservices|facebook\.com\/tr|\/collect\?|\/pixel|beacon|logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
 const IMAGE_EXT = /\.(jpe?g|png|webp|avif|heic)(\?|$)/i;
 /** Preferred key when one picture comes in several sizes. */
 const SIZE_KEYS = ["original", "originalUrl", "full", "fullUrl", "xxl", "xl", "large", "largeUrl", "big", "url", "baseUrl", "src", "href", "contentUrl", "uri", "path", "medium"];
@@ -77,23 +77,46 @@ function photoLists(root: unknown): PagePhoto[][] {
   return lists;
 }
 
+const SIZE_WORDS = ["thumb", "thumbnail", "tiny", "xsmall", "small", "medium", "large", "xlarge", "xxlarge", "original", "full"];
+const SIZE_SEGMENT = new RegExp(`/(${SIZE_WORDS.join("|")})(?=/)`, "i");
+
+/** The same picture in two sizes shares this key; `rank` says which of them is the larger. */
+function photoKey(url: string): { key: string; rank: number } | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const word = SIZE_SEGMENT.exec(u.pathname)?.[1]?.toLowerCase();
+  const width = Number(u.searchParams.get("im_w") ?? u.searchParams.get("w") ?? u.searchParams.get("width") ?? /[_-](\d{3,4})x\d{3,4}(?=\.)/.exec(u.pathname)?.[1] ?? 0);
+  const path = u.pathname.replace(SIZE_SEGMENT, "").replace(/[_-]\d{3,4}x\d{3,4}(?=\.)/, "");
+  // Without any hint an address counts as the original.
+  const rank = width || (word ? (SIZE_WORDS.indexOf(word) + 1) * 300 : 10_000);
+  return { key: `${u.host}${path}`, rank };
+}
+
 function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
-  const seen = new Set<string>();
+  const position = new Map<string, number>();
+  const ranks: number[] = [];
   const out: PagePhoto[] = [];
   for (const photo of candidates) {
     if (NOT_A_PHOTO.test(photo.url)) continue;
-    let key: string;
-    try {
-      const u = new URL(photo.url);
-      // The same picture in another size differs only in its query.
-      key = `${u.host}${u.pathname}`;
-    } catch {
+    const k = photoKey(photo.url);
+    if (!k) continue;
+    const at = position.get(k.key);
+    if (at !== undefined) {
+      // Seen before: keep its place in the order, but the larger rendition.
+      if (k.rank > ranks[at]!) {
+        out[at] = { ...photo, caption: photo.caption ?? out[at]!.caption };
+        ranks[at] = k.rank;
+      }
       continue;
     }
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (out.length >= limit) continue;
+    position.set(k.key, out.length);
+    ranks.push(k.rank);
     out.push(photo);
-    if (out.length >= limit) break;
   }
   return out;
 }
@@ -107,6 +130,11 @@ export function thumbFor(url: string): string | null {
     const u = new URL(url);
     if (/(^|\.)muscache\.com$/.test(u.hostname)) {
       u.searchParams.set("im_w", "720");
+      return u.toString();
+    }
+    // HomeToGo and Casamundo name the size in the first path segment.
+    if (u.hostname === "cdn.hometogo.net" && u.pathname.startsWith("/large/")) {
+      u.pathname = u.pathname.replace(/^\/large\//, "/medium/");
       return u.toString();
     }
   } catch {
@@ -229,6 +257,10 @@ export function extractBlocks(html: string): PageBlocks {
   }
 
   const title = root.querySelector("title")?.text.trim() || null;
+  // The app appends the large pictures it saw load, in order, in a hidden block of its own.
+  const capturedBlock = root.querySelector("#tp-captured-images");
+  const captured = (capturedBlock?.querySelectorAll("img") ?? []).map((img) => httpUrl(img.getAttribute("src"))).filter((u): u is string => u !== null);
+  capturedBlock?.remove();
   const imgs = root.querySelectorAll("img");
   root.querySelectorAll("script,style,noscript,svg,template,iframe,title").forEach((n) => n.remove());
   const text = root.structuredText.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
@@ -242,6 +274,11 @@ export function extractBlocks(html: string): PageBlocks {
   const galleries = rawStates.flatMap(photoLists).sort((a, b) => b.length - a.length);
   if (galleries[0]) candidates.push(...galleries[0]);
   let photos = cleanPhotos(candidates);
+  if (captured.length) {
+    // What the device actually displayed leads; page data may add captions and larger renditions.
+    const seenOnDevice = cleanPhotos([...captured.map((url) => ({ url, caption: null, width: null, height: null })), ...photos]);
+    if (seenOnDevice.length >= photos.length) photos = seenOnDevice;
+  }
 
   if (photos.length < 3) {
     // A page rendered on the device has its pictures in the document itself.
@@ -252,10 +289,13 @@ export function extractBlocks(html: string): PageBlocks {
       const url = httpUrl(largest) ?? httpUrl(img.getAttribute("src")) ?? httpUrl(img.getAttribute("data-src"));
       const width = Number(img.getAttribute("width")) || null;
       if (!url || (width !== null && width < 200)) continue;
+      // Anything can sit in an img element; a picture has a picture's address.
+      const { hostname, pathname } = new URL(url);
+      if (url.length > 600 || !(IMAGE_EXT.test(pathname) || /img|image|photo|media|cdn|static|pictures/i.test(hostname + pathname))) continue;
       fromDom.push({ url, caption: img.getAttribute("alt")?.trim() || null, width: null, height: null });
     }
     const merged = cleanPhotos([...photos, ...fromDom]);
-    if (merged.length >= 3) photos = merged;
+    if (merged.length > photos.length) photos = merged;
   }
 
   return { title, og, jsonLd, state, text, photos };
