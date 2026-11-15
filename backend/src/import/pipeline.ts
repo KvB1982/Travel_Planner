@@ -194,6 +194,13 @@ export async function processImport(
     } else {
       // What was read from the page replaces what was only seeded from the link.
       profile = mergeProfiles(before, extracted, true);
+      // How many pictures a reading brings depends on how far the gallery was opened on the device.
+      // A thinner reading must not shrink what an earlier one collected.
+      if (before.photos.length > profile.photos.length) {
+        console.info(`import ${input.link.platform}/${input.link.externalId}: kept ${before.photos.length} earlier photos over ${profile.photos.length} new ones`);
+        profile.photos = before.photos;
+        profile.coverImageUrl = before.coverImageUrl ?? profile.coverImageUrl;
+      }
       price = profile.price;
     }
     if (priceBelongsToTrip) {

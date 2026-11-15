@@ -266,7 +266,11 @@ export function claudeExtractor(options: { apiKey: string; model: string; client
           });
           const json = response.stop_reason === "end_turn" ? parseJsonObject(response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("")) : undefined;
           const items = (json as { items?: unknown } | undefined)?.items;
-          if (Array.isArray(items)) return reviewsFromBlocks(chunk, items);
+          if (Array.isArray(items)) {
+            const kept = reviewsFromBlocks(chunk, items);
+            if (kept.length < chunk.length) console.info(`extraction: reviews ${n * size}-${n * size + chunk.length - 1} of ${label}: ${chunk.length - kept.length} of ${chunk.length} blocks judged no review`);
+            return kept;
+          }
           console.warn(`extraction: reviews ${n * size}-${n * size + chunk.length - 1} of ${label} kept unsorted (stop ${response.stop_reason}, ${response.usage?.output_tokens ?? "?"} output tokens, ${response.content.map((b) => b.type).join("+") || "no blocks"})`);
         } catch (err) {
           console.warn(`extraction: reviews ${n * size}-${n * size + chunk.length - 1} of ${label} kept unsorted (${err instanceof Error ? err.name : "error"})`);

@@ -7,7 +7,14 @@ import { germanCountry } from "./country.js";
  * nothing is ever guessed.
  */
 
-const nstr = z.string().nullable().default(null);
+// Models answer a text field with a list or a yes/no now and then; that is no reason to lose the field.
+const nstr = z
+  .preprocess((v) => {
+    if (Array.isArray(v) && v.every((x) => typeof x === "string" || typeof x === "number")) return v.length ? v.join(", ") : null;
+    if (typeof v === "number") return String(v);
+    return v;
+  }, z.string().nullable())
+  .default(null);
 const nnum = z.number().nullable().default(null);
 const nbool = z.boolean().nullable().default(null);
 
