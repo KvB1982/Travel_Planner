@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { profileSchema } from "../src/import/profile.js";
 import { reviewsFromBlocks } from "../src/import/extract.js";
 import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
@@ -324,5 +325,17 @@ describe("reviews collected on the device", () => {
     ]);
     expect(reviews).toHaveLength(1);
     expect(reviews[0]).toMatchObject({ author: "Jörg", date: "August 2026", rating: 5, scale: 5, text: "Wunderbares Haus direkt am Meer, wir kommen wieder." });
+  });
+});
+
+describe("cost items in whatever shape the model chose", () => {
+  it("keeps them", () => {
+    const parsed = profileSchema.parse({ price: { extraCosts: ["Kurtaxe", { name: "Endreinigung", amount: "120,50 €" }, { item: "Strom", amountEur: "nach Verbrauch" }, { item: "Bettwäsche", amountEur: 15, note: "pro Person" }] } });
+    expect(parsed.price.extraCosts).toEqual([
+      { item: "Kurtaxe", amountEur: null, note: null },
+      { item: "Endreinigung", amountEur: 120.5, note: null },
+      { item: "Strom", amountEur: null, note: "nach Verbrauch" },
+      { item: "Bettwäsche", amountEur: 15, note: "pro Person" },
+    ]);
   });
 });
