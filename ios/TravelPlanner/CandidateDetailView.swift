@@ -192,7 +192,7 @@ struct CandidateDetailView: View {
                 }
             }
 
-            Section("Quellen") {
+            Section {
                 ForEach(detail.sources) { source in
                     if let url = URL(string: source.url) {
                         Button {
@@ -202,7 +202,19 @@ struct CandidateDetailView: View {
                         }
                     }
                 }
+                // Also offered for complete offers: reading the page again brings a current price and missing details.
+                if canEdit, detail.candidate.importStatus == .ready, let source = detail.sources.first {
+                    Button("Auf diesem Gerät aktualisieren", systemImage: "arrow.triangle.2.circlepath") {
+                        captureSource = source
+                    }
+                }
                 LabeledContent("Steckbrief gefüllt", value: "\(detail.listing.fillPercent) %")
+            } header: {
+                Text("Quellen")
+            } footer: {
+                if canEdit, detail.candidate.importStatus == .ready, !detail.sources.isEmpty {
+                    Text("Aktualisieren öffnet das Inserat hier in der App und liest es neu aus, zum Beispiel um den Preis für euren Zeitraum nachzutragen.")
+                }
             }
 
             Section("Kommentare") {
