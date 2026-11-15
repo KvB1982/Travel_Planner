@@ -79,9 +79,18 @@ function parseJsonObject(text: string): unknown {
  * where a number belongs, an over-long text) must not cost the whole reading:
  * the offending field is dropped and falls back to its empty default.
  */
+function fillMissing(defaults: unknown, value: unknown): unknown {
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value === undefined || value === null ? structuredClone(defaults) : value;
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const [key, def] of Object.entries(defaults)) out[key] = key in out ? fillMissing(def, out[key]) : structuredClone(def);
+  return out;
+}
+
 export function parseLenient(raw: unknown): { profile: Profile; dropped: string[] } | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const data = structuredClone(raw) as Record<string, unknown>;
+  // Models like to leave out keys they have nothing to say about; those get their empty defaults.
+  const data = fillMissing(emptyProfile(), structuredClone(raw)) as Record<string, unknown>;
   const dropped: string[] = [];
   for (let round = 0; round < 8; round++) {
     const parsed = profileSchema.safeParse(data);
@@ -97,7 +106,12 @@ export function parseLenient(raw: unknown): { profile: Profile; dropped: string[
       const last = issue.path.at(-1) as PropertyKey;
       if (!(last in parent)) continue;
       if (Array.isArray(parent)) parent.splice(Number(last), 1);
-      else delete (parent as Record<PropertyKey, unknown>)[last];
+      else {
+        // Back to the empty default where there is one, otherwise gone.
+        const fallback = issue.path.reduce<unknown>((d, k) => (d && typeof d === "object" ? (d as Record<PropertyKey, unknown>)[k as PropertyKey] : undefined), emptyProfile());
+        if (fallback === undefined || Object.is(fallback, (parent as Record<PropertyKey, unknown>)[last])) delete (parent as Record<PropertyKey, unknown>)[last];
+        else (parent as Record<PropertyKey, unknown>)[last] = structuredClone(fallback);
+      }
       dropped.push(`${issue.path.join(".")}: ${issue.code}`);
       changed = true;
     }
@@ -142,9 +156,12 @@ export function claudeExtractor(options: { apiKey: string; model: string; client
       if (response.stop_reason === "max_tokens") return fallback("Die KI-Auswertung wurde abgeschnitten. Übernommen wurden nur strukturierte Daten.");
 
       const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-      const parsed = parseLenient(parseJsonObject(text));
+      const json = parseJsonObject(text);
+      const parsed = parseLenient(json);
       if (!parsed) {
-        console.warn(`extraction: unusable answer for ${input.link.platform}/${input.link.externalId} (${text.length} chars, stop ${response.stop_reason})`);
+        // Shape of the failure only: paths and error codes, never content.
+        const why = json === undefined ? "no readable JSON" : (profileSchema.safeParse(json).error?.issues ?? []).slice(0, 12).map((i) => `${i.path.join(".")}: ${i.code}`).join("; ");
+        console.warn(`extraction: unusable answer for ${input.link.platform}/${input.link.externalId} (${text.length} chars, stop ${response.stop_reason}): ${why}`);
         return fallback("Die KI-Auswertung lieferte kein gültiges Ergebnis. Übernommen wurden nur strukturierte Daten.");
       }
       // Field names and error codes only, never page content.

@@ -84,6 +84,9 @@ export function extractBlocks(html: string): PageBlocks {
     if (key && content && /^(og:|twitter:|description$)/.test(key) && !(key in og)) og[key] = content;
   }
 
+  const canonical = root.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  if (canonical) og.canonical = canonical;
+
   const jsonLd: Record<string, unknown>[] = [];
   const state: Record<string, unknown> = {};
   for (const script of root.querySelectorAll("script")) {
@@ -110,10 +113,30 @@ export function extractBlocks(html: string): PageBlocks {
     }
   }
 
-  root.querySelectorAll("script,style,noscript,svg,template,iframe").forEach((n) => n.remove());
+  const title = root.querySelector("title")?.text.trim() || null;
+  root.querySelectorAll("script,style,noscript,svg,template,iframe,title").forEach((n) => n.remove());
   const text = root.structuredText.replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 
-  return { title: root.querySelector("title")?.text.trim() || null, og, jsonLd, state, text };
+  return { title, og, jsonLd, state, text };
+}
+
+/**
+ * Some portals serve every page with the metadata of their home page (title,
+ * preview image, og:url pointing at "/") and fill in the advert by script.
+ * Such a title and image say nothing about the advert.
+ */
+export function hasPortalMetadata(blocks: PageBlocks): boolean {
+  for (const key of ["og:url", "canonical"]) {
+    const value = blocks.og[key];
+    if (!value) continue;
+    try {
+      // Relative values resolve against a placeholder; only the path matters.
+      if (new URL(value, "https://placeholder.invalid").pathname.replace(/\/+$/, "") === "") return true;
+    } catch {
+      // Not a URL: no evidence either way.
+    }
+  }
+  return false;
 }
 
 const LODGING_TYPES = /VacationRental|LodgingBusiness|Hotel|Resort|House|Apartment|Accommodation|BedAndBreakfast|Campground|Product/i;
@@ -229,18 +252,20 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
     provenance.rating = `JSON-LD ${typeOf(rated)}`;
   }
 
-  if (!profile.title) {
+  const portalMeta = hasPortalMetadata(blocks);
+  if (portalMeta) provenance.metadata = "Seite trägt nur die Angaben des Portals";
+  if (!profile.title && !portalMeta) {
     profile.title = blocks.og["og:title"] ?? blocks.title;
     if (profile.title) provenance.title = blocks.og["og:title"] ? "Open Graph" : "Seitentitel";
   }
-  if (!profile.coverImageUrl && blocks.og["og:image"]) {
+  if (!profile.coverImageUrl && blocks.og["og:image"] && !portalMeta) {
     profile.coverImageUrl = blocks.og["og:image"];
     provenance.coverImage = "Open Graph";
   }
 
   // The headline of the advert ("… · 4 Schlafzimmer · 4 Betten · 4 Badezimmer") is what visitors see,
   // and platforms keep it more reliably than their JSON-LD.
-  const headline = [blocks.og["og:title"], blocks.og["og:description"], blocks.og["description"]].filter(Boolean).join(" · ");
+  const headline = portalMeta ? "" : [blocks.og["og:title"], blocks.og["og:description"], blocks.og["description"]].filter(Boolean).join(" · ");
   const count = (re: RegExp): number | null => {
     const m = re.exec(headline);
     return m ? Number(m[1]!.replace(",", ".")) : null;
@@ -273,8 +298,12 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
 export function modelInput(blocks: PageBlocks, limits = { state: 14_000, text: 9_000 }): string {
   const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n[gekürzt]` : s);
   const parts: string[] = [];
-  if (blocks.title) parts.push(`<title>${blocks.title}</title>`);
-  if (Object.keys(blocks.og).length) parts.push(`<meta>\n${JSON.stringify(blocks.og)}\n</meta>`);
+  if (hasPortalMetadata(blocks)) {
+    parts.push("<note>Titel, Beschreibung und Vorschaubild dieser Seite gehören zum Portal, nicht zum Angebot, und sind deshalb weggelassen.</note>");
+  } else {
+    if (blocks.title) parts.push(`<title>${blocks.title}</title>`);
+    if (Object.keys(blocks.og).length) parts.push(`<meta>\n${JSON.stringify(blocks.og)}\n</meta>`);
+  }
   if (blocks.jsonLd.length) parts.push(`<json_ld>\n${cut(JSON.stringify(prune(blocks.jsonLd) ?? []), 6_000)}\n</json_ld>`);
   if (Object.keys(blocks.state).length) parts.push(`<page_state>\n${cut(JSON.stringify(blocks.state), limits.state)}\n</page_state>`);
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);

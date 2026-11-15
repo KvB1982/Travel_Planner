@@ -106,6 +106,21 @@ describe("what real pages taught us", () => {
     expect(profileFromBlocks(extractBlocks(html), "hotel").profile.maxGuests).toBeNull();
   });
 
+  it("does not take a portal's home page title and picture for the advert", () => {
+    const html = `<html><head><title>Ferienhäuser online buchen – Portal</title>
+      <meta property="og:title" content="Ferienhäuser online buchen – Portal"><meta property="og:image" content="https://portal.example.test/collage.jpg">
+      <meta property="og:url" content="https://www.portal.example.test/"></head><body>Villa Sonnenschein, 4 Schlafzimmer</body></html>`;
+    const blocks = extractBlocks(html);
+    const { profile } = profileFromBlocks(blocks, "vacation_home");
+    expect(profile.title).toBeNull();
+    expect(profile.coverImageUrl).toBeNull();
+    expect(modelInput(blocks)).not.toContain("online buchen");
+    expect(modelInput(blocks)).toContain("Villa Sonnenschein");
+    // A page that names its own address keeps its metadata.
+    const own = extractBlocks(html.replace('test/"', 'test/rental/abc"'));
+    expect(profileFromBlocks(own, "vacation_home").profile.title).toMatch(/online buchen/);
+  });
+
   it("finds state that a page assigns in an inline script", () => {
     const inner = JSON.stringify({ "Property:1": { headline: 'Haus "Düne"', note: "it's", sleeps: 8 } });
     const literal = JSON.stringify(inner).replace(/'/g, "\\'").replace("ü", "\\xfc");
@@ -172,6 +187,10 @@ describe("claudeExtractor", () => {
     const result = parseLenient(answer);
     expect(result?.profile).toMatchObject({ title: "Haus", bedrooms: null, maxGuests: 8, highlights: ["Pool", "Meerblick"], price: { totalEur: null, nights: 7 } });
     expect(result?.dropped.map((d) => d.split(":")[0]).sort()).toEqual(["bedrooms", "highlights.1", "price.totalEur"]);
+    // Keys the model left out, and an object where it wrote null, fall back to empty values.
+    const sparse = parseLenient({ title: "Haus", amenities: { pool: true }, price: null, rating: { value: 4.5 } });
+    expect(sparse?.profile).toMatchObject({ title: "Haus", bedrooms: null, amenities: { pool: true, wifi: null }, price: { totalEur: null, extraCosts: [] }, rating: { value: 4.5, count: null }, warnings: [] });
+    expect(sparse?.dropped).toEqual([]);
     expect(parseLenient("kein Objekt")).toBeNull();
     expect(parseLenient([1])).toBeNull();
   });
