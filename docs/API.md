@@ -240,3 +240,19 @@ Grenzen: Ob ein Zeitraum frei ist, steht bei den meisten Plattformen nur in der 
 - Übernommen werden nur Preis und Verfügbarkeit. Titel, Texte, Bilder, Lage und Hinweise bleiben, wie die vollständige Einlesung sie hinterlassen hat. Ausnahme: Das Angebot wurde noch nie vollständig eingelesen.
 - Der Betrag muss auf genau dieser Seite stehen. Ein früher gelesener Betrag wird nicht unter dem Reisezeitraum weitergeführt. Findet der Prüflauf weder Betrag noch Aussage zur Verfügbarkeit, gilt der Reisepreis als unbekannt; `price` zeigt dann wieder den Preis aus dem geteilten Link (`forThisTrip: false`).
 - Sicherheitsabfragen ("Bot oder Mensch?", "Just a moment…", "Access Denied") verwirft der Server, auch wenn das Gerät sie schickt. Die Antwort bleibt 202, am Angebot ändert sich nichts.
+
+## Angebot verschieben und Merkliste
+
+### `POST /candidates/:id/move`
+
+Body `{ "tripId": "<Zielreise>" }`, ab Rolle Mitglied in beiden Reisen. Antwort 200 `{ "candidateId": "…", "tripId": "…" }`; die `candidateId` bleibt dieselbe.
+
+- Mit umziehen: Steckbrief, Quellen, Bilder, Bewertungen, Notizen, Tags, Kommentare, ausgeblendete Hinweise, Vorschläge anderer Plattformen.
+- Bleibt zurück: Stimmen (gelöscht), Status (zurück auf `new`, Ablehnungsgrund geleert). Preise und Verfügbarkeit, die für die alte Reise gelesen wurden, zählen in der neuen nicht; sie sind wieder da, wenn das Angebot zurückzieht. Preise aus dem geteilten Link bleiben sichtbar (`forThisTrip: false`).
+- 409 `already_in_trip`: das Inserat gibt es in der Zielreise schon. 404: Zielreise unbekannt oder kein Mitglied.
+
+### Merkliste
+
+Jede Reise trägt `kind: "trip" | "watchlist"`. Jede Person hat genau eine eigene Merkliste; `GET /trips` legt sie beim ersten Aufruf an und liefert sie mit (Titel "Merkliste", ohne Zeiträume, nur die Person selbst). "Auf die Merkliste" ist `move` mit deren `tripId`, zurück genauso. Importieren direkt in die Merkliste geht wie in jede Reise.
+
+Auf der Merkliste antworten mit 409 `watchlist`: `PATCH /trips/:id`, `POST /trips/:id/invites`, `POST /trips/:id/date-options`. `POST /trips/:id/refresh` und `/check` antworten mit 409 `no_dates`. In `candidateCount` und Listen zählt sie wie eine Reise; die App sollte sie getrennt anzeigen.

@@ -28,6 +28,11 @@ export async function logActivity(ctx: AppContext, tripId: string, uid: string |
 export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
 
+  const notTheWatchlist = async (tripId: string, message: string) => {
+    const [t] = await db.select({ kind: trips.kind }).from(trips).where(eq(trips.id, tripId)).limit(1);
+    if (t?.kind === "watchlist") throw new HttpError(409, "watchlist", message);
+  };
+
   app.post("/trips", async (req, reply) => {
     const uid = userId(req);
     const body = parseBody(
@@ -58,6 +63,14 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.get("/trips", async (req) => {
     const uid = userId(req);
+    // Everyone has a shelf of their own for adverts that belong to no trip. It appears with the first look.
+    const [shelf] = await db.select({ id: trips.id }).from(trips).where(and(eq(trips.createdBy, uid), eq(trips.kind, "watchlist"))).limit(1);
+    if (!shelf) {
+      await db.transaction(async (tx) => {
+        const [t] = await tx.insert(trips).values({ kind: "watchlist", title: "Merkliste", createdBy: uid }).onConflictDoNothing().returning({ id: trips.id });
+        if (t) await tx.insert(tripMembers).values({ tripId: t.id, userId: uid, role: "organizer" });
+      });
+    }
     const rows = await db
       .select({
         trip: trips,
@@ -91,6 +104,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "organizer");
+    await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
     const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]) }).partial(), req.body);
     const { voteDeadline, ...rest } = body;
     const values = { ...rest, ...(voteDeadline !== undefined ? { voteDeadline: voteDeadline ? new Date(voteDeadline) : null } : {}) };
@@ -103,6 +117,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "member");
+    await notTheWatchlist(tripId, "Die Merkliste hat keinen Zeitraum.");
     const body = parseBody(dateOption, req.body);
     const [option] = await db.insert(dateOptions).values({ ...body, tripId }).returning();
     return reply.code(201).send({ dateOption: option });
@@ -126,6 +141,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "organizer");
+    await notTheWatchlist(tripId, "Zur Merkliste kann niemand eingeladen werden.");
     const body = parseBody(
       z.object({ role: z.enum(["member", "guest"]).default("member"), maxUses: z.number().int().min(1).max(50).default(1), expiresInDays: z.number().int().min(1).max(60).default(14) }),
       req.body,

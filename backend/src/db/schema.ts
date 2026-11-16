@@ -63,8 +63,12 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId)],
 );
 
-export const trips = pgTable("trips", {
+export const trips = pgTable(
+  "trips",
+  {
   id: id(),
+  /** "watchlist" is one person's own shelf for adverts that belong to no trip yet. */
+  kind: text("kind").$type<"trip" | "watchlist">().notNull().default("trip"),
   title: text("title").notNull(),
   region: text("region"),
   adults: integer("adults").notNull().default(2),
@@ -77,7 +81,9 @@ export const trips = pgTable("trips", {
     .notNull()
     .references(() => users.id),
   createdAt: createdAt(),
-});
+  },
+  (t) => [uniqueIndex("trips_watchlist_owner_idx").on(t.createdBy).where(sql`${t.kind} = 'watchlist'`)],
+);
 
 export const tripMembers = pgTable(
   "trip_members",

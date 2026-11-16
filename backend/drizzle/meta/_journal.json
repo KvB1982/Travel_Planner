@@ -22,6 +22,13 @@
       "when": 1794782808211,
       "tag": "0002_supreme_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794793701614,
+      "tag": "0003_steady_sunfire",
+      "breakpoints": true
     }
   ]
 }

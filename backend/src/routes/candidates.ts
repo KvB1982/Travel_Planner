@@ -477,6 +477,29 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(204).send();
   });
 
+  /**
+   * Move a candidate to another trip, or to and from the watchlist. The advert goes with everything that
+   * describes it: notes, tags, comments, hidden hints. What the old group thought of it stays behind:
+   * votes, status, and the prices and availability read for the old trip's dates.
+   */
+  app.post("/candidates/:candidateId/move", async (req) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
+    const body = parseBody(z.object({ tripId: z.string().uuid() }), req.body);
+    if (body.tripId === candidate.tripId) return { candidateId: candidate.id, tripId: candidate.tripId };
+    await requireMember(db, body.tripId, uid, "member");
+    const [there] = await db.select({ id: tripListings.id }).from(tripListings).where(and(eq(tripListings.tripId, body.tripId), eq(tripListings.listingId, candidate.listingId))).limit(1);
+    if (there) throw new HttpError(409, "already_in_trip", "Dieses Angebot gibt es in der Zielreise schon.");
+    await db.transaction(async (tx) => {
+      await tx.delete(votes).where(eq(votes.tripListingId, candidate.id));
+      // Prices read for the old trip keep its mark: they do not count in the new one, and return with the advert if it moves back.
+      await tx.update(tripListings).set({ tripId: body.tripId, status: "new", rejectionReason: null }).where(eq(tripListings.id, candidate.id));
+    });
+    await logActivity(ctx, candidate.tripId, uid, "candidate_moved_away", { listingId: candidate.listingId });
+    await logActivity(ctx, body.tripId, uid, "candidate_moved_in", { candidateId: candidate.id, listingId: candidate.listingId });
+    return { candidateId: candidate.id, tripId: body.tripId };
+  });
+
   app.patch("/candidates/:candidateId", async (req) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
