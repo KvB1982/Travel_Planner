@@ -103,25 +103,21 @@ struct LocationSection: View {
         if !hint.isEmpty {
             Section {
                 if let place {
-                    // The small map does not move: dragging it would fight with scrolling the profile.
-                    Map(initialPosition: .region(.overview(place.coordinate)), interactionModes: []) {
+                    // The small map moves and zooms in place; the button opens the full map.
+                    Map(initialPosition: .region(.overview(place.coordinate)), interactionModes: [.pan, .zoom]) {
                         PlaceMark(title: title, place: place)
                     }
                     .frame(height: 260)
                     .overlay(alignment: .bottomTrailing) {
-                        Label("Karte öffnen", systemImage: "arrow.up.left.and.arrow.down.right")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(.regularMaterial, in: Capsule())
-                            .padding(8)
-                    }
-                    .overlay {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { open(MapTarget(title: title, hint: hint, place: place)) }
-                            .accessibilityElement()
-                            .accessibilityLabel("Karte öffnen: \(hint.query ?? title)")
-                            .accessibilityAddTraits(.isButton)
+                        Button { open(MapTarget(title: title, hint: hint, place: place)) } label: {
+                            Label("Karte öffnen", systemImage: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(.regularMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(8)
+                        .accessibilityLabel("Karte öffnen: \(hint.query ?? title)")
                     }
                     .listRowInsets(EdgeInsets())
                 } else if !searched {
