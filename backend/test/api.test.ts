@@ -833,3 +833,36 @@ describe("getting ready", () => {
     expect((await s.call("DELETE", `/activities/${idea.body.activity.id}`, s.owner)).body.plan.activities).toHaveLength(1);
   });
 });
+
+describe("sign in with Apple", () => {
+  it("opens the linked account and nothing else", async () => {
+    const { generateKeyPairSync, createSign } = await import("node:crypto");
+    const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const other = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const token = (claims: object = {}, key = pair.privateKey, alg = "RS256") => {
+      const head = `${part({ alg, kid: "k1" })}.${part({ iss: "https://appleid.apple.com", aud: "com.von-bleichert.travelplanner", sub: "apple-1", exp: now + 600, iat: now, email: "A@Example.test", ...claims })}`;
+      return `${head}.${createSign("RSA-SHA256").update(head).sign(key).toString("base64url")}`;
+    };
+    const t = await testApp({ appleKeys: async () => [{ ...pair.publicKey.export({ format: "jwk" }), kid: "k1" }] });
+    const owner = await t.bootstrap();
+
+    // Nobody linked this Apple ID yet: no account comes out of thin air.
+    expect((await t.call("POST", "/auth/apple", null, { identityToken: token() })).body.error.code).toBe("apple_not_linked");
+    for (const bad of [token({}, other.privateKey), token({ aud: "com.other.app" }), token({ exp: now - 3600 }), token({ iss: "https://evil.test" }), token({}, pair.privateKey, "none"), "aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc"]) {
+      expect((await t.call("PUT", "/me/apple", owner, { identityToken: bad })).body.error.code).toBe("apple_token_invalid");
+    }
+    expect((await t.call("PUT", "/me/apple", null, { identityToken: token() })).status).toBe(401);
+
+    const linked = await t.call("PUT", "/me/apple", owner, { identityToken: token() });
+    expect(linked.body.user).toMatchObject({ name: "Kristian", apple: true, email: "a@example.test" });
+    const fresh = await t.call("POST", "/auth/apple", null, { identityToken: token(), deviceName: "iPad" });
+    expect(fresh.status).toBe(201);
+    expect((await t.call("GET", "/me", fresh.body.token)).body.user.name).toBe("Kristian");
+    expect((await t.call("POST", "/auth/apple", null, { identityToken: token({ nonce: "x" }), nonce: "another-nonce" })).status).toBe(401);
+
+    expect((await t.call("DELETE", "/me/apple", owner)).body.user.apple).toBe(false);
+    expect((await t.call("POST", "/auth/apple", null, { identityToken: token() })).status).toBe(404);
+  });
+});

@@ -14,6 +14,7 @@ import { checklistRoutes } from "./routes/checklists.js";
 import { ledgerRoutes } from "./routes/ledger.js";
 import { planRoutes } from "./routes/plans.js";
 import { candidateRoutes } from "./routes/candidates.js";
+import type { AppleKeySource } from "./auth/apple.js";
 import { tripRoutes } from "./routes/trips.js";
 
 export interface AppContext {
@@ -25,6 +26,8 @@ export interface AppContext {
   /** Absent without an API key: then other platforms can only be added by link. */
   searcher?: Searcher | null;
   queue: ImportQueue;
+  /** Apple's public keys. Tests put their own in. */
+  appleKeys?: AppleKeySource;
 }
 
 export async function buildApp(deps: Omit<AppContext, "queue">, options: { logger?: boolean } = {}): Promise<{ app: FastifyInstance; ctx: AppContext }> {

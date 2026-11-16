@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AppleKeySource } from "../src/auth/apple.js";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { migrationsFolder, type Db } from "../src/db/client.js";
@@ -30,7 +31,7 @@ export function page(html: string, overrides: Partial<FetchedPage> = {}): Fetche
   return { finalUrl: "https://example.test/", status: 200, html, blocked: false, redirects: [], ...overrides };
 }
 
-export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extractor; searcher?: Searcher; summarizer?: ReviewSummarizer } = {}) {
+export async function testApp(options: { appleKeys?: AppleKeySource; fetcher?: PageFetcher; extractor?: Extractor; searcher?: Searcher; summarizer?: ReviewSummarizer } = {}) {
   const db = await testDb();
   const requested: string[] = [];
   const fetcher: PageFetcher = async (url) => {
@@ -38,7 +39,7 @@ export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extr
     return (options.fetcher ?? (async () => page(fixture("novasol.html"))))(url);
   };
   const config = loadConfig({ DATABASE_URL: "pglite://memory", BOOTSTRAP_SECRET, PUBLIC_BASE_URL: "https://reisen.example.test", FILES_DIR: mkdtempSync(path.join(tmpdir(), "reisen-files-")) });
-  const { app, ctx } = await buildApp({ db, config, fetcher, extractor: options.extractor ?? baselineExtractor, searcher: options.searcher ?? null, summarizer: options.summarizer ?? null });
+  const { app, ctx } = await buildApp({ db, config, fetcher, extractor: options.extractor ?? baselineExtractor, appleKeys: options.appleKeys ?? (async () => []), searcher: options.searcher ?? null, summarizer: options.summarizer ?? null });
 
   const call = async (method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, token?: string | null, body?: unknown) => {
     const res = await app.inject({ method, url, headers: token ? { authorization: `Bearer ${token}` } : {}, ...(body !== undefined ? { payload: body as object } : {}) });
