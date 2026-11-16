@@ -485,3 +485,7 @@ Die App bucht nicht. Sie hält fest, was gebucht wurde.
 - `PUT /trips/:id/house` (Mitglieder, keine Gäste): nur die gesendeten Felder ändern sich, `null` leert eines. Antwort wie GET.
 - Lesen dürfen alle Mitglieder der Reise, auch Gäste. Schlüsselcode und WLAN-Passwort liegen wie alles andere hinter der Anmeldung.
 - `GET /trips/:id/today?date=2027-08-21` (Datum am Reiseort, ohne Angabe das Datum des Servers) liefert `date`, `arrivalDay`, `departureDay`, `legs` und `activities` dieses Tages (wie im Plan, abgesagte fehlen), `bookings`, die an dem Tag beginnen oder enden (`begins`, `ends`), `ideas` (Zahl der Ideen ohne Termin) sowie `house` und `suggestions`. Gedacht als Startseite der Phase Unterwegs und zum Vorhalten für offline.
+
+## Offline geschriebene Einträge
+
+`POST /trips/:id/expenses` und `POST /trips/:id/checklist-items` nehmen ein optionales Feld `clientId` (UUID, vom Gerät vergeben). Ein zweiter Aufruf mit derselben `clientId` in derselben Reise legt nichts Neues an, sondern antwortet mit 200 statt 201 und liefert den bestehenden Eintrag (`expense` oder `item`) samt Kassenblatt (`ledger`) oder Listen (`checklists`). So kann die App Einträge ohne Netz vormerken und später gefahrlos wiederholt senden.

@@ -401,9 +401,11 @@ export const expenses = pgTable(
     weights: jsonb("weights").$type<Record<string, number>>().notNull().default({}),
     note: text("note"),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** Given by the device, so that an entry written offline and sent twice is kept once. */
+    clientId: uuid("client_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("expenses_trip_idx").on(t.tripId, t.createdAt)],
+  (t) => [uniqueIndex("expenses_client_idx").on(t.tripId, t.clientId), index("expenses_trip_idx").on(t.tripId, t.createdAt)],
 );
 
 /** Money that has changed hands to even things out. */
@@ -518,9 +520,11 @@ export const checklistItems = pgTable(
     private: boolean("private").notNull().default(false),
     position: integer("position").notNull().default(0),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** Given by the device, so that an entry written offline and sent twice is kept once. */
+    clientId: uuid("client_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("checklist_items_trip_idx").on(t.tripId, t.list, t.position)],
+  (t) => [uniqueIndex("checklist_items_client_idx").on(t.tripId, t.clientId), index("checklist_items_trip_idx").on(t.tripId, t.list, t.position)],
 );
 
 /** How one household gets there: a drive with stops, a flight, a train. */
