@@ -127,9 +127,9 @@ struct PresentationView: View {
 
     private func controls(_ candidate: CandidateSummary) -> some View {
         HStack(spacing: 28) {
-            decisionButton("Nein", symbol: "xmark", color: .red) { decide(.no, for: candidate, direction: -1) }
+            decisionButton("Nein", symbol: "hand.thumbsdown.fill", color: .red) { decide(.no, for: candidate, direction: -1) }
             decisionButton("Vielleicht", symbol: "questionmark", color: .orange) { decide(.maybe, for: candidate, direction: 0) }
-            decisionButton("Ja", symbol: "heart.fill", color: .green) { decide(.yes, for: candidate, direction: 1) }
+            decisionButton("Ja", symbol: "hand.thumbsup.fill", color: .green) { decide(.yes, for: candidate, direction: 1) }
         }
         .padding(.bottom, 18)
     }
