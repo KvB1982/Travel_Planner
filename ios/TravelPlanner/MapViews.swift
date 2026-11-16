@@ -20,18 +20,33 @@ final class PlaceResolver {
     static let shared = PlaceResolver()
     private var known: [String: CLLocationCoordinate2D?] = [:]
 
+    /// How far coordinates may lie from the place the advert names before they are taken for a mistake.
+    private let plausibleDistance: CLLocationDistance = 150_000
+
     func resolve(_ hint: PlaceHint) async -> ResolvedPlace? {
+        let named = await lookUp(hint.query)
         if let latitude = hint.latitude, let longitude = hint.longitude {
-            return ResolvedPlace(coordinate: .init(latitude: latitude, longitude: longitude), approximate: hint.uncertain)
+            let given = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            // Coordinates in another part of the world than the named place are wrong data (a page that
+            // located the reader instead of the house, for example). The place name wins then.
+            if let named, CLLocation(latitude: latitude, longitude: longitude)
+                .distance(from: CLLocation(latitude: named.latitude, longitude: named.longitude)) > plausibleDistance {
+                return ResolvedPlace(coordinate: named, approximate: true)
+            }
+            return ResolvedPlace(coordinate: given, approximate: hint.uncertain)
         }
-        guard let query = hint.query else { return nil }
-        if let cached = known[query] { return cached.map { ResolvedPlace(coordinate: $0, approximate: true) } }
+        return named.map { ResolvedPlace(coordinate: $0, approximate: true) }
+    }
+
+    private func lookUp(_ query: String?) async -> CLLocationCoordinate2D? {
+        guard let query else { return nil }
+        if let cached = known[query] { return cached }
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         request.resultTypes = .address
         let found = try? await MKLocalSearch(request: request).start().mapItems.first?.placemark.coordinate
         known[query] = .some(found)
-        return found.map { ResolvedPlace(coordinate: $0, approximate: true) }
+        return found
     }
 }
 
