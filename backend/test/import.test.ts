@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { profileSchema } from "../src/import/profile.js";
-import { germanCountry } from "../src/import/country.js";
+import { germanCountry, positionFitsCountry } from "../src/import/country.js";
 import { reviewsFromBlocks } from "../src/import/extract.js";
 import { digestState, extractBlocks, findKey, inlineState, modelInput, profileFromBlocks, prune } from "../src/import/blocks.js";
 import { claudeExtractor, combine, parseLenient } from "../src/import/extract.js";
@@ -375,5 +375,16 @@ describe("country names", () => {
     expect(germanCountry("Atlantis")).toBe("Atlantis");
     expect(germanCountry(null)).toBeNull();
     expect(mergeProfiles(emptyProfile(), { country: "Italy" }).country).toBe("Italien");
+  });
+});
+
+describe("positions", () => {
+  it("are believed only inside the advert's own country", () => {
+    expect(positionFitsCountry(45.09, 14.12, "Kroatien")).toBe(true);
+    expect(positionFitsCountry(45.09, 14.12, "Croatia")).toBe(true);
+    expect(positionFitsCountry(60.17, 24.8, "Kroatien")).toBe(false);
+    expect(positionFitsCountry(28.1, -15.4, "Spanien")).toBe(true);
+    expect(positionFitsCountry(60.17, 24.8, null)).toBe(true);
+    expect(positionFitsCountry(60.17, 24.8, "Atlantis")).toBe(true);
   });
 });

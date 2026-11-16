@@ -260,7 +260,7 @@ export function thumbFor(url: string): string | null {
 // Picture lists (collected separately), single reviews, and what real pages carry as ballast:
 // A/B test configuration, editorial building blocks, page chrome, monitoring.
 const DROP_KEYS =
-  /^(images?|photos?|pictures?|media|gallery|reviews?|ratingList|breadcrumbs?|seo|translations?|i18n|tracking|.*analytics.*|footer|header|unparsedHeader|globalHeader.*|navigation|menu|optimizely.*|contentful.*|experiment.*|hrefLang.*|appConfig|notification.*|inlineNotification.*|newsletter.*|.*datadog.*|.*performance.*|cookie.*|consent.*)$/i;
+  /^(images?|photos?|pictures?|media|gallery|reviews?|ratingList|breadcrumbs?|seo|translations?|i18n|tracking|.*analytics.*|footer|header|unparsedHeader|globalHeader.*|navigation|menu|optimizely.*|contentful.*|experiment.*|hrefLang.*|appConfig|notification.*|inlineNotification.*|newsletter.*|.*datadog.*|.*performance.*|cookie.*|consent.*|user(Geo)?Location|geoIp.*|ipLocation|ipGeo.*|visitor.*|clientLocation|currentLocation|userContext|requestContext|pointOfSale.*|edgeLocation)$/i;
 
 /** Shrink a state object to what describes the property: no image lists, no review bodies, no giant arrays. */
 export function prune(value: unknown, depth = 0): unknown {
