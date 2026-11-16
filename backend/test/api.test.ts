@@ -579,3 +579,76 @@ describe("moving candidates and the watchlist", () => {
     expect((await s.call("POST", `/candidates/${again.body.candidateId}/move`, s.owner, { tripId: s.tripId })).status).toBe(409);
   });
 });
+
+describe("criteria", () => {
+  it("measures candidates against the trip's must-haves and wishes", async () => {
+    const s = await setup();
+    const added = await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" });
+    const id = added.body.candidateId as string;
+    await s.ctx.queue.idle();
+    const profile = (await s.call("GET", `/candidates/${id}`, s.owner)).body.listing.profile;
+    expect(profile.bedrooms).toBeGreaterThan(0);
+
+    const none = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates[0];
+    expect(none.criteria).toBeNull();
+    const offered = await s.call("GET", `/trips/${s.tripId}/criteria`, s.owner);
+    expect(offered.body.measurable.find((m: { key: string }) => m.key === "bedrooms")).toMatchObject({ rule: "min" });
+
+    expect((await s.call("PUT", `/trips/${s.tripId}/criteria`, s.owner, { criteria: [{ key: "bedrooms", level: "must" }] })).status).toBe(400);
+    const put = await s.call("PUT", `/trips/${s.tripId}/criteria`, s.owner, {
+      criteria: [
+        { key: "bedrooms", level: "must", target: profile.bedrooms },
+        { key: "bedrooms", level: "wish", target: profile.bedrooms + 5 },
+        { key: "custom", label: "Ruhige Lage", level: "must" },
+      ],
+    });
+    expect(put.status).toBe(200);
+    const [must, wish, quiet] = put.body.criteria as { id: string }[];
+
+    let entry = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates[0];
+    // One must-have is met, one nobody has judged yet, the wish is missed.
+    expect(entry.criteria).toMatchObject({ light: "yellow", must: { met: 1, missed: 0, unknown: 1 }, wish: { met: 0, missed: 1, unknown: 0 } });
+
+    await s.call("PATCH", `/candidates/${id}`, s.owner, { criteriaChecks: { [quiet!.id]: "missed" } });
+    entry = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates[0];
+    expect(entry.criteria.light).toBe("red");
+
+    await s.call("PATCH", `/candidates/${id}`, s.owner, { criteriaChecks: { [quiet!.id]: "met", [wish!.id]: "met" } });
+    const detail = (await s.call("GET", `/candidates/${id}`, s.owner)).body;
+    expect(detail.criteria.light).toBe("green");
+    expect(detail.criteria.results.find((r: { id: string }) => r.id === must!.id)).toMatchObject({ status: "met", manual: false, value: profile.bedrooms, label: "Schlafzimmer" });
+    expect(detail.criteria.results.find((r: { id: string }) => r.id === wish!.id)).toMatchObject({ status: "met", manual: true });
+
+    // Keeping the ids keeps what was judged by hand.
+    await s.call("PUT", `/trips/${s.tripId}/criteria`, s.owner, { criteria: [{ id: quiet!.id, key: "custom", label: "Sehr ruhige Lage", level: "must" }] });
+    entry = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates[0];
+    expect(entry.criteria).toMatchObject({ light: "green", must: { met: 1 } });
+  });
+});
+
+describe("several periods", () => {
+  it("keeps prices and availability apart for each of the trip's periods", async () => {
+    let amount = 3000;
+    const extractor: Extractor = async ({ baseline, link }) => ({ profile: { ...baseline, title: `Haus bei ${link.platform}`, price: { ...baseline.price, totalEur: amount, kind: "total", available: true } }, note: null });
+    const s = await setup({ extractor });
+    const second = (await s.call("POST", `/trips/${s.tripId}/date-options`, s.owner, { label: "Herbst", startDate: "2027-10-09", endDate: "2027-10-16" })).body.dateOption as { id: string };
+    const a = (await s.importLink(AIRBNB)).body.candidateId as string;
+
+    amount = 2100;
+    const check = await s.call("POST", `/trips/${s.tripId}/check`, s.owner, { dateOptionId: second.id });
+    expect(check.body).toMatchObject({ dateOptionId: second.id, startDate: "2027-10-09" });
+    expect(check.body.checks[0].checkUrl).toContain("2027-10-09");
+    await s.call("POST", `/candidates/${a}/capture`, s.owner, { html: fixture("novasol.html"), forTrip: true, dateOptionId: second.id });
+    await s.ctx.queue.idle();
+
+    const first = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates[0];
+    expect(first.periods).toHaveLength(2);
+    expect(first.periods.find((p: { dateOptionId: string }) => p.dateOptionId === second.id)).toMatchObject({ availability: "available", totalCents: 210000 });
+    expect(first.periods.find((p: { dateOptionId: string }) => p.dateOptionId !== second.id)).toMatchObject({ totalCents: 300000 });
+    // The list as a whole speaks for the earliest period unless another one is asked for.
+    expect(first.price).toMatchObject({ totalCents: 300000, forThisTrip: true });
+    const autumn = (await s.call("GET", `/trips/${s.tripId}/candidates?dateOptionId=${second.id}`, s.owner)).body.candidates[0];
+    expect(autumn.price).toMatchObject({ totalCents: 210000, forThisTrip: true });
+    expect(autumn.checkUrl).toContain("2027-10-09");
+  });
+});

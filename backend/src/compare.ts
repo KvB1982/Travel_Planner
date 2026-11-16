@@ -52,7 +52,7 @@ const tripPrice = (c: Comparable) => {
 };
 const round = (n: number) => Math.round(n * 100) / 100;
 
-const CRITERIA: Criterion[] = [
+export const CRITERIA: Criterion[] = [
   { key: "price.total", label: "Gesamtpreis", group: "price", format: "eur", better: "lower", value: (c) => (tripPrice(c) ? tripPrice(c)!.totalCents / 100 : null) },
   {
     key: "price.perNight",

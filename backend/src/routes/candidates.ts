@@ -2,11 +2,12 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripListings, users, votes } from "../db/schema.js";
+import { comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
 import { analyzeLink, urlForStay } from "../import/url.js";
 import { compare } from "../compare.js";
+import { judge, MEASURABLE } from "../criteria.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
 import { logActivity } from "./trips.js";
 
@@ -95,7 +96,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post("/candidates/:candidateId/capture", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), url: z.string().max(4000).optional() }), req.body);
+    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), dateOptionId: z.string().uuid().optional(), url: z.string().max(4000).optional() }), req.body);
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
     if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
@@ -104,7 +105,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
     if (source.id === sources[0]!.id) await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
     ctx.queue.push(() =>
-      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip, openedUrl: body.url }),
+      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip, dateOptionId: body.dateOptionId, openedUrl: body.url }),
     );
     return reply.code(202).send({ candidateId: candidate.id, sourceId: source.id });
   });
@@ -125,7 +126,10 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   });
 
   /** The candidates of a trip as the list shows them, each with its advert for callers that need more. */
-  async function loadCandidates(tripId: string, uid: string) {
+  const criteriaOf = async (tripId: string) =>
+    (await db.select().from(tripCriteria).where(eq(tripCriteria.tripId, tripId)).orderBy(asc(tripCriteria.position), asc(tripCriteria.createdAt))).map((c) => ({ id: c.id, key: c.key, label: c.label, level: c.level, target: c.target }));
+
+  async function loadCandidates(tripId: string, uid: string, dateOptionId?: string | null) {
     const rows = await db
       .select({ candidate: tripListings, listing: listings, addedByName: users.name })
       .from(tripListings)
@@ -139,18 +143,20 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const listingIds = rows.map((r) => r.listing.id);
     const allVotes = await db.select().from(votes).where(inArray(votes.tripListingId, candidateIds));
     const sources = await db.select().from(listingSources).where(inArray(listingSources.listingId, listingIds)).orderBy(asc(listingSources.createdAt));
-    const stay = await tripStay(db, tripId);
+    const stay = await tripStay(db, tripId, dateOptionId);
     const prices = sources.length
       ? await db.select().from(priceSnapshots).where(inArray(priceSnapshots.listingSourceId, sources.map((s) => s.id))).orderBy(desc(priceSnapshots.capturedAt))
       : [];
 
     // A price counts for this trip when it was recorded for it and its dates are one of the trip's periods.
     // Prices typed in by hand always count: whoever enters one knows what it is for.
-    const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId));
+    // With several periods to choose from, only the one asked about counts: the chosen one, else the earliest.
+    const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
     const forThisTrip = (p: (typeof prices)[number]) =>
-      p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || options.some((o) => o.startDate === p.startDate && o.endDate === p.endDate));
+      p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || (p.startDate === stay.startDate && p.endDate === stay.endDate));
+    const inPeriod = (p: (typeof prices)[number], o: (typeof options)[number]) => p.tripId === tripId && p.startDate === o.startDate && p.endDate === o.endDate;
 
-    return rows.map(({ candidate, listing, addedByName }) => {
+    const loaded = rows.map(({ candidate, listing, addedByName }) => {
       const mine = allVotes.filter((v) => v.tripListingId === candidate.id);
       const own = sources.filter((s) => s.listingId === listing.id);
       const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
@@ -208,18 +214,85 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         availabilityCheckedAt: stale ? null : said.capturedAt,
         needsDevice,
         checkUrl: link ? urlForStay(link, stay) : null,
+        // What is known for each of the trip's periods, so they can be set side by side.
+        periods: options.map((o) => {
+          const seen = ownPrices.filter((x) => inPeriod(x, o));
+          const word = seen.find((x) => x.available !== null);
+          const amount = seen.find((x) => x.totalCents !== null);
+          const newest = seen[0];
+          const nothing = newest !== undefined && newest.totalCents === null && newest.available === null;
+          return {
+            dateOptionId: o.id,
+            label: o.label,
+            startDate: o.startDate,
+            endDate: o.endDate,
+            availability: !word || nothing ? ("unknown" as const) : word.available ? ("available" as const) : ("unavailable" as const),
+            totalCents: nothing ? null : (amount?.totalCents ?? null),
+            kind: nothing ? null : (amount?.kind ?? null),
+            checkedAt: newest?.capturedAt ?? null,
+            checkUrl: link ? urlForStay(link, { ...stay, startDate: o.startDate, endDate: o.endDate }) : null,
+          };
+        }),
         votes: tally(mine),
         myVote: mine.find((v) => v.userId === uid) ?? null,
       };
-      return { entry, profile: p, hiddenWarnings: candidate.hiddenWarnings };
+      return { entry, profile: p, hiddenWarnings: candidate.hiddenWarnings, checks: candidate.criteriaChecks };
+    });
+    const wanted = await criteriaOf(tripId);
+    return loaded.map((c) => {
+      const { results: _r, ...verdict } = judge(wanted, c, c.checks);
+      // The light and the counts for the list; the single results come with the detail view.
+      return { ...c, entry: { ...c.entry, criteria: wanted.length ? verdict : null } };
     });
   }
+
+  /** The trip's must-haves and wishes, and what can be asked for at all. */
+  app.get("/trips/:tripId/criteria", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    return { criteria: await criteriaOf(tripId), measurable: MEASURABLE };
+  });
+
+  /** Replace the trip's criteria as a whole. Entries that keep their id keep the checks made by hand. */
+  app.put("/trips/:tripId/criteria", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "member");
+    const body = parseBody(
+      z.object({
+        criteria: z
+          .array(z.object({ id: z.string().uuid().optional(), key: z.string().max(60), label: z.string().trim().min(1).max(80).nullish(), level: z.enum(["must", "wish"]), target: z.number().finite().nullish() }))
+          .max(30),
+      }),
+      req.body,
+    );
+    for (const c of body.criteria) {
+      const m = MEASURABLE.find((x) => x.key === c.key);
+      if (!m && c.key !== "custom") throw new HttpError(400, "invalid_request", `Unbekanntes Kriterium: ${c.key}`);
+      if (c.key === "custom" && !c.label) throw new HttpError(400, "invalid_request", "Ein eigenes Kriterium braucht eine Bezeichnung.");
+      if (m && m.rule !== "yes" && (c.target === null || c.target === undefined)) throw new HttpError(400, "invalid_request", `${m.label} braucht einen Zielwert.`);
+    }
+    const before = await db.select({ id: tripCriteria.id }).from(tripCriteria).where(eq(tripCriteria.tripId, tripId));
+    const kept = new Set(before.map((b) => b.id));
+    await db.transaction(async (tx) => {
+      await tx.delete(tripCriteria).where(eq(tripCriteria.tripId, tripId));
+      if (body.criteria.length) {
+        await tx.insert(tripCriteria).values(
+          body.criteria.map((c, position) => ({ ...(c.id && kept.has(c.id) ? { id: c.id } : {}), tripId, key: c.key, label: c.label ?? null, level: c.level, target: c.target ?? null, position })),
+        );
+      }
+    });
+    await logActivity(ctx, tripId, uid, "criteria_changed", { count: body.criteria.length });
+    return { criteria: await criteriaOf(tripId), measurable: MEASURABLE };
+  });
 
   app.get("/trips/:tripId/candidates", async (req) => {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid);
-    return { candidates: (await loadCandidates(tripId, uid)).map((c) => c.entry) };
+    const chosen = (req.query as { dateOptionId?: string }).dateOptionId;
+    return { candidates: (await loadCandidates(tripId, uid, chosen ? uuidParam(chosen) : null)).map((c) => c.entry) };
   });
 
   /**
@@ -231,7 +304,10 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "member");
-    const stay = await tripStay(db, tripId);
+    // Which period to check: named in the body or the query, else the earliest.
+    const named = (req.body as { dateOptionId?: unknown } | null)?.dateOptionId ?? (req.query as { dateOptionId?: string }).dateOptionId;
+    const stay = await tripStay(db, tripId, named ? uuidParam(named) : null);
+    if (named && stay.dateOptionId !== named) throw new HttpError(404, "not_found", "Diesen Zeitraum gibt es in der Reise nicht.");
     if (!stay.startDate || !stay.endDate) throw new HttpError(409, "no_dates", "Die Reise hat noch keinen Zeitraum. Lege zuerst einen fest.");
     const rows = await db.select().from(tripListings).where(eq(tripListings.tripId, tripId));
     const open = rows.filter((c) => c.status !== "rejected");
@@ -249,14 +325,14 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const justRead = source.lastFetchedAt !== null && Date.now() - source.lastFetchedAt.getTime() < 60_000;
       if (!device && !justRead) {
         await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
-        ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid }));
+        ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid, dateOptionId: stay.dateOptionId }));
       }
       // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
       const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;
       checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url });
     }
     await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });
-    return reply.code(202).send({ startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });
+    return reply.code(202).send({ dateOptionId: stay.dateOptionId, startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });
   };
   app.post("/trips/:tripId/check", checkTrip);
   app.post("/trips/:tripId/refresh", checkTrip);
@@ -298,9 +374,13 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       .innerJoin(users, eq(users.id, comments.userId))
       .where(eq(comments.tripListingId, candidate.id))
       .orderBy(asc(comments.createdAt));
+    // Measured against the trip's must-haves and wishes, criterion by criterion.
+    const wanted = await criteriaOf(candidate.tripId);
+    const self = wanted.length ? (await loadCandidates(candidate.tripId, uid)).find((c) => c.entry.id === candidate.id) : undefined;
     return {
       candidate,
       role,
+      criteria: self ? judge(wanted, self, candidate.criteriaChecks) : null,
       listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
       photos: listing?.profile.photos ?? [],
@@ -493,7 +573,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await db.transaction(async (tx) => {
       await tx.delete(votes).where(eq(votes.tripListingId, candidate.id));
       // Prices read for the old trip keep its mark: they do not count in the new one, and return with the advert if it moves back.
-      await tx.update(tripListings).set({ tripId: body.tripId, status: "new", rejectionReason: null }).where(eq(tripListings.id, candidate.id));
+      await tx.update(tripListings).set({ tripId: body.tripId, status: "new", rejectionReason: null, criteriaChecks: {} }).where(eq(tripListings.id, candidate.id));
     });
     await logActivity(ctx, candidate.tripId, uid, "candidate_moved_away", { listingId: candidate.listingId });
     await logActivity(ctx, body.tripId, uid, "candidate_moved_in", { candidateId: candidate.id, listingId: candidate.listingId });
@@ -511,6 +591,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           notes: z.string().max(5000).nullable(),
           tags: z.array(z.string().trim().min(1).max(40)).max(20),
           hiddenWarnings: z.array(z.string().max(1000)).max(40),
+          criteriaChecks: z.record(z.string().uuid(), z.enum(["met", "missed"])),
         })
         .partial(),
       req.body,

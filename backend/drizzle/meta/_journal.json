@@ -29,6 +29,13 @@
       "when": 1794793701614,
       "tag": "0003_steady_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794825124292,
+      "tag": "0004_oval_captain_cross",
+      "breakpoints": true
     }
   ]
 }

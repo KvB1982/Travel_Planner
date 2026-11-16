@@ -125,10 +125,13 @@ export async function startImport(deps: ImportDeps, input: { tripId: string; use
   return { candidateId: candidate!.id, listingId, sourceId, link, duplicate: false };
 }
 
-export async function tripStay(db: Db, tripId: string) {
+/** The stay a trip asks about: the chosen period, or the earliest one when none is named. */
+export async function tripStay(db: Db, tripId: string, dateOptionId?: string | null) {
   const [trip] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
-  const [option] = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate)).limit(1);
+  const all = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
+  const option = (dateOptionId ? all.find((o) => o.id === dateOptionId) : undefined) ?? all[0];
   return {
+    dateOptionId: option?.id ?? null,
     startDate: option?.startDate ?? null,
     endDate: option?.endDate ?? null,
     adults: trip?.adults ?? null,
@@ -142,7 +145,7 @@ export async function tripStay(db: Db, tripId: string) {
  */
 export async function processImport(
   deps: ImportDeps,
-  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean; /** The address the device had open, for diagnosis. */ openedUrl?: string },
+  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean; /** Which of the trip's periods is asked about; the earliest when left out. */ dateOptionId?: string | null; /** The address the device had open, for diagnosis. */ openedUrl?: string },
 ): Promise<void> {
   const { db } = deps;
   const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, input.listingId)).orderBy(asc(listingSources.createdAt));
@@ -154,7 +157,7 @@ export async function processImport(
   };
 
   try {
-    const stay = await tripStay(db, input.tripId);
+    const stay = await tripStay(db, input.tripId, input.dateOptionId);
     const fromDevice = input.html !== undefined;
     let html = input.html ?? "";
     // The device's word only counts where a link can carry the trip's dates; otherwise it opened the undated page.
