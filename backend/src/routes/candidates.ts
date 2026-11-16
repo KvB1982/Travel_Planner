@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
 import { comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripListings, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
-import { processImport, resolveLink, startImport } from "../import/pipeline.js";
-import { analyzeLink } from "../import/url.js";
+import { processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
+import { analyzeLink, urlForStay } from "../import/url.js";
 import { compare } from "../compare.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
 import { logActivity } from "./trips.js";
@@ -86,7 +86,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post("/candidates/:candidateId/capture", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional() }), req.body);
+    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional() }), req.body);
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
     if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
@@ -95,7 +95,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
     if (source.id === sources[0]!.id) await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
     ctx.queue.push(() =>
-      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html }),
+      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip }),
     );
     return reply.code(202).send({ candidateId: candidate.id, sourceId: source.id });
   });
@@ -129,7 +129,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const candidateIds = rows.map((r) => r.candidate.id);
     const listingIds = rows.map((r) => r.listing.id);
     const allVotes = await db.select().from(votes).where(inArray(votes.tripListingId, candidateIds));
-    const sources = await db.select().from(listingSources).where(inArray(listingSources.listingId, listingIds));
+    const sources = await db.select().from(listingSources).where(inArray(listingSources.listingId, listingIds)).orderBy(asc(listingSources.createdAt));
+    const stay = await tripStay(db, tripId);
     const prices = sources.length
       ? await db.select().from(priceSnapshots).where(inArray(priceSnapshots.listingSourceId, sources.map((s) => s.id))).orderBy(desc(priceSnapshots.capturedAt))
       : [];
@@ -145,7 +146,18 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const own = sources.filter((s) => s.listingId === listing.id);
       const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
       // A price captured for this trip's dates beats one that came with the shared link.
-      const price = ownPrices.find(forThisTrip) ?? ownPrices[0] ?? null;
+      const priced = ownPrices.filter((x) => x.totalCents !== null);
+      const price = priced.find(forThisTrip) ?? priced[0] ?? null;
+      // The latest word on whether the trip's dates can be booked, from whichever source said so last.
+      const said = ownPrices.find((x) => forThisTrip(x) && x.available !== null);
+      const lastForTrip = ownPrices.find(forThisTrip);
+      const stale = !said || (lastForTrip !== undefined && lastForTrip.capturedAt > said.capturedAt && lastForTrip.available === null && lastForTrip.totalCents === null);
+      const availability = stale ? ("unknown" as const) : said.available ? ("available" as const) : ("unavailable" as const);
+      // The page to open for the trip's dates and party, and whether only the device gets an answer from it.
+      const first = own[0];
+      const shared = first ? analyzeLink(first.url) : null;
+      const link = shared?.isShortLink && first ? analyzeLink(first.canonicalUrl) : shared;
+      const needsDevice = first?.fetchNote === "blocked" || first?.fetchNote === "device";
       const p = listing.profile;
       const entry = {
         id: candidate.id,
@@ -178,7 +190,12 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           // Hints still shown for this trip; hidden ones are not counted.
           warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
         },
-        price: price && { totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
+        price: price && { available: stale ? price.available : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
+        // For the trip's dates and party. "unknown" until a reading for those dates said one or the other.
+        availability,
+        availabilityCheckedAt: stale ? null : said.capturedAt,
+        needsDevice,
+        checkUrl: link ? urlForStay(link, stay) : null,
         votes: tally(mine),
         myVote: mine.find((v) => v.userId === uid) ?? null,
       };
@@ -192,6 +209,43 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await requireMember(db, tripId, uid);
     return { candidates: (await loadCandidates(tripId, uid)).map((c) => c.entry) };
   });
+
+  /**
+   * Check every candidate of a trip for the trip's dates and party: is it still to be had, and at what price.
+   * Where the server can read the page it does so in the background. Where the platform only talks to the
+   * device, the answer names the page to open; the app captures it as usual.
+   */
+  const checkTrip = async (req: FastifyRequest, reply: FastifyReply) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "member");
+    const stay = await tripStay(db, tripId);
+    if (!stay.startDate || !stay.endDate) throw new HttpError(409, "no_dates", "Die Reise hat noch keinen Zeitraum. Lege zuerst einen fest.");
+    const rows = await db.select().from(tripListings).where(eq(tripListings.tripId, tripId));
+    const open = rows.filter((c) => c.status !== "rejected");
+    const sources = open.length ? await db.select().from(listingSources).where(inArray(listingSources.listingId, open.map((c) => c.listingId))).orderBy(asc(listingSources.createdAt)) : [];
+
+    const checks = [];
+    for (const candidate of open) {
+      const source = sources.find((x) => x.listingId === candidate.listingId);
+      if (!source) continue;
+      const shared = analyzeLink(source.url);
+      const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
+      const url = urlForStay(link, stay);
+      // Read on the device before: the platform refused the server, or gave it too little to go by.
+      const device = source.fetchNote === "blocked" || source.fetchNote === "device";
+      const justRead = source.lastFetchedAt !== null && Date.now() - source.lastFetchedAt.getTime() < 60_000;
+      if (!device && !justRead) {
+        await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
+        ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid }));
+      }
+      checks.push({ candidateId: candidate.id, platform: source.platform, mode: device ? ("device" as const) : justRead ? ("skipped" as const) : ("server" as const), needsDevice: device, checkUrl: url });
+    }
+    await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });
+    return reply.code(202).send({ startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });
+  };
+  app.post("/trips/:tripId/check", checkTrip);
+  app.post("/trips/:tripId/refresh", checkTrip);
 
   /**
    * Side by side: chosen candidates of a trip (or all that are not rejected) with one row per

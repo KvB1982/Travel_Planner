@@ -123,7 +123,7 @@ export async function startImport(deps: ImportDeps, input: { tripId: string; use
   return { candidateId: candidate!.id, listingId, sourceId, link, duplicate: false };
 }
 
-async function tripStay(db: Db, tripId: string) {
+export async function tripStay(db: Db, tripId: string) {
   const [trip] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
   const [option] = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate)).limit(1);
   return {
@@ -140,7 +140,7 @@ async function tripStay(db: Db, tripId: string) {
  */
 export async function processImport(
   deps: ImportDeps,
-  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string },
+  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean },
 ): Promise<void> {
   const { db } = deps;
   const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, input.listingId)).orderBy(asc(listingSources.createdAt));
@@ -155,7 +155,7 @@ export async function processImport(
     const stay = await tripStay(db, input.tripId);
     const fromDevice = input.html !== undefined;
     let html = input.html ?? "";
-    let priceBelongsToTrip = false;
+    let priceBelongsToTrip = fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null;
 
     if (!fromDevice) {
       // Ask for the trip's dates and party, so the price on the page is the one that matters.
@@ -219,6 +219,10 @@ export async function processImport(
       price.nights = null;
     }
     price.nights ??= nightsBetween(price.startDate, price.endDate);
+    // What this reading said about availability counts, also when it said nothing: an old "booked out" must not linger.
+    price.available = extracted.price.available;
+    // A stay that cannot be booked has no price; whatever figure the page still showed is for other dates.
+    if (price.available === false) price.totalEur = null;
     if (!secondary) {
       // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
       // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
@@ -296,9 +300,10 @@ export async function processImport(
       latest.startDate === price.startDate &&
       latest.endDate === price.endDate &&
       latest.kind === (price.kind ?? "total") &&
+      latest.available === price.available &&
       (latest.tripId === input.tripId) === forTrip;
     // Reading the same price again is not a new observation.
-    if (totalCents !== null && !unchanged) {
+    if ((totalCents !== null || price.available === false) && !unchanged) {
       await db.insert(priceSnapshots).values({
         listingSourceId: input.sourceId,
         tripId: forTrip ? input.tripId : null,
@@ -309,6 +314,7 @@ export async function processImport(
         totalCents,
         rangeMaxCents: price.rangeMaxEur !== null ? Math.round(price.rangeMaxEur * 100) : null,
         kind: price.kind ?? "total",
+        available: price.available,
         breakdown: price.extraCosts.map((c) => ({ item: c.item, amountCents: c.amountEur !== null ? Math.round(c.amountEur * 100) : null })),
         capture: fromDevice ? "device" : "import",
         capturedBy: input.userId,
