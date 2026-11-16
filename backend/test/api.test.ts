@@ -665,3 +665,37 @@ describe("daily allowance", () => {
     await s.ctx.queue.idle();
   });
 });
+
+describe("pitch and decision", () => {
+  it("ranks the finalists by points and records what the group settled on", async () => {
+    const s = await setup();
+    const ids: string[] = [];
+    for (const code of ["CLD520", "CLD521", "CLD522"]) ids.push((await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: `https://www.novasol.de/ferienhaeuser/${code}` })).body.candidateId);
+    await s.ctx.queue.idle();
+    const [a, b, c] = ids as [string, string, string];
+    const member = await s.join("member", "Tante");
+
+    expect((await s.call("GET", `/trips/${s.tripId}`, s.owner)).body.trip).toMatchObject({ phase: "research", currentPhase: "research" });
+    expect((await s.call("POST", `/trips/${s.tripId}/pitch`, member, { candidateIds: [a, b] })).status).toBe(403);
+    const opened = await s.call("POST", `/trips/${s.tripId}/pitch`, s.owner, { candidateIds: [a, b] });
+    expect(opened.body).toMatchObject({ phase: "decision", maxPoints: 4 });
+    expect(opened.body.finalists).toHaveLength(2);
+    expect(opened.body.missing).toHaveLength(2);
+
+    expect((await s.call("PUT", `/trips/${s.tripId}/ranking`, s.owner, { order: [a, c] })).status).toBe(400);
+    await s.call("PUT", `/trips/${s.tripId}/ranking`, s.owner, { order: [b, a] });
+    const ranked = await s.call("PUT", `/trips/${s.tripId}/ranking`, member, { order: [b] });
+    expect(ranked.body.finalists.map((f: { candidate: { id: string }; points: number; place: number }) => [f.candidate.id, f.points, f.place])).toEqual([[b, 4, 1], [a, 1, 2]]);
+    expect(ranked.body.missing).toHaveLength(0);
+    expect(ranked.body.myRanking).toEqual([b]);
+
+    // A veto outweighs points.
+    await s.call("PUT", `/candidates/${b}/vote`, member, { verdict: "no", veto: true });
+    expect((await s.call("GET", `/trips/${s.tripId}/pitch`, s.owner)).body.finalists[0].candidate.id).toBe(a);
+
+    const decided = await s.call("POST", `/trips/${s.tripId}/decision`, s.owner, { candidateId: a });
+    expect(decided.body).toMatchObject({ phase: "booking", decided: { candidateId: a } });
+    expect((await s.call("GET", `/trips/${s.tripId}`, s.owner)).body.trip).toMatchObject({ phase: "booking", status: "decided", decidedCandidateId: a });
+    expect((await s.call("DELETE", `/trips/${s.tripId}/decision`, s.owner)).body).toMatchObject({ phase: "decision", decided: null });
+  });
+});

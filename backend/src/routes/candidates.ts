@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, users, votes } from "../db/schema.js";
+import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
 import { analyzeLink, urlForStay } from "../import/url.js";
@@ -195,6 +195,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const entry = {
         id: candidate.id,
         status: candidate.status,
+        finalist: candidate.finalist,
         importStatus: candidate.importStatus,
         importNote: candidate.importNote,
         tags: candidate.tags,
@@ -591,7 +592,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await db.transaction(async (tx) => {
       await tx.delete(votes).where(eq(votes.tripListingId, candidate.id));
       // Prices read for the old trip keep its mark: they do not count in the new one, and return with the advert if it moves back.
-      await tx.update(tripListings).set({ tripId: body.tripId, status: "new", rejectionReason: null, criteriaChecks: {} }).where(eq(tripListings.id, candidate.id));
+      await tx.update(tripListings).set({ tripId: body.tripId, status: "new", rejectionReason: null, criteriaChecks: {}, finalist: false }).where(eq(tripListings.id, candidate.id));
     });
     await logActivity(ctx, candidate.tripId, uid, "candidate_moved_away", { listingId: candidate.listingId });
     await logActivity(ctx, body.tripId, uid, "candidate_moved_in", { candidateId: candidate.id, listingId: candidate.listingId });
@@ -610,6 +611,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           tags: z.array(z.string().trim().min(1).max(40)).max(20),
           hiddenWarnings: z.array(z.string().max(1000)).max(40),
           criteriaChecks: z.record(z.string().uuid(), z.enum(["met", "missed"])),
+          finalist: z.boolean(),
         })
         .partial(),
       req.body,
@@ -725,5 +727,122 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       })
       .returning();
     return reply.code(201).send({ price });
+  });
+  /**
+   * The pitch: the few adverts the group decides between, everyone's order of them, and where that leaves each.
+   * Points follow the place in a person's order: with n finalists the first gets n, the last named 1, unnamed ones 0.
+   */
+  async function pitch(tripId: string, uid: string) {
+    const [trip] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
+    const all = await loadCandidates(tripId, uid, trip?.decidedDateOptionId);
+    const finalists = all.filter((c) => c.entry.finalist);
+    const ids = finalists.map((c) => c.entry.id);
+    const members = await db
+      .select({ id: users.id, name: users.name, role: tripMembers.role })
+      .from(tripMembers)
+      .innerJoin(users, eq(users.id, tripMembers.userId))
+      .where(eq(tripMembers.tripId, tripId))
+      .orderBy(asc(tripMembers.joinedAt));
+    const rankings = (await db.select().from(tripRankings).where(eq(tripRankings.tripId, tripId))).map((r) => ({ ...r, order: r.order.filter((id) => ids.includes(id)) })).filter((r) => r.order.length > 0);
+    const points = new Map(ids.map((id) => [id, 0]));
+    const firsts = new Map(ids.map((id) => [id, 0]));
+    for (const r of rankings) {
+      r.order.forEach((id, place) => points.set(id, (points.get(id) ?? 0) + ids.length - place));
+      firsts.set(r.order[0]!, (firsts.get(r.order[0]!) ?? 0) + 1);
+    }
+    const rows = finalists
+      .map((c) => ({
+        candidate: c.entry,
+        points: points.get(c.entry.id) ?? 0,
+        firstPlaces: firsts.get(c.entry.id) ?? 0,
+        // What speaks for and against it, for the paper the decision rests on.
+        summary: c.profile.summary,
+        highlights: c.profile.highlights,
+        warnings: c.profile.warnings.filter((w) => !c.hiddenWarnings.includes(w)),
+        reviewSummary: c.profile.reviewSummary.summary ? { summary: c.profile.reviewSummary.summary, positives: c.profile.reviewSummary.positives, negatives: c.profile.reviewSummary.negatives } : null,
+      }))
+      // Most points first; a veto puts an advert behind those without one, and first places break a tie.
+      .sort((a, b) => Number(a.candidate.votes.vetoes > 0) - Number(b.candidate.votes.vetoes > 0) || b.points - a.points || b.firstPlaces - a.firstPlaces);
+    return {
+      phase: trip?.phase ?? "research",
+      voteDeadline: trip?.voteDeadline ?? null,
+      decided: trip?.decidedCandidateId ? { candidateId: trip.decidedCandidateId, dateOptionId: trip.decidedDateOptionId, at: trip.decidedAt } : null,
+      maxPoints: ids.length * members.length,
+      finalists: rows.map((r, i) => ({ place: i + 1, ...r })),
+      rankings: rankings.map((r) => ({ userId: r.userId, name: members.find((m) => m.id === r.userId)?.name ?? null, order: r.order, updatedAt: r.updatedAt })),
+      myRanking: rankings.find((r) => r.userId === uid)?.order ?? [],
+      // Who has not put the finalists in an order yet, for a reminder.
+      missing: ids.length ? members.filter((m) => !rankings.some((r) => r.userId === m.id)).map((m) => ({ userId: m.id, name: m.name })) : [],
+    };
+  }
+
+  app.get("/trips/:tripId/pitch", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    return pitch(tripId, uid);
+  });
+
+  /** Open the pitch: name the finalists, optionally a deadline. The trip moves on to the decision. */
+  app.post("/trips/:tripId/pitch", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const body = parseBody(z.object({ candidateIds: z.array(z.string().uuid()).min(2).max(8), voteDeadline: z.string().datetime().nullish() }), req.body);
+    const rows = await db.select({ id: tripListings.id }).from(tripListings).where(eq(tripListings.tripId, tripId));
+    if (body.candidateIds.some((id) => !rows.some((r) => r.id === id))) throw new HttpError(404, "not_found", "Mindestens ein Angebot gehört nicht zu dieser Reise.");
+    await db.transaction(async (tx) => {
+      await tx.update(tripListings).set({ finalist: false }).where(eq(tripListings.tripId, tripId));
+      await tx.update(tripListings).set({ finalist: true }).where(inArray(tripListings.id, body.candidateIds));
+      await tx.update(trips).set({ phase: "decision", ...(body.voteDeadline !== undefined ? { voteDeadline: body.voteDeadline ? new Date(body.voteDeadline) : null } : {}) }).where(eq(trips.id, tripId));
+    });
+    await logActivity(ctx, tripId, uid, "pitch_opened", { finalists: body.candidateIds.length });
+    return pitch(tripId, uid);
+  });
+
+  /** One person's order of the finalists, best first. It may leave some out. Guests rank too. */
+  app.put("/trips/:tripId/ranking", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    const body = parseBody(z.object({ order: z.array(z.string().uuid()).max(8) }), req.body);
+    const finalists = await db.select({ id: tripListings.id }).from(tripListings).where(and(eq(tripListings.tripId, tripId), eq(tripListings.finalist, true)));
+    if (new Set(body.order).size !== body.order.length || body.order.some((id) => !finalists.some((f) => f.id === id))) {
+      throw new HttpError(400, "invalid_request", "Die Rangfolge darf nur Finalisten enthalten, jeden höchstens einmal.");
+    }
+    await db
+      .insert(tripRankings)
+      .values({ tripId, userId: uid, order: body.order })
+      .onConflictDoUpdate({ target: [tripRankings.tripId, tripRankings.userId], set: { order: body.order, updatedAt: new Date() } });
+    await logActivity(ctx, tripId, uid, "ranking_set", {});
+    return pitch(tripId, uid);
+  });
+
+  /** Record what the group settled on. The trip moves on to the booking; nothing else is thrown away. */
+  app.post("/trips/:tripId/decision", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const body = parseBody(z.object({ candidateId: z.string().uuid(), dateOptionId: z.string().uuid().nullish() }), req.body);
+    const [winner] = await db.select().from(tripListings).where(and(eq(tripListings.id, body.candidateId), eq(tripListings.tripId, tripId))).limit(1);
+    if (!winner) throw new HttpError(404, "not_found", "Dieses Angebot gehört nicht zu dieser Reise.");
+    const stay = await tripStay(db, tripId, body.dateOptionId);
+    if (body.dateOptionId && stay.dateOptionId !== body.dateOptionId) throw new HttpError(404, "not_found", "Diesen Zeitraum gibt es in der Reise nicht.");
+    await db.transaction(async (tx) => {
+      await tx.update(trips).set({ phase: "booking", status: "decided", decidedCandidateId: winner.id, decidedDateOptionId: stay.dateOptionId, decidedAt: new Date() }).where(eq(trips.id, tripId));
+      await tx.update(tripListings).set({ status: "favorite", finalist: true }).where(eq(tripListings.id, winner.id));
+    });
+    await logActivity(ctx, tripId, uid, "decision_made", { candidateId: winner.id });
+    return pitch(tripId, uid);
+  });
+
+  /** Take the decision back, for example when the house is gone after all. The trip returns to the pitch. */
+  app.delete("/trips/:tripId/decision", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    await db.update(trips).set({ phase: "decision", status: "planning", decidedCandidateId: null, decidedDateOptionId: null, decidedAt: null }).where(eq(trips.id, tripId));
+    await logActivity(ctx, tripId, uid, "decision_withdrawn", {});
+    return pitch(tripId, uid);
   });
 }

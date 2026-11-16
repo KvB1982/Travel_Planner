@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
-import { activityEvents, dateOptions, invites, tripListings, tripMembers, trips, users } from "../db/schema.js";
+import { activityEvents, dateOptions, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT");
@@ -20,6 +20,18 @@ const tripFields = {
   budgetTotalCents: z.number().int().min(0).nullish(),
   voteDeadline: z.string().datetime().nullish(),
 };
+
+/**
+ * The phase the trip is in today. Arrival and departure move it on by themselves: a booked trip is
+ * "travelling" from its first day and in "review" after its last.
+ */
+export function currentPhase(phase: TripPhase, stay: { startDate: string | null; endDate: string | null }, today = new Date().toISOString().slice(0, 10)): TripPhase {
+  if ((phase === "booking" || phase === "preparation" || phase === "travelling") && stay.startDate && stay.endDate) {
+    if (today > stay.endDate) return "review";
+    if (today >= stay.startDate) return "travelling";
+  }
+  return phase;
+}
 
 export async function logActivity(ctx: AppContext, tripId: string, uid: string | null, type: string, payload: Record<string, unknown> = {}) {
   await ctx.db.insert(activityEvents).values({ tripId, userId: uid, type, payload });
@@ -82,7 +94,13 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       .innerJoin(trips, eq(trips.id, tripMembers.tripId))
       .where(eq(tripMembers.userId, uid))
       .orderBy(desc(trips.createdAt));
-    return { trips: rows.map((r) => ({ ...r.trip, role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
+    const periods = await db.select().from(dateOptions).orderBy(asc(dateOptions.startDate));
+    const stayOf = (t: (typeof rows)[number]["trip"]) => {
+      const own = periods.filter((p) => p.tripId === t.id);
+      const o = own.find((p) => p.id === t.decidedDateOptionId) ?? own[0];
+      return { startDate: o?.startDate ?? null, endDate: o?.endDate ?? null };
+    };
+    return { trips: rows.map((r) => ({ ...r.trip, currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
   });
 
   app.get("/trips/:tripId", async (req) => {
@@ -97,7 +115,8 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       .where(eq(tripMembers.tripId, tripId))
       .orderBy(asc(tripMembers.joinedAt));
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
-    return { trip, role, members, dateOptions: options };
+    const chosen = options.find((o) => o.id === trip!.decidedDateOptionId) ?? options[0];
+    return { trip: { ...trip!, currentPhase: currentPhase(trip!.phase, { startDate: chosen?.startDate ?? null, endDate: chosen?.endDate ?? null }) }, role, members, dateOptions: options };
   });
 
   app.patch("/trips/:tripId", async (req) => {
@@ -105,7 +124,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "organizer");
     await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
-    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]) }).partial(), req.body);
+    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases) }).partial(), req.body);
     const { voteDeadline, ...rest } = body;
     const values = { ...rest, ...(voteDeadline !== undefined ? { voteDeadline: voteDeadline ? new Date(voteDeadline) : null } : {}) };
     if (Object.keys(values).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");

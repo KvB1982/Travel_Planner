@@ -43,6 +43,13 @@
       "when": 1794825431017,
       "tag": "0005_lumpy_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794826208327,
+      "tag": "0006_yellow_zzzax",
+      "breakpoints": true
     }
   ]
 }

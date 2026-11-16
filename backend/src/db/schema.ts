@@ -28,6 +28,9 @@ export const verdict = pgEnum("verdict", ["yes", "maybe", "no"]);
 export const priceKind = pgEnum("price_kind", ["total", "from", "range"]);
 export const priceCapture = pgEnum("price_capture", ["manual", "import", "device", "auto"]);
 
+export const tripPhases = ["framing", "research", "decision", "booking", "preparation", "travelling", "review", "archived"] as const;
+export type TripPhase = (typeof tripPhases)[number];
+
 export const households = pgTable("households", {
   id: id(),
   name: text("name").notNull(),
@@ -76,6 +79,12 @@ export const trips = pgTable(
   pets: integer("pets").notNull().default(0),
   budgetTotalCents: integer("budget_total_cents"),
   status: tripStatus("status").notNull().default("planning"),
+  /** Where the trip stands in its course. Finer than `status`, which older queries still read. */
+  phase: text("phase").$type<TripPhase>().notNull().default("research"),
+  /** The advert and the period the group settled on. Plain ids: the rows may go, the decision is history. */
+  decidedCandidateId: uuid("decided_candidate_id"),
+  decidedDateOptionId: uuid("decided_date_option_id"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
   voteDeadline: timestamp("vote_deadline", { withTimezone: true }),
   createdBy: uuid("created_by")
     .notNull()
@@ -219,6 +228,8 @@ export const tripListings = pgTable(
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     /** Hints of the advert that this trip's members chose not to see, by their wording. */
     hiddenWarnings: jsonb("hidden_warnings").$type<string[]>().notNull().default([]),
+    /** Chosen for the pitch: one of the few the group decides between. */
+    finalist: boolean("finalist").notNull().default(false),
     /** What somebody judged by hand against the trip's criteria, by criterion id. */
     criteriaChecks: jsonb("criteria_checks").$type<Record<string, "met" | "missed">>().notNull().default({}),
     /** Looking for the same property on other platforms: idle, running, done or failed. */
@@ -333,4 +344,20 @@ export const aiUsage = pgTable(
     count: integer("count").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.userId, t.day, t.kind] })],
+);
+
+/** One person's order of the finalists, best first. Points follow from the place in it. */
+export const tripRankings = pgTable(
+  "trip_rankings",
+  {
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    order: jsonb("order").$type<string[]>().notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tripId, t.userId] })],
 );

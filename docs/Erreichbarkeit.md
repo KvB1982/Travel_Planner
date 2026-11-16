@@ -15,7 +15,7 @@ Stand 16.11.2026. Der Server ist heute nur im Tailnet erreichbar (`tailscale ser
 
 | Punkt | Stand | Wer |
 |---|---|---|
-| Kopie der Datenbanksicherung außer Haus (Storage Box) | Skript fertig, Schlüssel erzeugt, wartet auf Zugang | Kristian, dann Claude |
+| Kopie der Datenbanksicherung außer Haus (Storage Box) | erledigt 16.11.2026: nächtlich gespiegelt auf eigenen Sub-Account | erledigt |
 | SSH-Passwort der VM ändern, falls noch nicht geschehen | offen | Kristian |
 | `BOOTSTRAP_SECRET` aus der `.env` entfernen (wird nicht mehr gebraucht) | offen | Kristian (tippt selbst) |
 | Tageslimit für KI-Aufrufe je Konto (Import, Suche), damit ein gekapertes Konto kein Guthaben verbrennt | erledigt: 400 Auswertungen und 30 Suchen je Person und Tag (`DAILY_READINGS`, `DAILY_SEARCHES`), danach 429 `daily_limit` | Claude |

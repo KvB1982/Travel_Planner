@@ -297,3 +297,41 @@ Von Hand urteilen: `PATCH /candidates/:id` mit `{ "criteriaChecks": { "<criterio
 ## Tageslimit
 
 Je Person und Tag (UTC) 400 Auswertungen (Import, capture, refresh, Reiseprüfung, weitere Quelle) und 30 Suchen nach demselben Objekt. Danach antworten diese Aufrufe mit 429 `daily_limit` und einer Meldung zum Anzeigen. Lesen, Abstimmen und Kommentieren bleiben möglich.
+
+## Phasen der Reise
+
+Jede Reise trägt `phase` (gespeichert) und `currentPhase` (heute gültig): `framing`, `research`, `decision`, `booking`, `preparation`, `travelling`, `review`, `archived`. Neue und bestehende Reisen stehen auf `research`.
+
+- `currentPhase` rückt von selbst vor: Eine Reise in `booking`, `preparation` oder `travelling` ist ab dem Anreisetag `travelling` und nach dem Abreisetag `review`. Maßgeblich ist der beschlossene Zeitraum, sonst der früheste. Die App öffnet die Oberfläche zu `currentPhase`.
+- Von Hand setzen: `PATCH /trips/:id` mit `{ "phase": "…" }` (Organisator), auch zurück. Dabei wird nichts gelöscht.
+- `status` (planning, decided, booked, archived) bleibt bestehen und wird bei der Entscheidung mitgeführt.
+
+## Pitch und Entscheidung
+
+### `POST /trips/:id/pitch` (Organisator)
+
+Body `{ "candidateIds": ["…", "…"], "voteDeadline": "2027-01-10T18:00:00Z" }`, zwei bis acht Finalisten. Setzt `finalist` an den Angeboten (alle anderen verlieren es) und die Phase auf `decision`. Einzelne Angebote lassen sich auch über `PATCH /candidates/:id` mit `{ "finalist": true | false }` aufnehmen oder herausnehmen. Jeder Listeneintrag trägt `finalist`.
+
+### `PUT /trips/:id/ranking` (alle, auch Gäste)
+
+Body `{ "order": ["<bester>", "<zweiter>", …] }`: die eigene Rangfolge der Finalisten, darf unvollständig sein. Punkte: bei n Finalisten bekommt der erste Platz n, jeder weitere einen weniger, nicht genannte 0.
+
+### `GET /trips/:id/pitch`
+
+```json
+{ "phase": "decision", "voteDeadline": null, "decided": null, "maxPoints": 8,
+  "finalists": [ { "place": 1, "points": 7, "firstPlaces": 2, "candidate": { "…wie in der Angebotsliste…" },
+                   "summary": "…", "highlights": ["…"], "warnings": ["…"], "reviewSummary": { "summary": "…", "positives": [], "negatives": [] } } ],
+  "rankings": [ { "userId": "…", "name": "…", "order": ["…"], "updatedAt": "…" } ],
+  "myRanking": ["…"],
+  "missing": [ { "userId": "…", "name": "…" } ] }
+```
+
+- Reihenfolge: Angebote mit Veto stehen hinter denen ohne, dann nach Punkten, bei Gleichstand nach ersten Plätzen. Vetos kommen weiter aus `PUT /candidates/:id/vote`.
+- `candidate` enthält Preis, Verfügbarkeit, Ampel und Stimmen wie in der Liste. Zusammen mit `summary`, `highlights`, `warnings` und `reviewSummary` ist das die Entscheidungsvorlage.
+- `missing` nennt, wer noch keine Rangfolge abgegeben hat.
+- Die drei Aufrufe oben und die beiden folgenden antworten alle mit diesem Objekt.
+
+### `POST /trips/:id/decision`, `DELETE /trips/:id/decision` (Organisator)
+
+Body `{ "candidateId": "…", "dateOptionId": "…" }` (Zeitraum optional, sonst der früheste). Hält Gewinner und Zeitraum an der Reise fest (`decidedCandidateId`, `decidedDateOptionId`, `decidedAt`), setzt die Phase auf `booking` und den Status auf `decided`. Die übrigen Angebote bleiben unverändert; verschieben auf die Merkliste geht mit `move`. `DELETE` nimmt die Entscheidung zurück, die Reise steht wieder auf `decision`.
