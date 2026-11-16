@@ -85,6 +85,9 @@ export const trips = pgTable(
   decidedCandidateId: uuid("decided_candidate_id"),
   decidedDateOptionId: uuid("decided_date_option_id"),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
+  /** How shared costs are split unless an expense says otherwise, and what a child counts when heads are counted. */
+  splitMode: text("split_mode").$type<"equal" | "heads">().notNull().default("equal"),
+  childWeight: doublePrecision("child_weight").notNull().default(1),
   voteDeadline: timestamp("vote_deadline", { withTimezone: true }),
   createdBy: uuid("created_by")
     .notNull()
@@ -360,4 +363,62 @@ export const tripRankings = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tripId, t.userId] })],
+);
+
+/** A household travelling along: the unit costs are shared between. It may include people without the app. */
+export const tripParties = pgTable(
+  "trip_parties",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    adults: integer("adults").notNull().default(2),
+    children: integer("children").notNull().default(0),
+    /** The members of the trip who belong to this household. */
+    memberIds: jsonb("member_ids").$type<string[]>().notNull().default([]),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("trip_parties_trip_idx").on(t.tripId, t.position)],
+);
+
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    category: text("category"),
+    spentOn: date("spent_on"),
+    paidBy: uuid("paid_by").notNull(),
+    mode: text("mode").$type<"equal" | "heads" | "custom">(),
+    among: jsonb("among").$type<string[]>().notNull().default([]),
+    weights: jsonb("weights").$type<Record<string, number>>().notNull().default({}),
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("expenses_trip_idx").on(t.tripId, t.createdAt)],
+);
+
+/** Money that has changed hands to even things out. */
+export const settlementPayments = pgTable(
+  "settlement_payments",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    fromParty: uuid("from_party").notNull(),
+    toParty: uuid("to_party").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("settlement_payments_trip_idx").on(t.tripId)],
 );

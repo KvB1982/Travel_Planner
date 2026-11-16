@@ -699,3 +699,43 @@ describe("pitch and decision", () => {
     expect((await s.call("DELETE", `/trips/${s.tripId}/decision`, s.owner)).body).toMatchObject({ phase: "decision", decided: null });
   });
 });
+
+describe("shared purse", () => {
+  it("keeps expenses per household and says who owes whom", async () => {
+    const s = await setup();
+    const aunt = await s.join("member", "Tante");
+    expect((await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, { title: "Einkauf", amountCents: 9000, paidBy: "00000000-0000-4000-8000-000000000000" })).status).toBe(409);
+
+    const suggested = await s.call("POST", `/trips/${s.tripId}/parties/suggest`, s.owner);
+    expect(suggested.body.parties).toHaveLength(2);
+    const set = await s.call("PUT", `/trips/${s.tripId}/parties`, s.owner, {
+      parties: [
+        { id: suggested.body.parties[0].id, name: "Familie A", adults: 2, children: 2, memberIds: suggested.body.parties[0].memberIds },
+        { id: suggested.body.parties[1].id, name: "Familie B", adults: 2, children: 0, memberIds: suggested.body.parties[1].memberIds },
+        { name: "Oma", adults: 1, children: 0 },
+      ],
+    });
+    const [a, b, c] = set.body.parties.map((p: { id: string }) => p.id) as [string, string, string];
+    expect(set.body.myPartyId).toBe(a);
+
+    await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, { title: "Haus", amountCents: 30000, paidBy: a });
+    const second = await s.call("POST", `/trips/${s.tripId}/expenses`, aunt, { title: "Bootstour", amountCents: 8000, paidBy: b, mode: "custom", weights: { [a]: 1, [b]: 1 } });
+    expect(second.status).toBe(201);
+    let ledger = second.body.ledger;
+    expect(ledger.totalCents).toBe(38000);
+    expect(ledger.parties.map((p: { balanceCents: number }) => p.balanceCents)).toEqual([16000, -6000, -10000]);
+    expect(ledger.transfers).toEqual([{ from: c, to: a, amountCents: 10000 }, { from: b, to: a, amountCents: 6000 }]);
+
+    ledger = (await s.call("POST", `/trips/${s.tripId}/payments`, s.owner, { fromParty: c, toParty: a, amountCents: 10000 })).body.ledger;
+    expect(ledger.transfers).toEqual([{ from: b, to: a, amountCents: 6000 }]);
+
+    // Counting heads with children at half changes the shares of the house.
+    await s.call("PATCH", `/trips/${s.tripId}`, s.owner, { splitMode: "heads", childWeight: 0.5 });
+    ledger = (await s.call("GET", `/trips/${s.tripId}/ledger`, aunt)).body;
+    expect(ledger.myPartyId).toBe(b);
+    expect(ledger.parties[0].shareCents).toBe(15000 + 4000);
+
+    const gone = await s.call("DELETE", `/expenses/${second.body.expense.id}`, s.owner);
+    expect(gone.body.ledger.expenses).toHaveLength(1);
+  });
+});

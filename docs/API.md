@@ -335,3 +335,45 @@ Body `{ "order": ["<bester>", "<zweiter>", …] }`: die eigene Rangfolge der Fin
 ### `POST /trips/:id/decision`, `DELETE /trips/:id/decision` (Organisator)
 
 Body `{ "candidateId": "…", "dateOptionId": "…" }` (Zeitraum optional, sonst der früheste). Hält Gewinner und Zeitraum an der Reise fest (`decidedCandidateId`, `decidedDateOptionId`, `decidedAt`), setzt die Phase auf `booking` und den Status auf `decided`. Die übrigen Angebote bleiben unverändert; verschieben auf die Merkliste geht mit `move`. `DELETE` nimmt die Entscheidung zurück, die Reise steht wieder auf `decision`.
+
+## Gemeinsame Kasse und Abrechnung
+
+Kosten werden zwischen den **Haushalten** der Reise geteilt. Ein Haushalt kann Personen ohne App enthalten (Kinder, Partner).
+
+### Haushalte
+
+- `POST /trips/:id/parties/suggest`: legt als Startpunkt je Mitglied einen Haushalt an (409 `already_set_up`, wenn es schon welche gibt).
+- `PUT /trips/:id/parties` mit `{ "parties": [ { "id": "…", "name": "Familie A", "adults": 2, "children": 2, "memberIds": ["<userId>"] } ] }` ersetzt die Liste. Einträge mit ihrer `id` behalten ihre Ausgaben. Ab Rolle Mitglied.
+
+### Ausgaben
+
+`POST /trips/:id/expenses` (alle, auch Gäste), `PATCH /expenses/:id`, `DELETE /expenses/:id` (Gäste nur eigene):
+
+```json
+{ "title": "Einkauf", "amountCents": 8450, "paidBy": "<partyId>", "spentOn": "2027-05-16", "category": "Lebensmittel",
+  "mode": null, "among": [], "weights": {}, "note": null }
+```
+
+- `mode` leer: die Aufteilung der Reise (`splitMode`, Standard `equal`: jeder Haushalt gleich viel). `heads`: nach Köpfen, Kinder zählen mit `childWeight` der Reise (Standard 1, zum Beispiel 0.5). `custom`: nach `weights` je Haushalt, etwa die Zahl der Teilnehmenden (Frauen-Event: `{ "<A>": 1, "<B>": 1 }`).
+- `among`: nur diese Haushalte teilen; leer heißt alle.
+- `splitMode` und `childWeight` setzt `PATCH /trips/:id`.
+- 409 `no_parties`, solange keine Haushalte angelegt sind.
+
+### `GET /trips/:id/ledger`
+
+```json
+{ "splitMode": "equal", "childWeight": 1, "myPartyId": "…", "totalCents": 38000,
+  "parties": [ { "id": "…", "name": "Familie A", "adults": 2, "children": 2, "memberIds": ["…"], "paidCents": 30000, "shareCents": 14000, "balanceCents": 16000 } ],
+  "expenses": [ { "id": "…", "title": "…", "amountCents": 8000, "paidBy": "…", "mode": "custom", "among": [], "weights": {}, "spentOn": "…", "unsplit": false } ],
+  "payments": [ { "id": "…", "fromParty": "…", "toParty": "…", "amountCents": 10000 } ],
+  "transfers": [ { "from": "<partyId>", "to": "<partyId>", "amountCents": 6000 } ] }
+```
+
+- `balanceCents` positiv: bekommt Geld zurück; negativ: schuldet noch.
+- `transfers` ist der Vorschlag mit möglichst wenigen Ausgleichszahlungen, bereits geleistete `payments` sind abgezogen.
+- `unsplit: true` an einer Ausgabe heißt: Sie lässt sich nicht verteilen (Haushalt entfernt) und ist nicht eingerechnet.
+- Alle schreibenden Aufrufe liefern das Kassenblatt unter `ledger` mit zurück.
+
+### Ausgleich abhaken
+
+`POST /trips/:id/payments` mit `{ "fromParty": "…", "toParty": "…", "amountCents": 6000 }` (ab Mitglied), `DELETE /trips/:id/payments/:paymentId`.
