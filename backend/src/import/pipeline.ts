@@ -155,7 +155,9 @@ export async function processImport(
     const stay = await tripStay(db, input.tripId);
     const fromDevice = input.html !== undefined;
     let html = input.html ?? "";
-    let priceBelongsToTrip = fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null;
+    // The device's word only counts where a link can carry the trip's dates; otherwise it opened the undated page.
+    let priceBelongsToTrip =
+      fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null && urlForStay(input.link, stay) !== input.link.canonicalUrl;
 
     if (!fromDevice) {
       // Ask for the trip's dates and party, so the price on the page is the one that matters.
@@ -212,7 +214,7 @@ export async function processImport(
       price.nights = nightsBetween(stay.startDate, stay.endDate);
       if (stay.adults !== null) price.persons = stay.adults + (stay.children ?? 0);
     }
-    if (input.link.searchWindow && !fromDevice) {
+    if (input.link.searchWindow && !fromDevice && !priceBelongsToTrip) {
       // Whatever was read, a window of possible dates is not a stay.
       price.startDate = null;
       price.endDate = null;
@@ -249,7 +251,11 @@ export async function processImport(
       title: extracted.title,
       rating: extracted.rating,
       reviews: extracted.reviews.length ? extracted.reviews : (earlier?.reviews ?? []),
-      reviewSummary: extracted.reviewSummary.summary ? extracted.reviewSummary : (earlier?.reviewSummary ?? extracted.reviewSummary),
+      // A summary resting on fewer reviews than the one before (a quick look at the page) does not replace it.
+      reviewSummary:
+        extracted.reviewSummary.summary && (extracted.reviewSummary.basedOn ?? 0) >= (earlier?.reviewSummary.summary ? (earlier.reviewSummary.basedOn ?? 0) : 0)
+          ? extracted.reviewSummary
+          : (earlier?.reviewSummary ?? extracted.reviewSummary),
     };
     const perSource = sources.map((s, i) => {
       if (s.id === input.sourceId) return { platform: s.platform, extract: own };

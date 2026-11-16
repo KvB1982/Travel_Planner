@@ -41,6 +41,15 @@ function reviewsFor(listing: typeof listings.$inferSelect | undefined, platform:
   };
 }
 
+/**
+ * Whether asking the server is pointless for prices and availability: the platform refused it before,
+ * or it is one of those that put the price for a stay into the page only in the visitor's browser.
+ */
+const RENDERED_PRICES = new Set(["airbnb", "vrbo", "casamundo", "check24", "novasol"]);
+function onlyTheDeviceSeesPrices(source: { platform: string; fetchNote: string | null }): boolean {
+  return source.fetchNote === "blocked" || source.fetchNote === "device" || RENDERED_PRICES.has(source.platform);
+}
+
 /** The advert's hints with the trip's choice to hide them; hidden ones stay retrievable. */
 function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: string[]) {
   return (listing?.profile.warnings ?? []).map((text) => ({ text, hidden: hidden.includes(text) }));
@@ -157,7 +166,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const first = own[0];
       const shared = first ? analyzeLink(first.url) : null;
       const link = shared?.isShortLink && first ? analyzeLink(first.canonicalUrl) : shared;
-      const needsDevice = first?.fetchNote === "blocked" || first?.fetchNote === "device";
+      const needsDevice = first !== undefined && onlyTheDeviceSeesPrices(first);
       const p = listing.profile;
       const entry = {
         id: candidate.id,
@@ -233,13 +242,15 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
       const url = urlForStay(link, stay);
       // Read on the device before: the platform refused the server, or gave it too little to go by.
-      const device = source.fetchNote === "blocked" || source.fetchNote === "device";
+      const device = onlyTheDeviceSeesPrices(source);
       const justRead = source.lastFetchedAt !== null && Date.now() - source.lastFetchedAt.getTime() < 60_000;
       if (!device && !justRead) {
         await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
         ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid }));
       }
-      checks.push({ candidateId: candidate.id, platform: source.platform, mode: device ? ("device" as const) : justRead ? ("skipped" as const) : ("server" as const), needsDevice: device, checkUrl: url });
+      // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
+      const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;
+      checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url });
     }
     await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });
     return reply.code(202).send({ startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });

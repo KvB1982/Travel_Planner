@@ -224,7 +224,7 @@ Stehen `"lat"` und `"lon"` in `profile.uncertain`, ist die Position nur ungefäh
 - `mode: "server"`: Der Server liest die Seite im Hintergrund für die Reisedaten. Das Angebot steht solange auf `importStatus: "pending"`; fertig ist es, wenn die Liste wieder `ready`, `partial` oder `failed` zeigt.
 - `mode: "device"` (`needsDevice: true`): Die Plattform gibt dem Server nichts oder zu wenig. Die App öffnet `checkUrl` und schickt die Seite an `POST /candidates/:id/capture` mit `{ "html": "…", "forTrip": true }`. `forTrip: true` sagt dem Server, dass die Seite für Zeitraum und Personen der Reise geöffnet war; nur dann gelten Preis und Verfügbarkeit für die Reise.
 - `mode: "skipped"`: in der letzten Minute schon gelesen.
-- `POST /candidates/:id/refresh` ruft ebenfalls mit Zeitraum und Personen der Reise ab, wo die Plattform das über den Link erlaubt (Airbnb, FeWo-direkt/Vrbo, Booking, Casamundo). Bei Novasol und Check24 kennt der Server die Linkform dafür noch nicht; dort bleibt die Verfügbarkeit `unknown`.
+- `POST /candidates/:id/refresh` ruft ebenfalls mit Zeitraum und Personen der Reise ab, wo die Plattform das über den Link erlaubt (Airbnb, FeWo-direkt/Vrbo, Booking, Casamundo, Check24, Novasol). Bei Airbnb, FeWo-direkt/Vrbo, Casamundo, Check24 und Novasol rechnet erst die geladene Seite den Preis aus; dort ist `needsDevice` immer `true` und die Reiseprüfung liefert `mode: "device"`. Kennt der Server für eine Plattform keine Linkform mit Reisedaten, liefert die Reiseprüfung `mode: "skipped"` (nicht öffnen), und ein `forTrip: true` wird dort nicht gewertet, damit kein Preis für einen anderen Zeitraum bei der Reise landet. Novasol-Links tragen `start=TT-MM-JJJJ`, `nights`, `adult`, `child`.
 
 In `GET /trips/:tripId/candidates` steht je Angebot:
 

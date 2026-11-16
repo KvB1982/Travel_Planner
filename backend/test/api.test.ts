@@ -133,12 +133,14 @@ describe("import", () => {
     expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 8 });
   });
 
-  it("does not turn a search window into a stay", async () => {
+  it("asks for the trip's own stay where the shared link only had a search window", async () => {
     const s = await setup({ fetcher: async () => page(fixture("novasol.html")) });
     const res = await s.importLink("https://urlaub.check24.de/suche/angebot?days=11-25&departureDate=2027-08-06&pageArea=package&returnDate=2027-08-30&roomAllocation=A-A-7-11&hotelId=12912");
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
-    expect(detail.body.listing.profile.price).toMatchObject({ startDate: null, endDate: null, nights: null, persons: 4 });
-    expect(detail.body.listing.profile.warnings.join(" ")).toMatch(/11 bis 25 Tagen/);
+    expect(new URL(s.requested.at(-1)!).searchParams.get("days")).toBe("7");
+    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 8 });
+    // The window of the shared link is beside the point once the page was read for the trip.
+    expect(detail.body.listing.profile.warnings.join(" ")).not.toMatch(/11 bis 25 Tagen/);
   });
 
   it("reads an advert again on request, but not twice within a minute", async () => {
@@ -501,7 +503,7 @@ describe("checking a whole trip", () => {
     const b = (await s.importLink(CASAMUNDO)).body.candidateId as string;
 
     let list = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates as { id: string; availability: string; needsDevice: boolean; checkUrl: string; price: { available: boolean | null; totalCents: number } | null }[];
-    expect(list.find((c) => c.id === a)).toMatchObject({ availability: "available", needsDevice: false, price: { available: true, totalCents: 300000 } });
+    expect(list.find((c) => c.id === a)).toMatchObject({ availability: "available", needsDevice: true, price: { available: true, totalCents: 300000 } });
     expect(list.find((c) => c.id === b)).toMatchObject({ availability: "unknown", needsDevice: true });
     expect(list.find((c) => c.id === b)!.checkUrl).toContain("2027-08-21");
 
@@ -509,7 +511,9 @@ describe("checking a whole trip", () => {
     await s.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
     const check = await s.call("POST", `/trips/${s.tripId}/refresh`, s.owner);
     expect(check.status).toBe(202);
-    expect(check.body.checks.map((c: { candidateId: string; mode: string }) => [c.candidateId, c.mode]).sort()).toEqual([[a, "server"], [b, "device"]].sort());
+    expect(check.body.checks.map((c: { candidateId: string; mode: string }) => [c.candidateId, c.mode]).sort()).toEqual([[a, "device"], [b, "device"]].sort());
+    // Prices for a stay appear on these platforms only in a browser: the device reads the page for the trip.
+    await s.call("POST", `/candidates/${a}/capture`, s.owner, { html: fixture("novasol.html"), forTrip: true });
     await s.ctx.queue.idle();
 
     list = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates;
