@@ -20,6 +20,7 @@ struct CandidateListView: View {
     @State private var pendingDelete: CandidateSummary?
     @State private var moving: CandidateSummary?
     @State private var showCompare = false
+    @State private var showPresentation = false
     @State private var showMap = false
     /// "2 von 5" while all offers are being checked; nil otherwise.
     @State private var checking: String?
@@ -42,6 +43,11 @@ struct CandidateListView: View {
             if let filter { return candidate.status == filter }
             return candidate.status != .rejected
         }
+    }
+
+    /// What the presentation walks through: the offers on screen that are still in the running.
+    private var presentable: [CandidateSummary] {
+        visible.filter { !$0.isUnavailable && $0.importStatus != .pending }
     }
 
     private var countries: [String] { OfferGrouping.countries(in: candidates) }
@@ -162,6 +168,11 @@ struct CandidateListView: View {
                     Button("Karte", systemImage: "map") { showMap = true }
                 }
             }
+            if !presentable.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Präsentation", systemImage: "play.rectangle") { showPresentation = true }
+                }
+            }
             if candidates.count > 1 {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Vergleichen", systemImage: "rectangle.split.3x1") { showCompare = true }
@@ -207,6 +218,9 @@ struct CandidateListView: View {
         .fullScreenCover(isPresented: $showMap) {
             // Rejected offers stay off the map unless the list is filtered to show them.
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
+        }
+        .fullScreenCover(isPresented: $showPresentation) {
+            PresentationView(candidates: presentable, persons: detail?.trip.persons)
         }
         .fullScreenCover(isPresented: $showCompare) {
             CompareView(candidates: candidates, persons: detail?.trip.persons)
