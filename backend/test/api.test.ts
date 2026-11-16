@@ -1,4 +1,5 @@
-import { listingSources } from "../src/db/schema.js";
+import { desc } from "drizzle-orm";
+import { listingSources, priceSnapshots } from "../src/db/schema.js";
 import { describe, expect, it } from "vitest";
 import { emptyProfile } from "../src/import/profile.js";
 import type { Extractor } from "../src/import/extract.js";
@@ -529,6 +530,14 @@ describe("checking a whole trip", () => {
     const after = (await s.call("GET", `/candidates/${a}`, s.owner)).body.listing.profile;
     expect(after.title).toBe(titleBefore);
     expect(after.title).not.toMatch(/Bot oder Mensch/);
+
+    // A page caught before its price box had loaded says nothing. What the look before it found stays.
+    const [lastRow] = await s.db.select().from(priceSnapshots).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
+    await s.db.insert(priceSnapshots).values({ listingSourceId: lastRow!.listingSourceId, tripId: s.tripId, startDate: lastRow!.startDate, endDate: lastRow!.endDate, totalCents: null, available: null, kind: "total", capture: "device", capturedAt: new Date(Date.now() + 1000) });
+    const still = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates.find((c: { id: string }) => c.id === a);
+    expect(still).toMatchObject({ availability: "unavailable", price: { totalCents: 300000 } });
+    expect(still.emptyCheckAt).toBeTruthy();
+    expect(still.availabilityCheckedAt).toBeTruthy();
 
     // Rejected candidates are left alone, and a guest may not trigger the check.
     await s.call("PATCH", `/candidates/${a}`, s.owner, { status: "rejected" });
