@@ -157,7 +157,8 @@ struct CandidateListView: View {
                     Button("Vergleichen", systemImage: "rectangle.split.3x1") { showCompare = true }
                 }
             }
-            if detail?.role == .organizer {
+            // The watchlist is personal: nobody can be invited to it.
+            if detail?.role == .organizer, detail?.trip.isWatchlist != true {
                 ToolbarItem(placement: .secondaryAction) {
                     Button("Jemanden einladen", systemImage: "person.badge.plus") { createInvite() }
                 }
