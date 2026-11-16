@@ -284,6 +284,8 @@ export const priceSnapshots = pgTable(
     capture: priceCapture("capture").notNull(),
     capturedBy: uuid("captured_by").references(() => users.id, { onDelete: "set null" }),
     capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When a later reading last found the very same again. The row itself stays the first sighting. */
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   },
   (t) => [index("price_snapshots_source_idx").on(t.listingSourceId, t.capturedAt)],
 );

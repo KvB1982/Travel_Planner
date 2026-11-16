@@ -366,6 +366,8 @@ export async function processImport(
       });
     }
 
+    else if (unchanged) await db.update(priceSnapshots).set({ confirmedAt: new Date() }).where(eq(priceSnapshots.id, latest!.id));
+
     await setCandidate({ importStatus: note ? "partial" : "ready", importNote: note });
   } catch (err) {
     const note =

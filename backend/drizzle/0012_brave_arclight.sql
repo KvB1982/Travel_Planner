@@ -1,0 +1,1 @@
+ALTER TABLE "price_snapshots" ADD COLUMN "confirmed_at" timestamp with time zone;
