@@ -249,7 +249,11 @@ export async function processImport(
       title: extracted.title,
       rating: extracted.rating,
       reviews: extracted.reviews.length ? extracted.reviews : (earlier?.reviews ?? []),
-      reviewSummary: extracted.reviewSummary.summary ? extracted.reviewSummary : (earlier?.reviewSummary ?? extracted.reviewSummary),
+      // A summary resting on fewer reviews than the one before (a quick look at the page) does not replace it.
+      reviewSummary:
+        extracted.reviewSummary.summary && (extracted.reviewSummary.basedOn ?? 0) >= (earlier?.reviewSummary.summary ? (earlier.reviewSummary.basedOn ?? 0) : 0)
+          ? extracted.reviewSummary
+          : (earlier?.reviewSummary ?? extracted.reviewSummary),
     };
     const perSource = sources.map((s, i) => {
       if (s.id === input.sourceId) return { platform: s.platform, extract: own };
