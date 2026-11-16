@@ -48,6 +48,9 @@ struct CandidateListView: View {
     @State private var deviceTotal = 0
     /// How many of them were actually read and sent; the rest were cancelled.
     @State private var deviceDone = 0
+    /// Offers whose page went to the server a moment ago: when it was sent. Until the server has read it,
+    /// the list says so instead of showing the old state as if nothing had happened.
+    @State private var evaluating: [String: Date] = [:]
     @State private var deviceCheck: TripCheck.Check?
     /// Adverts the hidden run could not read because the site wants a person; shown once the summary is closed.
     @State private var pendingVisible: [TripCheck.Check] = []
@@ -72,7 +75,7 @@ struct CandidateListView: View {
 
     @ViewBuilder
     private func row(_ candidate: CandidateSummary) -> some View {
-        CandidateRow(candidate: candidate, persons: detail?.trip.persons).tag(candidate.id)
+        CandidateRow(candidate: candidate, persons: detail?.trip.persons, evaluating: evaluating[candidate.id] != nil).tag(candidate.id)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if detail?.role.canEdit ?? false {
                     // Not `role: .destructive`: the row must stay until the question is answered.
@@ -334,7 +337,7 @@ struct CandidateListView: View {
             let url = check.checkUrl ?? ""
             CaptureView(source: ListingSource(id: check.candidateId, platform: check.platform ?? "other", url: url, canonicalUrl: url),
                         candidateID: check.candidateId, forTrip: true, dateOptionID: periodID, automatic: true,
-                        progressLabel: "\(deviceTotal - deviceQueue.count) von \(deviceTotal)") { _, _ in deviceDone += 1 }
+                        progressLabel: "\(deviceTotal - deviceQueue.count) von \(deviceTotal)") { _, _ in deviceDone += 1; evaluating[check.candidateId] = .now; model.dataChanged() }
         }
         .sheet(item: $moving) { candidate in
             MoveOfferView(candidateID: candidate.id, title: candidate.listing.title ?? "Angebot", currentTripID: tripID) { _ in
@@ -349,11 +352,21 @@ struct CandidateListView: View {
         .task(id: model.revision) {
             await load()
             // Imports finish in the background on the server; look again until none is pending.
-            while !Task.isCancelled, candidates.contains(where: { $0.importStatus == .pending }) {
+            while !Task.isCancelled, candidates.contains(where: { $0.importStatus == .pending }) || !evaluating.isEmpty {
                 try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { break }
                 await load()
+                settleEvaluating()
             }
+        }
+    }
+
+    /// Drops the mark once the server shows a newer price or verdict for the offer, or after a minute and a half.
+    private func settleEvaluating() {
+        for (id, sent) in evaluating {
+            let candidate = candidates.first { $0.id == id }
+            let fresh = (candidate?.price?.capturedAt).map { $0 > sent.addingTimeInterval(-5) } ?? false
+            if candidate == nil || fresh || Date.now.timeIntervalSince(sent) > 90 { evaluating[id] = nil }
         }
     }
 
@@ -416,6 +429,7 @@ struct CandidateListView: View {
         Task {
             do {
                 let result = try await backend.checkTrip(tripId: tripID, dateOptionId: periodID)
+                for check in result.checks where check.mode == "server" { evaluating[check.candidateId] = .now }
                 model.dataChanged()
                 let onDevice = result.checks.filter(\.wantsDevice)
                 deviceTotal = onDevice.count
@@ -471,6 +485,7 @@ struct CandidateListView: View {
                 try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,
                                           url: hiddenPage.advertURL ?? address, dateOptionId: periodID)
                 done += 1
+                evaluating[check.candidateId] = .now
                 model.dataChanged()
             } catch {
                 failed += 1
@@ -615,6 +630,16 @@ private struct CandidateRow: View {
     let candidate: CandidateSummary
     let persons: Int?
 
+    /// The page of this offer is with the server right now.
+    var evaluating = false
+
+    private var working: some View {
+        HStack(spacing: 5) {
+            ProgressView().controlSize(.mini)
+            Text("Preis wird gerade ausgewertet …").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CoverImage(url: candidate.listing.coverImageUrl)
@@ -661,6 +686,10 @@ private struct CandidateRow: View {
                         if price.forThisTrip {
                             // Only a price asked for this trip's dates is shown as the price of the offer.
                             Text(text).font(.subheadline.weight(.semibold))
+                            // The price on screen is the old one until the server has read the new page.
+                            if evaluating { ProgressView().controlSize(.mini).accessibilityLabel("Preis wird gerade neu ausgewertet") }
+                        } else if evaluating {
+                            working
                         } else if !candidate.isUnavailable {
                             // A price from the shared link belongs to other dates: named as such, small, never as "the" price.
                             VStack(alignment: .leading, spacing: 1) {
@@ -669,6 +698,8 @@ private struct CandidateRow: View {
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
+                    } else if evaluating {
+                        working
                     } else if !candidate.isUnavailable && candidate.importStatus == .ready {
                         Text("Preis für euren Zeitraum noch offen").font(.caption).foregroundStyle(.secondary)
                     }
