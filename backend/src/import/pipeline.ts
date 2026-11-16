@@ -230,8 +230,9 @@ export async function processImport(
     if (priceBelongsToTrip) {
       // Only what this very page showed is the trip's price. An amount an earlier reading or the shared
       // link left behind is for other dates and must not be carried over under the trip's.
-      price.totalEur = extracted.price.totalEur;
-      price.kind = extracted.price.kind;
+      // A general "from" price is no price for the trip's dates.
+      price.totalEur = fromDevice && extracted.price.kind === "from" ? null : extracted.price.totalEur;
+      price.kind = fromDevice && extracted.price.kind === "from" ? null : extracted.price.kind;
       price.rangeMaxEur = extracted.price.rangeMaxEur;
       // The page was asked for the trip's dates and party, so whatever price it showed belongs to those,
       // not to what the sharer had selected in the link.

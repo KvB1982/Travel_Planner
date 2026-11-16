@@ -338,11 +338,19 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       if (stay.children !== null) p.set("child", String(stay.children));
       break;
     }
-    case "casamundo":
+    case "casamundo": {
+      // The page only takes the dates over when arrival, length and head count come along with the range.
+      const nights = nightsBetween(stay.startDate, stay.endDate);
       p.set("dateRange", `${stay.startDate}~${stay.endDate}`);
-      if (stay.adults !== null) p.set("adults", String(stay.adults));
-      if (stay.children) p.set("children", String(stay.children));
+      p.set("arrival", stay.startDate);
+      if (nights) p.set("duration", String(nights));
+      if (stay.adults !== null) {
+        p.set("adults", String(stay.adults));
+        if (stay.children) p.set("children", String(stay.children));
+        p.set("persons", String(stay.adults + (stay.children ?? 0)));
+      }
       break;
+    }
     default:
       return info.canonicalUrl;
   }
