@@ -1,8 +1,8 @@
 # Konzept: Ferienhaus-Planer für Familie und Freunde
 
 **Arbeitstitel:** Travel Planner
-**Stand:** 15.11.2026, Version 0.4 (Machbarkeitstest Import, Erweiterung um Hotels und Pauschalreisen)
-**Status:** Konzeptphase, noch keine Implementierung
+**Stand:** 16.11.2026, Version 0.5 (Ausbau zum Begleiter für die ganze Reise, Kapitel 15)
+**Status:** Recherche weitgehend umgesetzt (Backend und iOS-App), übrige Phasen in Konzeption
 
 ---
 
@@ -609,3 +609,208 @@ Stand 15.11.2026, nach Rückmeldung des Auftraggebers:
 2. Machbarkeitstest für den Import mit echten Inseraten
 3. Entwurf der wichtigsten Ansichten zur Abstimmung
 4. Start von Phase 0
+
+---
+
+## 15. Ausbau: Vom Recherche-Werkzeug zum Begleiter für die ganze Reise
+
+Stand 16.11.2026, auf Wunsch des Auftraggebers. Dieses Kapitel erweitert das Zielbild. Die Kapitel 1 bis 14 beschreiben weiterhin die Recherche, die inzwischen weitgehend gebaut ist (Stand siehe 15.8).
+
+### 15.1 Leitidee
+
+Die Reise bleibt der rote Faden. Bisher endet sie in der App mit der Entscheidung für ein Haus. Künftig begleitet die App die Gruppe von der ersten Idee bis zur Abrechnung danach.
+
+Drei Grundsätze:
+
+- **Eine Reise, mehrere Oberflächen.** Jede Phase bekommt eine eigene, auf ihre Aufgabe zugeschnittene Oberfläche. Wer packt, sieht keine Angebotsvergleiche, und wer vergleicht, keine Packliste.
+- **Nichts wird doppelt erfasst.** Was eine Phase weiß, erbt die nächste: Aus dem gewählten Angebot wird die Buchung, aus der Buchung Adresse, Zeiten und Kosten, aus den Mitreisenden der Verteilerschlüssel für die Abrechnung.
+- **Schritt für Schritt.** Jede Phase ist für sich nützlich und wird einzeln gebaut. Eine Reise funktioniert auch, wenn spätere Phasen noch fehlen.
+
+### 15.2 Die Phasen
+
+| Nr. | Phase | Leitfrage | Beginnt mit |
+|---|---|---|---|
+| 0 | **Rahmen** | Wer fährt wann wohin, und was darf es kosten? | Reise anlegen |
+| 1 | **Recherche** | Welche Angebote kommen in Frage? | erstes geteiltes Angebot |
+| 2 | **Pitch und Entscheidung** | Welches nehmen wir? | Organisator eröffnet die Abstimmung |
+| 3 | **Buchung** | Ist alles fest und bezahlt? | Entscheidung für ein Angebot |
+| 4 | **Vorbereitung** | Wie kommen wir hin, und was brauchen wir? | Buchung bestätigt |
+| 5 | **Unterwegs** | Was steht heute an, und wer hat was bezahlt? | Anreisetag |
+| 6 | **Rückblick** | Was hat es gekostet, wie war es, was bleibt? | Abreisetag |
+
+Phase 0 ist eine Ergänzung zur Vorgabe. Sie ist heute das Formular „Neue Reise“ und verdient eine eigene, kleine Oberfläche, weil Terminfindung und Budget oft die erste Hürde sind.
+
+#### Phase 0: Rahmen
+
+- Mitreisende und Haushalte, Rollen
+- Zeiträume zur Wahl, mit Terminabstimmung in der Gruppe (wer kann wann, Ferienkalender der Bundesländer)
+- Budget gesamt und je Haushalt, Muss- und Wunsch-Kriterien
+- Zielregion oder mehrere Regionen zur Wahl
+
+#### Phase 1: Recherche
+
+Der heutige Kern der App, siehe Kapitel 3 bis 6: Angebote sammeln, Steckbrief, Bilder, Bewertungen, Karte, Vergleich, Verfügbarkeit und Preise prüfen, Merkliste. Neu im erweiterten Bild ist nur der Übergang: Die Recherche endet nicht von selbst, sondern mit einer **Auswahl der Kandidaten für den Pitch**.
+
+#### Phase 2: Pitch und Entscheidung
+
+Zweck: Aus zwanzig Fundstücken werden drei bis fünf, und die Gruppe entscheidet sich nachvollziehbar.
+
+- **Kandidatenliste:** Der Organisator markiert die Finalisten. Alles andere tritt in den Hintergrund.
+- **Pitch-Ansicht:** Jedes Angebot als aufgeräumte Präsentation zum Durchblättern: beste Bilder, Eckdaten, Preis je Haushalt, Stärken und Schwächen aus den Bewertungen, Karte, offene Hinweise. Geeignet, um sie gemeinsam am Fernseher oder iPad durchzugehen, und als Link für Gäste ohne App.
+- **Abstimmung mit Frist:** Stimmen, Rangfolge oder Punkte, Veto mit Begründung, Erinnerung an fehlende Stimmen.
+- **Entscheidungsvorlage:** Ergebnis mit Begründung, also Stimmenbild, Preis, erfüllte Muss-Kriterien und offene Risiken.
+- **Entscheidung festhalten:** Der Organisator erklärt ein Angebot zum Gewinner. Die übrigen wandern ins Archiv der Reise oder auf die Merkliste.
+
+#### Phase 3: Buchung
+
+Die App bucht nicht selbst. Sie führt durch die Buchung und hält fest, was vereinbart wurde.
+
+- **Letzte Prüfung vor dem Buchen:** Preis und Verfügbarkeit frisch abfragen, Stornobedingungen, Kaution, Nebenkosten
+- **Buchung erfassen:** Plattform, Buchungsnummer, Gesamtpreis, wer gebucht hat. Die Bestätigung lässt sich per Teilen-Menü oder Foto ablegen und wird ausgelesen.
+- **Zahlungsplan:** Anzahlung, Restzahlung, Kaution mit Fälligkeiten und Erinnerungen
+- **Fristen:** kostenlose Stornierung bis, Anreisezeiten, Schlüsselübergabe
+- **Weitere Buchungen derselben Reise:** Flüge, Mietwagen, Fähre, Zwischenübernachtung, Reiseversicherung, jeweils mit Beleg
+- **Vorab-Aufteilung:** Wer trägt welchen Anteil, als Grundlage für die spätere Abrechnung
+
+#### Phase 4: Vorbereitung
+
+Zweck: Alles rund um die Reise ist geklärt, bevor es losgeht.
+
+- **Anreise je Haushalt:** Auto, Flug oder Bahn, Abfahrtsort, Route mit Fahrzeit, Etappen und Zwischenstopps, Maut und Vignetten, Ladestopps
+- **Flug und Mietwagen:** Zeiten, Buchungsnummern, Abholort, Fahrer
+- **Zimmer- und Bettenverteilung** anhand der Angaben im Steckbrief
+- **Packlisten:** Vorlagen (Strand, Ski, Kleinkind, Hund), gemeinsame Liste („wer bringt was mit“) und persönliche Liste
+- **Einkauf und Essensplan:** Wer kocht wann, Einkaufsliste für den ersten Tag, Supermarkt in der Nähe aus dem Steckbrief
+- **Aktivitäten und Termine:** Ideen sammeln, abstimmen, Feste und Märkte vor Ort, Tische oder Eintritte vorbestellen
+- **Checklisten mit Fristen:** Ausweise gültig, Auslandskrankenschein, Haustierpapiere, Post, Pflanzen, Hausschlüssel
+- **Aufgaben verteilen:** jede Aufgabe mit zuständiger Person und Termin
+
+#### Phase 5: Unterwegs
+
+Zweck: Das Wichtige ist mit einem Griff da, auch ohne Netz.
+
+- **Heute-Ansicht:** Was steht an, Wetter, nächste Fahrt
+- **Hausmappe:** Adresse mit Navigation, Anreise- und Abreisezeit, Schlüsselcode, WLAN, Ansprechperson, Hausregeln, Müll, Notfallnummern
+- **Dokumente:** Buchungsbestätigungen, Tickets, Mietwagenvertrag, Versicherung, offline verfügbar
+- **Kalender:** Aktivitäten planen und durchführen, Zu- und Absagen, Übernahme in den Gerätekalender
+- **Gemeinsame Kasse:** Ausgaben in Sekunden erfassen (Betrag, wer hat bezahlt, für wen), Beleg als Foto, laufender Stand je Haushalt
+- **Fotos:** gemeinsames Album der Reise, Hochladen aus der Fotos-App, Lieblingsbilder markieren
+- **Notizen zum Haus:** was gut war, was fehlte. Grundlage für die Bewertung danach.
+
+#### Phase 6: Rückblick
+
+- **Abrechnung:** Kosten-Split nach Haushalten oder Personen, mit Gewichtung (zum Beispiel Kinder halb), kleinste Zahl an Ausgleichszahlungen, „erledigt“ abhaken
+- **Kaution:** Rückzahlung nachverfolgen
+- **Fotobuch:** Auswahl der besten Bilder, Reihenfolge, Titel, Ausgabe als PDF oder Übergabe an einen Fotobuch-Dienst
+- **Bewertung:** Haus, Lage, Vermieter aus Sicht der Gruppe. „Würden wir wieder buchen?“ landet im Familien-Gedächtnis (Kapitel 9: ein Haus erscheint in späteren Reisen mit seiner Vorgeschichte).
+- **Rückblick auf die Reise:** Was nehmen wir uns fürs nächste Mal vor, Packliste und Checklisten als Vorlage sichern
+- **Archiv:** Die Reise bleibt lesbar, mit allem, was dazugehört.
+
+### 15.3 Navigation und Phasenübertritt
+
+- **Phasenleiste.** Innerhalb einer Reise steht oben eine Leiste mit den Phasen. Sie zeigt, wo die Reise steht, und schaltet die Oberfläche um. Auf dem iPad ersetzt die gewählte Phase die mittlere und rechte Spalte, auf dem iPhone den Inhalt unter der Leiste.
+- **Die richtige Phase von selbst.** Beim Öffnen einer Reise zeigt die App die Phase, die gerade dran ist: bestimmt durch den Stand der Reise und das Datum. Am Anreisetag öffnet sich „Unterwegs“.
+- **Zurück ist immer möglich.** Frühere Phasen bleiben einsehbar, spätere sind sichtbar, aber leer und erklären, was dort kommt.
+- **Der Übertritt ist ein bewusster Schritt.** Wo eine Phase mit einer Entscheidung endet, gibt es einen eindeutigen Knopf mit kurzer Prüfliste:
+
+| Übertritt | Auslöser | Was dabei geschieht |
+|---|---|---|
+| Rahmen → Recherche | Zeitraum und Gäste stehen | Prüflauf und Preise beziehen sich darauf |
+| Recherche → Pitch | „Kandidaten auswählen“ | Finalisten werden markiert, die Abstimmung beginnt, die Gruppe wird benachrichtigt |
+| Pitch → Buchung | „Entscheidung festhalten“ | Gewinner steht fest, letzter Preis- und Verfügbarkeitscheck, übrige Angebote ins Archiv oder auf die Merkliste |
+| Buchung → Vorbereitung | Buchung als bestätigt erfasst | Adresse, Zeiten und Fristen gehen in Hausmappe, Kalender und Checklisten über |
+| Vorbereitung → Unterwegs | Anreisetag (automatisch) | Heute-Ansicht wird Startseite, Dokumente offline verfügbar |
+| Unterwegs → Rückblick | Abreisetag (automatisch) | Kasse wird zur Abrechnung, Album zur Fotobuch-Auswahl |
+
+- **Ein Schritt zurück bleibt erlaubt.** Fällt ein gebuchtes Haus aus, lässt sich die Reise zur Recherche zurückstellen. Nichts wird gelöscht.
+- **Rollen.** Der Organisator löst die Übertritte aus. Mitglieder arbeiten in allen Phasen mit, Gäste sehen, stimmen ab und kommentieren.
+
+Der vorhandene Reisestatus (`planning`, `decided`, `booked`, `archived`) wird zur Phase verfeinert: `framing`, `research`, `decision`, `booking`, `preparation`, `travelling`, `review`, `archived`.
+
+### 15.4 Erweiterung des Datenmodells
+
+Zusätzlich zu Kapitel 9. Alles hängt an der Reise.
+
+| Entität | Phase | Zweck | Wichtige Felder |
+|---|---|---|---|
+| **AvailabilityPoll** | 0 | Terminfindung | Zeitraum, Antwort je Haushalt |
+| **Booking** (vorhanden, erweitert) | 3 | Jede feste Buchung der Reise | Art (Unterkunft, Flug, Mietwagen, Fähre, Versicherung, Aktivität), Anbieter, Buchungsnummer, Zeiten, Betrag, gebucht von |
+| **Payment** (vorhanden) | 3 | Zahlungsplan | Betrag, fällig am, bezahlt am, bezahlt von |
+| **Document** | 3 bis 5 | Belege und Unterlagen | Datei, Art, gehört zu Buchung oder Person, offline vorhalten |
+| **TravelLeg** | 4 | Anreise und Etappen | Haushalt, Verkehrsmittel, von, nach, Zeiten, Zwischenstopps |
+| **RoomAssignment** | 4 | Zimmerverteilung | Zimmer, Personen |
+| **ChecklistItem** | 4 | Packen, Einkauf, Aufgaben | Liste, Text, zuständig, fällig, erledigt, Menge |
+| **Activity** | 4 und 5 | Unternehmung oder Termin | Titel, Ort, Zeit, Kosten, Zusagen, Buchung |
+| **HouseInfo** | 5 | Hausmappe | Schlüsselcode, WLAN, Kontakt, Regeln |
+| **Expense** | 5 | Ausgabe aus der gemeinsamen Kasse | Betrag, Währung, bezahlt von, aufgeteilt auf, Kategorie, Beleg |
+| **Settlement** | 6 | Ausgleichszahlung | von, an, Betrag, erledigt |
+| **TripPhoto / Album** | 5 und 6 | Reisefotos | Datei, aufgenommen von, Zeit, Ort, Favorit |
+| **TripReview** | 6 | Fazit der Gruppe | Wertungen, Text, wieder buchen |
+
+### 15.5 Folgen für die Technik
+
+- **Dateiablage auf dem Server.** Dokumente und Fotos brauchen Speicherplatz, Datensicherung und Zugriffsschutz. Das ist der größte neue Baustein und hängt mit der schon geplanten eigenen Bildablage zusammen.
+- **Offline wird Pflicht.** Unterwegs gibt es nicht immer Netz. Hausmappe, Dokumente, Kalender und Kasse müssen ohne Verbindung lesbar und die Kasse auch beschreibbar sein, mit Abgleich bei Verbindung. Das macht den lokalen Zwischenspeicher (SwiftData, bisher zurückgestellt) nötig.
+- **Erreichbarkeit.** Unterwegs im Mobilfunknetz ist der Server nur über Tailscale oder eine öffentliche Adresse erreichbar. Spätestens ab Phase 5 braucht es die öffentliche Erreichbarkeit aus Kapitel 8.3.
+- **Mitteilungen.** Fristen, fehlende Stimmen, Zahlungstermine und Tagesplan leben von Push-Mitteilungen.
+- **Schnittstellen zum Gerät.** Kalender, Karten und Navigation, Fotos-App, Dateien, Kamera für Belege.
+- **Sensible Daten.** Ausweiskopien, Buchungsunterlagen und Schlüsselcodes verlangen Verschlüsselung der Ablage und eine klare Regel, wer was sehen darf. Kapitel 10 wird dafür erweitert.
+- **Abrechnung.** Der Kosten-Split ist reine Rechenlogik ohne Abhängigkeit nach außen und lässt sich früh und gut testbar bauen.
+
+### 15.6 Abgrenzung
+
+- Die App **bucht und bezahlt nicht**. Sie verweist auf die Plattform und hält das Ergebnis fest.
+- Die App **überweist kein Geld**. Sie rechnet aus, wer wem wie viel schuldet. Der Ausgleich läuft wie gewohnt per Überweisung oder Bezahl-App.
+- Die App ist **kein Ersatz für die Foto-Mediathek**. Sie sammelt die gemeinsamen Bilder einer Reise in begrenzter Menge.
+- Die App ist **kein Routenplaner**. Sie hält Etappen fest und übergibt an Karten oder Google Maps.
+
+### 15.7 Stufenplan
+
+Die Reihenfolge folgt dem Nutzen für die beiden anstehenden Reisen (Pfingsten und Sommer 2027) und der technischen Abhängigkeit. Zeitangaben fehlen bewusst: Sie hängen davon ab, wie viel je Phase wirklich gebraucht wird.
+
+| Stufe | Inhalt | Umfang | Voraussetzung |
+|---|---|---|---|
+| **A** | Recherche abrunden (15.8) | klein bis mittel | keine |
+| **B** | Phasenleiste und Phase als Zustand der Reise, Phase 0 als eigene Oberfläche | klein | A |
+| **C** | Pitch und Entscheidung | mittel | B |
+| **D** | Buchung mit Zahlungsplan, Fristen und Belegen | mittel | C, Dateiablage |
+| **E** | Vorbereitung: Listen, Aufgaben, Anreise, Aktivitäten | groß, gut teilbar | D |
+| **F** | Unterwegs: Hausmappe, Kalender, Kasse, Fotos | groß | E, Offline-Speicher, öffentliche Erreichbarkeit |
+| **G** | Rückblick: Abrechnung, Fotobuch, Bewertung | mittel | F |
+
+Zwei Bausteine lassen sich vorziehen, weil sie für sich nützlich sind: die **gemeinsame Kasse mit Abrechnung** (aus F und G) und die **Packliste** (aus E).
+
+### 15.8 Stand der Recherche und was ihr noch fehlt
+
+Gebaut und im Einsatz (Stand 16.11.2026):
+
+- Angebote per Link und Teilen-Menü sammeln, KI-gestützter Steckbrief mit Kennzeichnung unsicherer Werte
+- Auslesen auf dem Gerät für Plattformen, die den Server sperren, mit automatischem Durchblättern von Bildergalerie und Bewertungen
+- Bildergalerie, Bewertungen mit Zusammenfassung, Karte je Angebot und für die ganze Reise
+- Vergleich mehrerer Angebote, Gliederung und Filter nach Land und Region
+- Verfügbarkeit und Preise für Zeitraum und Gäste der Reise prüfen, nicht verfügbare Angebote gekennzeichnet
+- Dasselbe Haus auf anderen Plattformen suchen und zusammenführen
+- Abstimmen, Kommentieren, Hinweise ausblenden, Verschieben zwischen Reisen, Merkliste, Löschen
+
+Für eine runde Recherche fehlt noch:
+
+| Thema | Warum es zur Recherche gehört |
+|---|---|
+| Steckbrief von Hand korrigieren, Preis von Hand eintragen | Die Automatik liegt gelegentlich daneben. Die Schnittstelle dafür gibt es schon. |
+| Muss- und Wunsch-Kriterien der Reise mit Ampel je Angebot | Im Konzept vorgesehen (Kapitel 3.4), macht den Vergleich erst scharf |
+| Sortieren und Filtern nach Preis, Bewertung, Verfügbarkeit | Bei mehr als zehn Angeboten wird die Liste sonst unübersichtlich |
+| Mehrere Zeiträume je Reise prüfen | Bisher zählt nur der erste Zeitraum |
+| Preisverlauf sichtbar machen | Die Daten werden gesammelt, aber nicht gezeigt |
+| Aktivitäten-Chronik | Wer hat was hinzugefügt oder geändert |
+| Dasselbe Konto auf mehreren Geräten („Mit Apple anmelden“) | Heute legt jedes Gerät ein eigenes Konto an |
+| Verteilung über TestFlight | Wartet auf die Freischaltung der Developer-Mitgliedschaft |
+| Teilen-Menü aus Safari im Alltag erproben | Gebaut, aber noch nicht mit echten Inseraten getestet |
+
+### 15.9 Offene Fragen an den Auftraggeber
+
+1. **Reihenfolge:** Passt der Stufenplan, oder soll ein Baustein vorgezogen werden, etwa die gemeinsame Kasse für die Pfingstreise?
+2. **Abstimmung im Pitch:** Reicht Ja, Vielleicht, Nein mit Veto wie heute, oder soll es eine Rangfolge oder Punkte geben?
+3. **Abrechnung:** Wird nach Haushalten, nach Personen oder gemischt geteilt, und zählen Kinder voll?
+4. **Fotos:** Wie viele Bilder je Reise sind realistisch? Davon hängt der Speicherbedarf auf dem Server ab.
+5. **Fotobuch:** Genügt eine PDF-Ausgabe, oder soll ein bestimmter Dienst angebunden werden?
+6. **Gäste ohne App:** Sollen sie auch in späteren Phasen mitmachen können, etwa Ausgaben erfassen über einen Web-Link?
