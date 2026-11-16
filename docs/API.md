@@ -293,3 +293,7 @@ Von Hand urteilen: `PATCH /candidates/:id` mit `{ "criteriaChecks": { "<criterio
 - `POST /trips/:id/check` und `/refresh` nehmen `{ "dateOptionId": "…" }` (oder denselben Query-Parameter) und prüfen diesen Zeitraum; die Antwort nennt `dateOptionId`. Ohne Angabe wie bisher der früheste.
 - `POST /candidates/:id/capture` nimmt neben `forTrip: true` ebenfalls `dateOptionId`, damit der Preis beim richtigen Zeitraum landet.
 - Geändert: Ein Preis zählt für die Reise nur noch, wenn er zum gefragten Zeitraum gehört, nicht mehr zu irgendeinem der Zeiträume.
+
+## Tageslimit
+
+Je Person und Tag (UTC) 400 Auswertungen (Import, capture, refresh, Reiseprüfung, weitere Quelle) und 30 Suchen nach demselben Objekt. Danach antworten diese Aufrufe mit 429 `daily_limit` und einer Meldung zum Anzeigen. Lesen, Abstimmen und Kommentieren bleiben möglich.

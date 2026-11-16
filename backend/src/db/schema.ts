@@ -320,3 +320,17 @@ export const activityEvents = pgTable(
   },
   (t) => [index("activity_trip_idx").on(t.tripId, t.createdAt)],
 );
+
+/** How often a person has set the language model to work on a day, so a stolen login cannot burn through the credit. */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    kind: text("kind").$type<"reading" | "search">().notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day, t.kind] })],
+);

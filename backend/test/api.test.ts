@@ -652,3 +652,16 @@ describe("several periods", () => {
     expect(autumn.checkUrl).toContain("2027-10-09");
   });
 });
+
+describe("daily allowance", () => {
+  it("refuses further readings once the day's allowance is used up", async () => {
+    const s = await setup();
+    s.ctx.config.DAILY_READINGS = 2;
+    expect((await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).status).toBe(202);
+    expect((await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD521" })).status).toBe(202);
+    const third = await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD522" });
+    expect(third.status).toBe(429);
+    expect(third.body.error.code).toBe("daily_limit");
+    await s.ctx.queue.idle();
+  });
+});

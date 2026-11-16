@@ -1,8 +1,8 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, users, votes } from "../db/schema.js";
+import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
 import { analyzeLink, urlForStay } from "../import/url.js";
@@ -67,6 +67,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await requireMember(db, tripId, uid, "member");
     const body = parseBody(z.object({ url: z.string().trim().url().max(4000), html: z.string().max(MAX_PAGE_BYTES).optional() }), req.body);
 
+    await spend(uid, "reading");
     let started;
     try {
       started = await startImport(importDeps, { tripId, userId: uid, url: body.url });
@@ -97,6 +98,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
     const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), dateOptionId: z.string().uuid().optional(), url: z.string().max(4000).optional() }), req.body);
+    await spend(uid, "reading");
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
     if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
@@ -118,6 +120,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     if (!source) throw new HttpError(409, "no_source", "Zu diesem Angebot gibt es keinen Link.");
     // Platforms are asked sparingly: not again within a minute.
     if (source.lastFetchedAt && Date.now() - source.lastFetchedAt.getTime() < 60_000) throw new HttpError(429, "too_soon", "Das Angebot wurde gerade erst abgerufen. Bitte gleich noch einmal versuchen.");
+    await spend(uid, "reading");
     const shared = analyzeLink(source.url);
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
     await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
@@ -126,6 +129,18 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   });
 
   /** The candidates of a trip as the list shows them, each with its advert for callers that need more. */
+  /** Count one use of the language model against the person's allowance for today; refuse when it is used up. */
+  const spend = async (uid: string, kind: "reading" | "search") => {
+    const limit = kind === "search" ? ctx.config.DAILY_SEARCHES : ctx.config.DAILY_READINGS;
+    const day = new Date().toISOString().slice(0, 10);
+    const [row] = await db
+      .insert(aiUsage)
+      .values({ userId: uid, day, kind, count: 1 })
+      .onConflictDoUpdate({ target: [aiUsage.userId, aiUsage.day, aiUsage.kind], set: { count: sql`${aiUsage.count} + 1` } })
+      .returning({ count: aiUsage.count });
+    if ((row?.count ?? 0) > limit) throw new HttpError(429, "daily_limit", kind === "search" ? "Für heute sind die Suchen aufgebraucht. Morgen geht es weiter." : "Für heute sind die Auswertungen aufgebraucht. Morgen geht es weiter.");
+  };
+
   const criteriaOf = async (tripId: string) =>
     (await db.select().from(tripCriteria).where(eq(tripCriteria.tripId, tripId)).orderBy(asc(tripCriteria.position), asc(tripCriteria.createdAt))).map((c) => ({ id: c.id, key: c.key, label: c.label, level: c.level, target: c.target }));
 
@@ -313,6 +328,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const open = rows.filter((c) => c.status !== "rejected");
     const sources = open.length ? await db.select().from(listingSources).where(inArray(listingSources.listingId, open.map((c) => c.listingId))).orderBy(asc(listingSources.createdAt)) : [];
 
+    await spend(uid, "reading");
     const checks = [];
     for (const candidate of open) {
       const source = sources.find((x) => x.listingId === candidate.listingId);
@@ -436,6 +452,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         .insert(listingSources)
         .values({ listingId: candidate.listingId, platform: link.platform, externalId: link.externalId, url: url.trim(), canonicalUrl: link.canonicalUrl, provenance: { stay: "Link" } })
         .returning())[0]!;
+    await spend(uid, "reading");
     ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html }));
     if (!existing) await logActivity(ctx, candidate.tripId, uid, "source_added", { candidateId: candidate.id, platform: link.platform });
     return { sourceId: source.id, platform: link.platform, duplicate: Boolean(existing) };
@@ -487,6 +504,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     if (candidate.searchStatus === "running" && candidate.searchedAt && Date.now() - candidate.searchedAt.getTime() < 5 * 60_000) return reply.code(202).send({ candidateId: candidate.id, status: "running" });
     // Every search costs money: not again for the same advert within ten minutes.
     if (candidate.searchedAt && Date.now() - candidate.searchedAt.getTime() < 10 * 60_000) throw new HttpError(429, "too_soon", "Für dieses Angebot wurde gerade erst gesucht. Bitte in ein paar Minuten noch einmal versuchen.");
+    await spend(uid, "search");
     const [listing] = await db.select().from(listings).where(eq(listings.id, candidate.listingId)).limit(1);
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId));
     await db.update(tripListings).set({ searchStatus: "running", searchedAt: new Date(), searchNote: null }).where(eq(tripListings.id, candidate.id));
@@ -683,6 +701,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       }),
       req.body,
     );
+    await spend(uid, "reading");
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
     if (!source) throw new HttpError(400, "invalid_request", "sourceId: unbekannt");

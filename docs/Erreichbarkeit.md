@@ -18,7 +18,7 @@ Stand 16.11.2026. Der Server ist heute nur im Tailnet erreichbar (`tailscale ser
 | Kopie der Datenbanksicherung außer Haus (Storage Box) | Skript fertig, Schlüssel erzeugt, wartet auf Zugang | Kristian, dann Claude |
 | SSH-Passwort der VM ändern, falls noch nicht geschehen | offen | Kristian |
 | `BOOTSTRAP_SECRET` aus der `.env` entfernen (wird nicht mehr gebraucht) | offen | Kristian (tippt selbst) |
-| Tageslimit für KI-Aufrufe je Konto (Import, Suche), damit ein gekapertes Konto kein Guthaben verbrennt | noch zu bauen | Claude |
+| Tageslimit für KI-Aufrufe je Konto (Import, Suche), damit ein gekapertes Konto kein Guthaben verbrennt | erledigt: 400 Auswertungen und 30 Suchen je Person und Tag (`DAILY_READINGS`, `DAILY_SEARCHES`), danach 429 `daily_limit` | Claude |
 | Ausgabenlimit im Anthropic-Konto setzen | offen | Kristian |
 | Sitzungen einsehen und einzeln abmelden (Gerät verloren) | Abmelden gibt es, Übersicht fehlt in der App | Claude, App |
 | "Mit Apple anmelden", damit ein Konto nicht an einem Gerät hängt | offen, braucht Developer-Mitgliedschaft | Claude, App |
