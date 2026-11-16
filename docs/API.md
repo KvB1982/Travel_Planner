@@ -468,3 +468,20 @@ Die App bucht nicht. Sie hält fest, was gebucht wurde.
 - Aktivitäten: `POST /trips/:id/activities` (Pflicht `title`, auch Gäste), `PATCH /activities/:id`, `DELETE /activities/:id`. `status` ist `idea`, `planned`, `done` oder `cancelled`. Mit `startsAt` stehen sie in der Reihenfolge des Kalenders, Ideen ohne Termin danach.
 - Zu- und Absage: `PUT /activities/:id/response` mit `{ "answer": "yes" | "maybe" | "no" | null }`, jeder für sich, `null` nimmt die Antwort zurück.
 - Alle schreibenden Aufrufe liefern den ganzen Plan unter `plan` mit zurück, dazu den Eintrag unter `leg`, `room` oder `activity`. Im PATCH reichen die geänderten Felder, geleerte als `null`.
+
+## Unterwegs: Hausmappe und Heute
+
+`GET /trips/:id/house`:
+
+```json
+{ "house": { "address": null, "lat": null, "lon": null, "checkInFrom": null, "checkOutUntil": null, "keyInfo": "Schlüsselkasten 4711",
+             "wifiName": "Villa", "wifiPassword": "…", "contactName": null, "contactPhone": null, "rules": null, "waste": null,
+             "emergency": null, "notes": null, "updatedBy": "…", "updatedAt": "…" },
+  "suggestions": { "title": "…", "address": "Sukošan, Dalmatien, Kroatien", "lat": 44.05, "lon": 15.31, "checkInFrom": "16:00", "checkOutUntil": "10:00",
+                   "arrival": "2027-08-21T16:00", "departure": "2027-08-28T10:00", "bookingId": "…", "reference": "NOV-123" } }
+```
+
+- `house` ist, was die Gruppe eingetragen hat. `suggestions` ist, was Steckbrief und Unterkunftsbuchung schon wissen. Die App zeigt für leere Felder den Vorschlag und bietet "übernehmen" an.
+- `PUT /trips/:id/house` (Mitglieder, keine Gäste): nur die gesendeten Felder ändern sich, `null` leert eines. Antwort wie GET.
+- Lesen dürfen alle Mitglieder der Reise, auch Gäste. Schlüsselcode und WLAN-Passwort liegen wie alles andere hinter der Anmeldung.
+- `GET /trips/:id/today?date=2027-08-21` (Datum am Reiseort, ohne Angabe das Datum des Servers) liefert `date`, `arrivalDay`, `departureDay`, `legs` und `activities` dieses Tages (wie im Plan, abgesagte fehlen), `bookings`, die an dem Tag beginnen oder enden (`begins`, `ends`), `ideas` (Zahl der Ideen ohne Termin) sowie `house` und `suggestions`. Gedacht als Startseite der Phase Unterwegs und zum Vorhalten für offline.
