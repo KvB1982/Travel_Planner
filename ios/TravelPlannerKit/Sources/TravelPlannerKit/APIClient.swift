@@ -27,6 +27,26 @@ public protocol TravelBackend: Sendable {
     func removeDateOption(tripId: String, optionId: String) async throws
     /// The chronicle: the last hundred events of the trip, newest first.
     func activity(tripId: String) async throws -> [ActivityEvent]
+    /// Packing, shopping, tasks and lists of the group's own.
+    func checklists(tripId: String) async throws -> Checklists
+    func addChecklistItem(tripId: String, list: String, title: String, quantity: String?, isPrivate: Bool) async throws -> Checklists
+    func updateChecklistItem(itemId: String, change: ChecklistChange) async throws -> Checklists
+    func deleteChecklistItem(itemId: String) async throws -> Checklists
+    /// Adds the lines of a template; lines of the same name stay as they are.
+    func applyChecklistTemplate(tripId: String, template: String) async throws -> Checklists
+    /// What was booked, with payment plan, deadlines and papers. The app does not book anything itself.
+    func bookings(tripId: String) async throws -> BookingOverview
+    func addBooking(tripId: String, booking: BookingDraft) async throws -> BookingOverview
+    func updateBooking(bookingId: String, booking: BookingDraft) async throws -> BookingOverview
+    func deleteBooking(bookingId: String) async throws -> BookingOverview
+    func addBookingPayment(bookingId: String, label: String, amountCents: Int, dueOn: String?, refundable: Bool) async throws -> BookingOverview
+    /// Ticks a payment off as paid, or back to open with nil.
+    func setBookingPaymentPaid(paymentId: String, paidOn: String?, paidByParty: String?) async throws -> BookingOverview
+    func deleteBookingPayment(paymentId: String) async throws -> BookingOverview
+    /// Stores a paper of the trip, optionally with a booking.
+    func uploadDocument(tripId: String, title: String, bookingId: String?, contentType: String, data: Data) async throws
+    func documentFile(documentId: String) async throws -> Data
+    func deleteDocument(documentId: String) async throws
     /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
     func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
     /// Moves the trip to a phase by hand, forwards or back. Nothing is deleted.
@@ -155,7 +175,10 @@ public struct APIClient: TravelBackend {
     }
 
     private func data(_ method: String, _ path: String, body: (any Encodable)? = nil) async throws -> Data {
-        let request = try request(method, path, body: body)
+        try await perform(try request(method, path, body: body))
+    }
+
+    private func perform(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
@@ -287,6 +310,94 @@ public struct APIClient: TravelBackend {
 
     public func addPrice(candidateId: String, price: ManualPrice) async throws {
         _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/prices", body: price)
+    }
+
+    // MARK: Lists and bookings
+
+    private struct ChecklistAnswer: Decodable { var checklists: Checklists }
+    private struct BookingAnswer: Decodable { var overview: BookingOverview }
+
+    public func checklists(tripId: String) async throws -> Checklists {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/checklists")
+    }
+
+    public func addChecklistItem(tripId: String, list: String, title: String, quantity: String?, isPrivate: Bool) async throws -> Checklists {
+        struct Body: Encodable {
+            var list: String; var title: String; var quantity: String?; var isPrivate: Bool
+            enum CodingKeys: String, CodingKey { case list, title, quantity, isPrivate = "private" }
+        }
+        return try await (send("POST", "/trips/\(tripId.pathEscaped)/checklist-items", body: Body(list: list, title: title, quantity: quantity, isPrivate: isPrivate)) as ChecklistAnswer).checklists
+    }
+
+    public func updateChecklistItem(itemId: String, change: ChecklistChange) async throws -> Checklists {
+        try await (send("PATCH", "/checklist-items/\(itemId.pathEscaped)", body: change) as ChecklistAnswer).checklists
+    }
+
+    public func deleteChecklistItem(itemId: String) async throws -> Checklists {
+        try await (send("DELETE", "/checklist-items/\(itemId.pathEscaped)") as ChecklistAnswer).checklists
+    }
+
+    public func applyChecklistTemplate(tripId: String, template: String) async throws -> Checklists {
+        struct Body: Encodable { var template: String }
+        return try await (send("POST", "/trips/\(tripId.pathEscaped)/checklists/template", body: Body(template: template)) as ChecklistAnswer).checklists
+    }
+
+    public func bookings(tripId: String) async throws -> BookingOverview {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/bookings")
+    }
+
+    public func addBooking(tripId: String, booking: BookingDraft) async throws -> BookingOverview {
+        try await (send("POST", "/trips/\(tripId.pathEscaped)/bookings", body: booking) as BookingAnswer).overview
+    }
+
+    public func updateBooking(bookingId: String, booking: BookingDraft) async throws -> BookingOverview {
+        try await (send("PATCH", "/bookings/\(bookingId.pathEscaped)", body: booking) as BookingAnswer).overview
+    }
+
+    public func deleteBooking(bookingId: String) async throws -> BookingOverview {
+        try await (send("DELETE", "/bookings/\(bookingId.pathEscaped)") as BookingAnswer).overview
+    }
+
+    public func addBookingPayment(bookingId: String, label: String, amountCents: Int, dueOn: String?, refundable: Bool) async throws -> BookingOverview {
+        struct Body: Encodable { var label: String; var amountCents: Int; var dueOn: String?; var refundable: Bool }
+        return try await (send("POST", "/bookings/\(bookingId.pathEscaped)/payments", body: Body(label: label, amountCents: amountCents, dueOn: dueOn, refundable: refundable)) as BookingAnswer).overview
+    }
+
+    public func setBookingPaymentPaid(paymentId: String, paidOn: String?, paidByParty: String?) async throws -> BookingOverview {
+        struct Body: Encodable {
+            var paidOn: String?; var paidByParty: String?
+            func encode(to encoder: any Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(paidOn, forKey: .paidOn); try c.encode(paidByParty, forKey: .paidByParty)
+            }
+            enum CodingKeys: String, CodingKey { case paidOn, paidByParty }
+        }
+        return try await (send("PATCH", "/booking-payments/\(paymentId.pathEscaped)", body: Body(paidOn: paidOn, paidByParty: paidByParty)) as BookingAnswer).overview
+    }
+
+    public func deleteBookingPayment(paymentId: String) async throws -> BookingOverview {
+        try await (send("DELETE", "/booking-payments/\(paymentId.pathEscaped)") as BookingAnswer).overview
+    }
+
+    public func uploadDocument(tripId: String, title: String, bookingId: String?, contentType: String, data: Data) async throws {
+        var query = URLComponents()
+        query.queryItems = [URLQueryItem(name: "title", value: title)] + (bookingId.map { [URLQueryItem(name: "bookingId", value: $0)] } ?? [])
+        var request = try request("POST", "/trips/\(tripId.pathEscaped)/documents?\(query.percentEncodedQuery ?? "")")
+        request.httpBody = data
+        request.timeoutInterval = 120
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        _ = try await perform(request)
+    }
+
+    public func documentFile(documentId: String) async throws -> Data {
+        var request = try request("GET", "/documents/\(documentId.pathEscaped)/file")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 120
+        return try await perform(request)
+    }
+
+    public func deleteDocument(documentId: String) async throws {
+        _ = try await data("DELETE", "/documents/\(documentId.pathEscaped)")
     }
 
     // MARK: Frame of the trip

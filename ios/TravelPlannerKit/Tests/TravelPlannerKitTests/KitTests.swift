@@ -853,3 +853,75 @@ final class CorrectionTests: XCTestCase {
         XCTAssertEqual(list.first { $0.id == "c-1" }?.price?.totalCents, 499_000)
     }
 }
+
+final class PreparationTests: XCTestCase {
+    func testListsTickAddAndTemplate() async throws {
+        let demo = DemoBackend()
+        var lists = try await demo.checklists(tripId: "t-1")
+        XCTAssertEqual(lists.lists.map(\.list), ["packing", "shopping", "todo"])
+        XCTAssertEqual(lists.lists[0].done, 1)
+        lists = try await demo.updateChecklistItem(itemId: "i-2", change: ChecklistChange(done: true))
+        XCTAssertEqual(lists.lists[0].done, 2)
+        lists = try await demo.addChecklistItem(tripId: "t-1", list: "Spiele", title: "Wizard", quantity: nil, isPrivate: false)
+        XCTAssertEqual(lists.lists.last?.list, "Spiele")
+        let before = lists.lists[0].items.count
+        lists = try await demo.applyChecklistTemplate(tripId: "t-1", template: "beach")
+        // "Badesachen" is on the list already and is not added twice.
+        XCTAssertEqual(lists.lists[0].items.count, before + 4)
+        lists = try await demo.deleteChecklistItem(itemId: "i-1")
+        XCTAssertFalse(lists.lists[0].items.contains { $0.id == "i-1" })
+        let sent = String(decoding: try JSONEncoder().encode(ChecklistChange(done: false)), as: UTF8.self)
+        XCTAssertEqual(sent, #"{"done":false}"#)
+    }
+
+    func testChecklistDecodesPrivateFlag() throws {
+        let json = #"{"lists":[{"list":"packing","total":1,"done":0,"items":[{"id":"a","list":"packing","title":"Pass","quantity":null,"done":false,"private":true,"position":0}]}],"templates":[{"key":"beach","label":"Strand","list":"packing","count":10}]}"#
+        let lists = try JSONDecoder().decode(Checklists.self, from: Data(json.utf8))
+        XCTAssertEqual(lists.lists.first?.items.first?.isPrivate, true)
+        XCTAssertEqual(lists.templates.first?.count, 10)
+    }
+
+    func testBookingTotalsAndDeadlines() {
+        let booking = Booking(id: "b", title: "Haus", status: "booked", startsAt: "2027-05-15T16:00", totalCents: 100_000, freeCancellationUntil: "2027-03-01",
+                              payments: [BookingPayment(id: "1", label: "Anzahlung", amountCents: 30_000, dueOn: "2027-01-10", paidOn: "2027-01-09"),
+                                         BookingPayment(id: "2", label: "Rest", amountCents: 70_000, dueOn: "2027-02-01"),
+                                         BookingPayment(id: "3", label: "Kaution", amountCents: 20_000, dueOn: "2027-05-15", paidOn: "2027-02-02", refundable: true)])
+        let overview = BookingMath.overview(bookings: [booking], documents: [], today: "2027-02-10")
+        XCTAssertEqual(overview.totals.paidCents, 30_000)
+        XCTAssertEqual(overview.totals.openCents, 70_000)
+        XCTAssertEqual(overview.totals.depositsOutCents, 20_000)
+        XCTAssertEqual(overview.deadlines.map(\.type), ["payment", "cancellation", "start"])
+        XCTAssertEqual(overview.deadlines.first?.overdue, true)
+    }
+
+    func testBookingFromOfferAndPayingMovesOn() async throws {
+        let demo = DemoBackend()
+        var overview = try await demo.addBooking(tripId: "t-1", booking: BookingDraft(candidateId: "c-2", status: "booked", totalCents: 539_000))
+        let added = try XCTUnwrap(overview.bookings.last)
+        XCTAssertEqual(added.title, "Villa Il Poggio")
+        let trip = try await demo.trip("t-1").trip
+        XCTAssertEqual(trip.activePhase, .preparation)
+        overview = try await demo.addBookingPayment(bookingId: added.id, label: "Anzahlung", amountCents: 100_000, dueOn: "2027-02-01", refundable: false)
+        let payment = try XCTUnwrap(overview.bookings.last?.payments.first)
+        overview = try await demo.setBookingPaymentPaid(paymentId: payment.id, paidOn: "2027-01-30", paidByParty: "p-1")
+        XCTAssertEqual(overview.bookings.last?.payments.first?.isPaid, true)
+        overview = try await demo.setBookingPaymentPaid(paymentId: payment.id, paidOn: nil, paidByParty: nil)
+        XCTAssertEqual(overview.bookings.last?.payments.first?.isPaid, false)
+        try await demo.uploadDocument(tripId: "t-1", title: "Bestätigung", bookingId: added.id, contentType: "application/pdf", data: Data([1, 2, 3]))
+        overview = try await demo.bookings(tripId: "t-1")
+        let document = try XCTUnwrap(overview.bookings.last?.documents.first)
+        XCTAssertEqual(document.fileExtension, "pdf")
+        let file = try await demo.documentFile(documentId: document.id)
+        XCTAssertEqual(file.count, 3)
+    }
+
+    func testBookingDraftKeepsOfferPlaceAndSendsNulls() throws {
+        let fromOffer = String(decoding: try JSONEncoder().encode(BookingDraft(candidateId: "c")), as: UTF8.self)
+        XCTAssertFalse(fromOffer.contains("\"place\""))
+        XCTAssertFalse(fromOffer.contains("\"title\""))
+        let cleared = String(decoding: try JSONEncoder().encode(BookingDraft(title: "X")), as: UTF8.self)
+        XCTAssertTrue(cleared.contains(#""provider":null"#))
+        XCTAssertEqual(TripDocument.contentType(forExtension: "JPG"), "image/jpeg")
+        XCTAssertNil(TripDocument.contentType(forExtension: "docx"))
+    }
+}

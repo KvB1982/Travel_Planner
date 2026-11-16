@@ -24,6 +24,7 @@ struct CandidateListView: View {
     @State private var showCriteria = false
     @State private var showLedger = false
     @State private var framingSheet: FramingSheet?
+    @State private var bookingRequests = BookingRequests()
     @State private var removingPeriod: DateOption?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
@@ -118,6 +119,10 @@ struct CandidateListView: View {
         case .framing:
             FramingSections(detail: detail, showCriteria: { showCriteria = true }, invite: { createInvite() },
                             showLedger: { showLedger = true }, sheet: $framingSheet, removing: $removingPeriod)
+        case .booking:
+            BookingSections(detail: detail, candidates: candidates, requests: $bookingRequests)
+        case .preparation:
+            ChecklistSections(tripID: tripID, role: detail.role)
         default:
             PhasePlaceholder(phase: viewedPhase)
         }
@@ -298,6 +303,7 @@ struct CandidateListView: View {
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
+        .modifier(BookingPresenter(tripID: tripID, requests: $bookingRequests, run: frame))
         .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, run: frame))
         .sheet(isPresented: $showLedger) { LedgerView(tripID: tripID, role: detail?.role ?? .guest, members: detail?.members ?? []) }
         .fullScreenCover(isPresented: $showPresentation) {
@@ -351,7 +357,7 @@ struct CandidateListView: View {
             error = nil
             if !phasePicked, let trip = detail?.trip {
                 // Open the surface the trip is in; phases without a surface yet fall back to the research.
-                viewedPhase = [.framing, .research, .decision].contains(trip.activePhase) ? trip.activePhase : .research
+                viewedPhase = [.framing, .research, .decision, .booking, .preparation].contains(trip.activePhase) ? trip.activePhase : .research
             }
         } catch is CancellationError {
         } catch {

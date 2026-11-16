@@ -136,6 +136,176 @@ public actor DemoBackend: TravelBackend {
         details[candidateId] = detail
     }
 
+    // MARK: Lists and bookings
+
+    private var listItems: [String: [ChecklistItem]] = ["t-1": [
+        ChecklistItem(id: "i-1", list: "packing", title: "Badesachen", done: true),
+        ChecklistItem(id: "i-2", list: "packing", title: "Reiseapotheke"),
+        ChecklistItem(id: "i-3", list: "packing", title: "Ladegeräte und Kabel"),
+        ChecklistItem(id: "i-4", list: "shopping", title: "Frühstück für den ersten Tag", quantity: "für 8"),
+        ChecklistItem(id: "i-5", list: "todo", title: "Zeitung abbestellen", dueOn: "2027-05-10")]]
+    private let listTemplates: [String: (String, String, [String])] = [
+        "basics": ("Grundausstattung", "packing", ["Ausweise und Reisepässe", "Krankenversicherungskarten", "Ladegeräte und Kabel", "Reiseapotheke", "Sonnencreme"]),
+        "beach": ("Strand und Pool", "packing", ["Badesachen", "Strandtücher", "Sonnenhüte", "Badeschuhe", "Kühltasche"]),
+        "firstDay": ("Einkauf für den ersten Tag", "shopping", ["Brot", "Butter", "Kaffee", "Milch", "Nudeln"])]
+
+    private func sheets(_ tripId: String) throws -> Checklists {
+        _ = try tripIndex(tripId)
+        let items = listItems[tripId] ?? []
+        let names = ["packing", "shopping", "todo"] + Array(Set(items.map(\.list)).subtracting(["packing", "shopping", "todo"])).sorted()
+        return Checklists(lists: names.map { name in Checklists.List(list: name, items: items.filter { $0.list == name }) },
+                          templates: listTemplates.sorted { $0.key < $1.key }.map { Checklists.Template(key: $0.key, label: $0.value.0, list: $0.value.1, count: $0.value.2.count) })
+    }
+
+    public func checklists(tripId: String) async throws -> Checklists { try sheets(tripId) }
+
+    public func addChecklistItem(tripId: String, list: String, title: String, quantity: String?, isPrivate: Bool) async throws -> Checklists {
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Der Eintrag braucht einen Namen.") }
+        listItems[tripId, default: []].append(ChecklistItem(id: nextID("i"), list: list, title: title, quantity: quantity, isPrivate: isPrivate))
+        return try sheets(tripId)
+    }
+
+    private func tripOfItem(_ id: String) throws -> String {
+        guard let key = listItems.first(where: { $0.value.contains { $0.id == id } })?.key else { throw APIError(status: 404, code: "not_found", message: "Eintrag nicht gefunden.") }
+        return key
+    }
+
+    public func updateChecklistItem(itemId: String, change: ChecklistChange) async throws -> Checklists {
+        let key = try tripOfItem(itemId)
+        if let index = listItems[key]?.firstIndex(where: { $0.id == itemId }) {
+            if let title = change.title { listItems[key]?[index].title = title }
+            if let quantity = change.quantity { listItems[key]?[index].quantity = quantity }
+            if let done = change.done { listItems[key]?[index].done = done }
+        }
+        return try sheets(key)
+    }
+
+    public func deleteChecklistItem(itemId: String) async throws -> Checklists {
+        let key = try tripOfItem(itemId)
+        listItems[key]?.removeAll { $0.id == itemId }
+        return try sheets(key)
+    }
+
+    public func applyChecklistTemplate(tripId: String, template: String) async throws -> Checklists {
+        guard let entry = listTemplates[template] else { throw APIError(status: 400, code: "invalid_request", message: "Diese Vorlage gibt es nicht.") }
+        let there = Set((listItems[tripId] ?? []).filter { $0.list == entry.1 }.map { $0.title.lowercased() })
+        for title in entry.2 where !there.contains(title.lowercased()) {
+            listItems[tripId, default: []].append(ChecklistItem(id: nextID("i"), list: entry.1, title: title))
+        }
+        return try sheets(tripId)
+    }
+
+    private var booked: [String: [Booking]] = ["t-1": [
+        Booking(id: "b-1", kind: .accommodation, title: "Casa Olivia mit Pool", provider: "Airbnb", reference: "HM4X9K2", candidateId: "c-1", status: "planned",
+                startsAt: "2027-05-15T16:00", endsAt: "2027-05-29T10:00", place: "Castellina in Chianti, Italien", totalCents: 486_000, depositCents: 50_000,
+                freeCancellationUntil: "2027-03-01",
+                payments: [BookingPayment(id: "bp-1", label: "Anzahlung", amountCents: 145_800, dueOn: "2027-01-12", paidOn: "2027-01-12", paidByParty: "p-1"),
+                           BookingPayment(id: "bp-2", label: "Restzahlung", amountCents: 340_200, dueOn: "2027-04-15"),
+                           BookingPayment(id: "bp-3", label: "Kaution", amountCents: 50_000, dueOn: "2027-05-15", refundable: true)],
+                documents: [TripDocument(id: "doc-1", title: "Buchungsbestätigung", contentType: "text/plain", sizeBytes: 64)])]]
+    private var papers: [String: [TripDocument]] = [:]
+    private var files: [String: Data] = ["doc-1": Data("Beispiel: Buchungsbestätigung für Casa Olivia mit Pool.".utf8)]
+
+    private func plan(_ tripId: String) throws -> BookingOverview {
+        _ = try tripIndex(tripId)
+        return BookingMath.overview(bookings: booked[tripId] ?? [], documents: papers[tripId] ?? [], today: Format.isoDay(.now))
+    }
+
+    private func place(ofBooking id: String) throws -> (String, Int) {
+        for (key, list) in booked { if let index = list.firstIndex(where: { $0.id == id }) { return (key, index) } }
+        throw APIError(status: 404, code: "not_found", message: "Buchung nicht gefunden.")
+    }
+
+    private func place(ofPayment id: String) throws -> (String, Int, Int) {
+        for (key, list) in booked {
+            for (index, booking) in list.enumerated() { if let p = booking.payments.firstIndex(where: { $0.id == id }) { return (key, index, p) } }
+        }
+        throw APIError(status: 404, code: "not_found", message: "Zahlung nicht gefunden.")
+    }
+
+    private func apply(_ draft: BookingDraft, to booking: inout Booking) {
+        booking.kind = draft.kind; booking.provider = draft.provider; booking.reference = draft.reference; booking.status = draft.status
+        booking.startsAt = draft.startsAt; booking.endsAt = draft.endsAt; booking.totalCents = draft.totalCents; booking.depositCents = draft.depositCents
+        booking.freeCancellationUntil = draft.freeCancellationUntil; booking.notes = draft.notes
+        if let title = draft.title { booking.title = title }
+        if draft.candidateId == nil || draft.place != nil { booking.place = draft.place }
+    }
+
+    public func bookings(tripId: String) async throws -> BookingOverview { try plan(tripId) }
+
+    public func addBooking(tripId: String, booking draft: BookingDraft) async throws -> BookingOverview {
+        var booking = Booking(id: nextID("b"), title: draft.title ?? "")
+        if let candidate = draft.candidateId {
+            let listing = try detail(candidate).listing
+            booking.candidateId = candidate
+            booking.title = listing.title ?? ""
+            booking.place = [listing.place, listing.country].compactMap { $0 }.joined(separator: ", ")
+        }
+        apply(draft, to: &booking)
+        guard !booking.title.isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Die Buchung braucht eine Bezeichnung.") }
+        booked[tripId, default: []].append(booking)
+        if booking.kind == .accommodation, booking.status == "booked" { try await setPhase(tripId: tripId, phase: .preparation) }
+        return try plan(tripId)
+    }
+
+    public func updateBooking(bookingId: String, booking draft: BookingDraft) async throws -> BookingOverview {
+        let (key, index) = try place(ofBooking: bookingId)
+        if var booking = booked[key]?[index] {
+            apply(draft, to: &booking)
+            booked[key]?[index] = booking
+            if booking.kind == .accommodation, booking.status == "booked" { try await setPhase(tripId: key, phase: .preparation) }
+        }
+        return try plan(key)
+    }
+
+    public func deleteBooking(bookingId: String) async throws -> BookingOverview {
+        let (key, index) = try place(ofBooking: bookingId)
+        booked[key]?.remove(at: index)
+        return try plan(key)
+    }
+
+    public func addBookingPayment(bookingId: String, label: String, amountCents: Int, dueOn: String?, refundable: Bool) async throws -> BookingOverview {
+        let (key, index) = try place(ofBooking: bookingId)
+        booked[key]?[index].payments.append(BookingPayment(id: nextID("bp"), label: label, amountCents: amountCents, dueOn: dueOn, refundable: refundable))
+        return try plan(key)
+    }
+
+    public func setBookingPaymentPaid(paymentId: String, paidOn: String?, paidByParty: String?) async throws -> BookingOverview {
+        let (key, index, payment) = try place(ofPayment: paymentId)
+        booked[key]?[index].payments[payment].paidOn = paidOn
+        booked[key]?[index].payments[payment].paidByParty = paidByParty
+        return try plan(key)
+    }
+
+    public func deleteBookingPayment(paymentId: String) async throws -> BookingOverview {
+        let (key, index, payment) = try place(ofPayment: paymentId)
+        booked[key]?[index].payments.remove(at: payment)
+        return try plan(key)
+    }
+
+    public func uploadDocument(tripId: String, title: String, bookingId: String?, contentType: String, data: Data) async throws {
+        let document = TripDocument(id: nextID("doc"), title: title, contentType: contentType, sizeBytes: data.count)
+        files[document.id] = data
+        if let bookingId {
+            let (key, index) = try place(ofBooking: bookingId)
+            booked[key]?[index].documents.append(document)
+        } else {
+            _ = try tripIndex(tripId)
+            papers[tripId, default: []].append(document)
+        }
+    }
+
+    public func documentFile(documentId: String) async throws -> Data {
+        guard let data = files[documentId] else { throw APIError(status: 404, code: "not_found", message: "Dokument nicht gefunden.") }
+        return data
+    }
+
+    public func deleteDocument(documentId: String) async throws {
+        files[documentId] = nil
+        for key in papers.keys { papers[key]?.removeAll { $0.id == documentId } }
+        for key in booked.keys { for index in (booked[key] ?? []).indices { booked[key]?[index].documents.removeAll { $0.id == documentId } } }
+    }
+
     // MARK: Frame of the trip
 
     private var periods: [String: [DateOption]] = [
