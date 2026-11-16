@@ -256,3 +256,44 @@ Body `{ "tripId": "<Zielreise>" }`, ab Rolle Mitglied in beiden Reisen. Antwort 
 Jede Reise trägt `kind: "trip" | "watchlist"`. Jede Person hat genau eine eigene Merkliste; `GET /trips` legt sie beim ersten Aufruf an und liefert sie mit (Titel "Merkliste", ohne Zeiträume, nur die Person selbst). "Auf die Merkliste" ist `move` mit deren `tripId`, zurück genauso. Importieren direkt in die Merkliste geht wie in jede Reise.
 
 Auf der Merkliste antworten mit 409 `watchlist`: `PATCH /trips/:id`, `POST /trips/:id/invites`, `POST /trips/:id/date-options`. `POST /trips/:id/refresh` und `/check` antworten mit 409 `no_dates`. In `candidateCount` und Listen zählt sie wie eine Reise; die App sollte sie getrennt anzeigen.
+
+## Muss- und Wunsch-Kriterien mit Ampel
+
+### `GET /trips/:id/criteria`, `PUT /trips/:id/criteria`
+
+```json
+{ "criteria": [ { "id": "…", "key": "bedrooms", "label": null, "level": "must", "target": 4 },
+                { "id": "…", "key": "amenities.pool", "label": null, "level": "wish", "target": null },
+                { "id": "…", "key": "custom", "label": "Ruhige Lage", "level": "must", "target": null } ],
+  "measurable": [ { "key": "bedrooms", "label": "Schlafzimmer", "group": "space", "format": "number", "rule": "min" } ] }
+```
+
+- `measurable` ist die Auswahl dessen, was der Server am Steckbrief messen kann: dieselben Zeilen wie im Vergleich. `rule: "min"` heißt mindestens `target`, `"max"` höchstens `target` (Preise in Euro, Entfernungen in Metern bzw. km, Bewertung auf einer Skala bis 10), `"yes"` heißt muss vorhanden sein und braucht kein `target`.
+- `key: "custom"` mit `label` ist ein eigenes Kriterium, das nur Menschen beurteilen.
+- `PUT` ersetzt die ganze Liste (höchstens 30, ab Rolle Mitglied). Einträge mit ihrer bisherigen `id` behalten die von Hand gesetzten Urteile; die Reihenfolge der Liste bleibt.
+
+### Urteil je Angebot
+
+Jeder Eintrag in `GET /trips/:id/candidates` trägt `criteria` (oder `null`, wenn die Reise keine Kriterien hat):
+
+```json
+{ "light": "green | yellow | red", "must": { "met": 2, "missed": 0, "unknown": 1 }, "wish": { "met": 1, "missed": 1, "unknown": 0 } }
+```
+
+Rot: ein Muss ist verfehlt. Gelb: ein Muss ist offen oder ein Wunsch nicht erfüllt oder offen. Grün: alles erfüllt.
+
+`GET /candidates/:id` trägt dasselbe unter `criteria`, zusätzlich `results` mit je `id`, `key`, `label`, `level`, `rule`, `format`, `target`, `value`, `status` (`met | missed | unknown`) und `manual`.
+
+Von Hand urteilen: `PATCH /candidates/:id` mit `{ "criteriaChecks": { "<criterionId>": "met" | "missed" } }`. Das Feld ersetzt alle bisherigen Urteile dieses Angebots; ein Urteil von Hand geht dem gemessenen Wert vor. Beim Verschieben in eine andere Reise verfallen die Urteile.
+
+## Mehrere Zeiträume
+
+- Jeder Eintrag der Angebotsliste trägt `periods`: je Zeitraum der Reise `dateOptionId`, `label`, `startDate`, `endDate`, `availability`, `totalCents`, `kind`, `checkedAt`, `checkUrl`.
+- `price`, `availability` und `checkUrl` der Liste gelten für den frühesten Zeitraum. Mit `GET /trips/:id/candidates?dateOptionId=…` gelten sie für den genannten.
+- `POST /trips/:id/check` und `/refresh` nehmen `{ "dateOptionId": "…" }` (oder denselben Query-Parameter) und prüfen diesen Zeitraum; die Antwort nennt `dateOptionId`. Ohne Angabe wie bisher der früheste.
+- `POST /candidates/:id/capture` nimmt neben `forTrip: true` ebenfalls `dateOptionId`, damit der Preis beim richtigen Zeitraum landet.
+- Geändert: Ein Preis zählt für die Reise nur noch, wenn er zum gefragten Zeitraum gehört, nicht mehr zu irgendeinem der Zeiträume.
+
+## Tageslimit
+
+Je Person und Tag (UTC) 400 Auswertungen (Import, capture, refresh, Reiseprüfung, weitere Quelle) und 30 Suchen nach demselben Objekt. Danach antworten diese Aufrufe mit 429 `daily_limit` und einer Meldung zum Anzeigen. Lesen, Abstimmen und Kommentieren bleiben möglich.

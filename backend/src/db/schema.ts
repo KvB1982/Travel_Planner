@@ -116,6 +116,24 @@ export const invites = pgTable("invites", {
   createdAt: createdAt(),
 });
 
+/** What the group asks of an advert: must-haves and wishes, measured against the profile where possible. */
+export const tripCriteria = pgTable(
+  "trip_criteria",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    label: text("label"),
+    level: text("level").$type<"must" | "wish">().notNull().default("wish"),
+    target: doublePrecision("target"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("trip_criteria_trip_idx").on(t.tripId, t.position)],
+);
+
 export const dateOptions = pgTable(
   "date_options",
   {
@@ -201,6 +219,8 @@ export const tripListings = pgTable(
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     /** Hints of the advert that this trip's members chose not to see, by their wording. */
     hiddenWarnings: jsonb("hidden_warnings").$type<string[]>().notNull().default([]),
+    /** What somebody judged by hand against the trip's criteria, by criterion id. */
+    criteriaChecks: jsonb("criteria_checks").$type<Record<string, "met" | "missed">>().notNull().default({}),
     /** Looking for the same property on other platforms: idle, running, done or failed. */
     searchStatus: text("search_status").$type<"idle" | "running" | "done" | "failed">().notNull().default("idle"),
     searchedAt: timestamp("searched_at", { withTimezone: true }),
@@ -299,4 +319,18 @@ export const activityEvents = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("activity_trip_idx").on(t.tripId, t.createdAt)],
+);
+
+/** How often a person has set the language model to work on a day, so a stolen login cannot burn through the credit. */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    kind: text("kind").$type<"reading" | "search">().notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day, t.kind] })],
 );

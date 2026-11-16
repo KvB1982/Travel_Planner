@@ -10,6 +10,9 @@ const schema = z.object({
   EXTRACTION_MODEL: z.string().default("claude-haiku-5-5"),
   /** Finding the same property on other platforms needs web search and more judgement than reading a page. */
   SEARCH_MODEL: z.string().default("claude-sonnet-5-5"),
+  /** Per person and day: pages read with the language model, and web searches for the same property. */
+  DAILY_READINGS: z.coerce.number().int().min(1).default(400),
+  DAILY_SEARCHES: z.coerce.number().int().min(1).default(30),
 });
 
 export type Config = z.infer<typeof schema>;

@@ -25,7 +25,19 @@ export interface AppContext {
 
 export async function buildApp(deps: Omit<AppContext, "queue">, options: { logger?: boolean } = {}): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const app = Fastify({
-    logger: options.logger ?? false,
+    // Invite tokens travel in the path. They are secrets and must not end up in the log.
+    logger: options.logger
+      ? {
+          serializers: {
+            req: (req: { method: string; url: string; hostname?: string; ip?: string }) => ({
+              method: req.method,
+              url: req.url.replace(/(\/auth\/invites\/)[^/?]+/, "$1…"),
+              hostname: req.hostname,
+              remoteAddress: req.ip,
+            }),
+          },
+        }
+      : false,
     bodyLimit: 256 * 1024,
     // The API sits behind a tunnel or reverse proxy; client addresses come from its header.
     trustProxy: true,
