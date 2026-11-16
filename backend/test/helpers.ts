@@ -1,7 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app.js";
@@ -36,7 +37,7 @@ export async function testApp(options: { fetcher?: PageFetcher; extractor?: Extr
     requested.push(url);
     return (options.fetcher ?? (async () => page(fixture("novasol.html"))))(url);
   };
-  const config = loadConfig({ DATABASE_URL: "pglite://memory", BOOTSTRAP_SECRET, PUBLIC_BASE_URL: "https://reisen.example.test" });
+  const config = loadConfig({ DATABASE_URL: "pglite://memory", BOOTSTRAP_SECRET, PUBLIC_BASE_URL: "https://reisen.example.test", FILES_DIR: mkdtempSync(path.join(tmpdir(), "reisen-files-")) });
   const { app, ctx } = await buildApp({ db, config, fetcher, extractor: options.extractor ?? baselineExtractor, searcher: options.searcher ?? null, summarizer: options.summarizer ?? null });
 
   const call = async (method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, token?: string | null, body?: unknown) => {

@@ -422,3 +422,103 @@ export const settlementPayments = pgTable(
   },
   (t) => [index("settlement_payments_trip_idx").on(t.tripId)],
 );
+
+export const bookingKinds = ["accommodation", "flight", "car", "ferry", "train", "insurance", "activity", "other"] as const;
+
+/** Something fixed for the trip: the house, a flight, a hire car. The app records it, it does not book. */
+export const bookings = pgTable(
+  "bookings",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<(typeof bookingKinds)[number]>().notNull().default("accommodation"),
+    title: text("title").notNull(),
+    provider: text("provider"),
+    reference: text("reference"),
+    /** The advert this booking came from, for the house the group decided on. */
+    candidateId: uuid("candidate_id"),
+    status: text("status").$type<"planned" | "booked" | "cancelled">().notNull().default("planned"),
+    /** Local date and time as written on the confirmation, for example 2027-05-15T16:00. */
+    startsAt: text("starts_at"),
+    endsAt: text("ends_at"),
+    place: text("place"),
+    totalCents: integer("total_cents"),
+    depositCents: integer("deposit_cents"),
+    depositReturnedOn: date("deposit_returned_on"),
+    freeCancellationUntil: date("free_cancellation_until"),
+    bookedByParty: uuid("booked_by_party"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bookings_trip_idx").on(t.tripId)],
+);
+
+/** One instalment of a booking: deposit, balance, security deposit. */
+export const bookingPayments = pgTable(
+  "booking_payments",
+  {
+    id: id(),
+    bookingId: uuid("booking_id")
+      .notNull()
+      .references(() => bookings.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    dueOn: date("due_on"),
+    paidOn: date("paid_on"),
+    paidByParty: uuid("paid_by_party"),
+    /** A security deposit comes back; it is not a cost to share. */
+    refundable: boolean("refundable").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index("booking_payments_booking_idx").on(t.bookingId)],
+);
+
+/** A confirmation, ticket or contract kept with the trip. The file itself lies in the server's file store. */
+export const documents = pgTable(
+  "documents",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    bookingId: uuid("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    kind: text("kind"),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    storedName: text("stored_name").notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("documents_trip_idx").on(t.tripId)],
+);
+
+/** A line on one of the trip's lists: packing, shopping, things to do. */
+export const checklistItems = pgTable(
+  "checklist_items",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    list: text("list").notNull().default("packing"),
+    title: text("title").notNull(),
+    quantity: text("quantity"),
+    /** Who takes care of it, as a member or as a household. */
+    assignedTo: uuid("assigned_to"),
+    assignedParty: uuid("assigned_party"),
+    dueOn: date("due_on"),
+    done: boolean("done").notNull().default(false),
+    doneBy: uuid("done_by"),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    /** Only its author sees it: a personal packing list. */
+    private: boolean("private").notNull().default(false),
+    position: integer("position").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("checklist_items_trip_idx").on(t.tripId, t.list, t.position)],
+);

@@ -57,6 +57,13 @@
       "when": 1794826464386,
       "tag": "0007_equal_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794833165966,
+      "tag": "0008_magenta_impossible_man",
+      "breakpoints": true
     }
   ]
 }

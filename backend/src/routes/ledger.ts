@@ -1,8 +1,8 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, ne } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { expenses, settlementPayments, tripMembers, tripParties, trips, users } from "../db/schema.js";
+import { bookingPayments, bookings, expenses, settlementPayments, tripMembers, tripParties, trips, users } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
 import { settle } from "../ledger.js";
 import { logActivity } from "./trips.js";
@@ -35,9 +35,16 @@ export function ledgerRoutes(app: FastifyInstance, ctx: AppContext): void {
     const parties = await partiesOf(tripId);
     const spent = await db.select().from(expenses).where(eq(expenses.tripId, tripId)).orderBy(desc(expenses.spentOn), desc(expenses.createdAt));
     const paid = await db.select().from(settlementPayments).where(eq(settlementPayments.tripId, tripId)).orderBy(asc(settlementPayments.createdAt));
+    // What was paid for a booking is a shared cost as well; it is not entered a second time. Security deposits come back and stay out.
+    const booked = await db
+      .select({ id: bookingPayments.id, label: bookingPayments.label, amountCents: bookingPayments.amountCents, paidOn: bookingPayments.paidOn, paidBy: bookingPayments.paidByParty, title: bookings.title, bookingId: bookings.id })
+      .from(bookingPayments)
+      .innerJoin(bookings, eq(bookings.id, bookingPayments.bookingId))
+      .where(and(eq(bookings.tripId, tripId), ne(bookings.status, "cancelled"), eq(bookingPayments.refundable, false), isNotNull(bookingPayments.paidOn), isNotNull(bookingPayments.paidByParty)));
+    const fromBookings = booked.map((p) => ({ id: p.id, amountCents: p.amountCents, paidBy: p.paidBy!, mode: trip!.splitMode, among: [] as string[], weights: {} as Record<string, number> }));
     const result = settle(
       parties,
-      spent.map((e) => ({ id: e.id, amountCents: e.amountCents, paidBy: e.paidBy, mode: e.mode ?? trip!.splitMode, among: e.among, weights: e.weights })),
+      [...spent.map((e) => ({ id: e.id, amountCents: e.amountCents, paidBy: e.paidBy, mode: e.mode ?? trip!.splitMode, among: e.among, weights: e.weights })), ...fromBookings],
       paid.map((p) => ({ from: p.fromParty, to: p.toParty, amountCents: p.amountCents })),
       trip!.childWeight,
     );
@@ -49,6 +56,8 @@ export function ledgerRoutes(app: FastifyInstance, ctx: AppContext): void {
       totalCents: result.totalCents,
       parties: result.parties.map((p) => ({ ...p, memberIds: parties.find((x) => x.id === p.id)!.memberIds })),
       expenses: spent.map((e) => ({ ...e, unsplit: result.unsplit.includes(e.id) })),
+      // Paid instalments of bookings, counted in the totals above. They are changed where the booking is.
+      bookingPayments: booked.map((p) => ({ id: p.id, bookingId: p.bookingId, title: `${p.title}: ${p.label}`, amountCents: p.amountCents, paidBy: p.paidBy, spentOn: p.paidOn, unsplit: result.unsplit.includes(p.id) })),
       payments: paid,
       // What is still to be paid to make everything even.
       transfers: result.transfers,

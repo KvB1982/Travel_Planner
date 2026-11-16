@@ -13,6 +13,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY drizzle ./drizzle
+# Uploaded documents live in a volume; it takes over this folder's owner on first use.
+RUN mkdir -p /data/files && chown node:node /data/files
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

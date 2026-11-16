@@ -9,6 +9,8 @@ import type { Searcher } from "./import/search.js";
 import type { PageFetcher } from "./import/fetch.js";
 import { ImportQueue } from "./import/pipeline.js";
 import { authRoutes } from "./routes/auth.js";
+import { bookingRoutes } from "./routes/bookings.js";
+import { checklistRoutes } from "./routes/checklists.js";
 import { ledgerRoutes } from "./routes/ledger.js";
 import { candidateRoutes } from "./routes/candidates.js";
 import { tripRoutes } from "./routes/trips.js";
@@ -64,6 +66,8 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
   tripRoutes(app, ctx);
   candidateRoutes(app, ctx);
   ledgerRoutes(app, ctx);
+  bookingRoutes(app, ctx);
+  checklistRoutes(app, ctx);
 
   app.addHook("onClose", async () => ctx.queue.idle());
   return { app, ctx };
