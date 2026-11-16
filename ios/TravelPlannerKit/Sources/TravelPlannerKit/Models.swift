@@ -64,6 +64,14 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     public var favoriteCount: Int?
     /// "trip" or "watchlist". The watchlist is a personal place for offers that belong to no trip (yet).
     public var kind: String?
+    /// Where the trip stands today, as the server sees it (it moves on by itself on arrival and departure day).
+    public var currentPhase: String?
+    /// The phase as stored, set by a decision or by hand.
+    public var phase: String?
+    public var decidedCandidateId: String?
+
+    /// The phase to open: today's, falling back to research on servers that know no phases.
+    public var activePhase: TripPhase { TripPhase(rawValue: currentPhase ?? phase ?? "") ?? .research }
 
     public var persons: Int { adults + children }
     public var isWatchlist: Bool { kind == "watchlist" }
@@ -236,6 +244,8 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var needsDevice: Bool?
     /// The advert's page for the dates and party of the trip.
     public var checkUrl: String?
+    /// Chosen for the decision round of the trip.
+    public var finalist: Bool?
     /// How the offer does against the trip's criteria; nil when the trip has none.
     public var criteria: CriteriaVerdict?
     /// Price and availability for each period of the trip.
@@ -434,6 +444,118 @@ public struct Photo: Codable, Identifiable, Hashable, Sendable {
     public var aspectRatio: Double? {
         guard let width, let height, width > 0, height > 0 else { return nil }
         return width / height
+    }
+}
+
+/// The stages a trip goes through, each with a surface of its own.
+public enum TripPhase: String, CaseIterable, Sendable, Identifiable {
+    case framing, research, decision, booking, preparation, travelling, review, archived
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .framing: "Rahmen"
+        case .research: "Recherche"
+        case .decision: "Entscheidung"
+        case .booking: "Buchung"
+        case .preparation: "Vorbereitung"
+        case .travelling: "Unterwegs"
+        case .review: "Rückblick"
+        case .archived: "Archiv"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .framing: "calendar.badge.clock"
+        case .research: "magnifyingglass"
+        case .decision: "trophy"
+        case .booking: "checkmark.seal"
+        case .preparation: "checklist"
+        case .travelling: "car"
+        case .review: "book.closed"
+        case .archived: "archivebox"
+        }
+    }
+
+    /// What the phase is for, shown where its surface is not built yet.
+    public var purpose: String {
+        switch self {
+        case .framing: "Wer fährt wann wohin, und was darf es kosten? Mitreisende, Zeiträume, Budget und Kriterien."
+        case .research: "Angebote sammeln, vergleichen und bewerten."
+        case .decision: "Aus den Fundstücken werden Finalisten, und die Gruppe entscheidet sich."
+        case .booking: "Buchung festhalten, Zahlungsplan, Fristen und Belege."
+        case .preparation: "Anreise, Packlisten, Einkauf, Zimmerverteilung, Aktivitäten und Aufgaben."
+        case .travelling: "Hausmappe, Dokumente, Kalender, gemeinsame Kasse und Fotos."
+        case .review: "Abrechnung in der Gruppe, Fotobuch und Bewertung."
+        case .archived: "Die abgeschlossene Reise zum Nachlesen."
+        }
+    }
+
+    /// The phases shown in the bar of a trip; the archive is a state, not a place to work in.
+    public static let shown: [TripPhase] = [.framing, .research, .decision, .booking, .preparation, .travelling, .review]
+}
+
+/// The state of the decision round: finalists with their points, who ranked how, and who is missing.
+public struct Pitch: Decodable, Hashable, Sendable {
+    public struct Finalist: Decodable, Hashable, Sendable, Identifiable {
+        public var place: Int?
+        public var points: Double?
+        public var firstPlaces: Int?
+        public var candidate: CandidateSummary
+        public var summary: String?
+        public var highlights: [String]?
+        public var warnings: [String]?
+        public var id: String { candidate.id }
+
+        public init(place: Int? = nil, points: Double? = nil, firstPlaces: Int? = nil, candidate: CandidateSummary,
+                    summary: String? = nil, highlights: [String]? = nil, warnings: [String]? = nil) {
+            self.place = place; self.points = points; self.firstPlaces = firstPlaces; self.candidate = candidate
+            self.summary = summary; self.highlights = highlights; self.warnings = warnings
+        }
+    }
+    public struct Person: Decodable, Hashable, Sendable, Identifiable {
+        public var userId: String
+        public var name: String
+        public var order: [String]?
+        public var id: String { userId }
+        public init(userId: String, name: String, order: [String]? = nil) { self.userId = userId; self.name = name; self.order = order }
+    }
+
+    public var phase: String?
+    public var voteDeadline: Date?
+    /// The winner, once the organizer has recorded the decision.
+    public var decidedCandidateId: String?
+    public var maxPoints: Double?
+    public var finalists: [Finalist]
+    public var rankings: [Person]
+    public var myRanking: [String]
+    public var missing: [Person]
+
+    public init(phase: String? = nil, decidedCandidateId: String? = nil, maxPoints: Double? = nil, finalists: [Finalist] = [],
+                rankings: [Person] = [], myRanking: [String] = [], missing: [Person] = []) {
+        self.phase = phase; self.decidedCandidateId = decidedCandidateId; self.maxPoints = maxPoints; self.finalists = finalists
+        self.rankings = rankings; self.myRanking = myRanking; self.missing = missing
+    }
+
+    private enum CodingKeys: String, CodingKey { case phase, voteDeadline, decided, maxPoints, finalists, rankings, myRanking, missing }
+    private struct Decided: Decodable { var candidateId: String? }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        phase = try container.decodeIfPresent(String.self, forKey: .phase)
+        voteDeadline = (try? container.decodeIfPresent(Date.self, forKey: .voteDeadline)) ?? nil
+        // "decided" is null, an id, or an object naming the winner.
+        if let id = try? container.decodeIfPresent(String.self, forKey: .decided) {
+            decidedCandidateId = id
+        } else {
+            decidedCandidateId = ((try? container.decodeIfPresent(Decided.self, forKey: .decided)) ?? nil)?.candidateId
+        }
+        maxPoints = try container.decodeIfPresent(Double.self, forKey: .maxPoints)
+        finalists = try container.decodeIfPresent([Finalist].self, forKey: .finalists) ?? []
+        rankings = (try? container.decodeIfPresent([Person].self, forKey: .rankings)) ?? []
+        myRanking = (try? container.decodeIfPresent([String].self, forKey: .myRanking)) ?? []
+        missing = (try? container.decodeIfPresent([Person].self, forKey: .missing)) ?? []
     }
 }
 

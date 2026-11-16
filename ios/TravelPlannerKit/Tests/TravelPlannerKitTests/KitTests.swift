@@ -479,6 +479,70 @@ final class CriteriaAndSortingTests: XCTestCase {
     }
 }
 
+final class PitchTests: XCTestCase {
+    func testServerShapeDecodes() throws {
+        let pitch = try APIClient.decoder.decode(Pitch.self, from: Data("""
+        {"phase":"decision","voteDeadline":null,"decided":null,"maxPoints":8,
+         "finalists":[{"place":1,"points":7,"firstPlaces":2,
+           "candidate":{"id":"c1","status":"new","importStatus":"ready","importNote":null,"tags":[],"addedBy":"A","createdAt":"2026-11-15T09:17:52.123Z",
+             "listing":{"id":"l1","kind":"vacation_home","title":"Casa","place":null,"country":null,"lat":null,"lon":null,"coverImageUrl":null,
+               "fillPercent":0,"maxGuests":null,"bedrooms":null,"bathrooms":null,"rating":null,"platforms":[]},
+             "price":null,"votes":{"yes":0,"maybe":0,"no":0,"vetoes":0},"myVote":null,"finalist":true},
+           "summary":"Schön.","highlights":["Pool"],"warnings":[],"reviewSummary":{"summary":"Gut.","positives":[],"negatives":[]}}],
+         "rankings":[{"userId":"u1","name":"Anna","order":["c1"],"updatedAt":"2026-11-16T10:00:00.000Z"}],
+         "myRanking":["c1"],"missing":[{"userId":"u2","name":"Jonas"}]}
+        """.utf8))
+        XCTAssertEqual(pitch.finalists.first?.points, 7)
+        XCTAssertEqual(pitch.finalists.first?.candidate.finalist, true)
+        XCTAssertNil(pitch.decidedCandidateId)
+        XCTAssertEqual(pitch.missing.map(\.name), ["Jonas"])
+        let decided = try APIClient.decoder.decode(Pitch.self, from: Data(#"{"phase":"booking","decided":{"candidateId":"c1","decidedAt":"2026-11-16T10:00:00.000Z"},"finalists":[]}"#.utf8))
+        XCTAssertEqual(decided.decidedCandidateId, "c1")
+    }
+
+    func testPhaseOfTrip() throws {
+        let json = #"{"id":"t","title":"R","region":null,"adults":2,"children":0,"pets":0,"budgetTotalCents":null,"status":"planning","voteDeadline":null,"createdAt":"2026-11-16T00:00:00.000Z","phase":"booking","currentPhase":"travelling"}"#
+        XCTAssertEqual(try APIClient.decoder.decode(Trip.self, from: Data(json.utf8)).activePhase, .travelling, "maßgeblich ist, was heute gilt")
+        XCTAssertEqual(Trip(id: "x", title: "Alt").activePhase, .research)
+    }
+
+    func testRankingPointsAndDecision() async throws {
+        let demo = DemoBackend()
+        do {
+            _ = try await demo.startPitch(tripId: "t-1", candidateIds: ["c-1"])
+            XCTFail("Ein Finalist ist keine Wahl")
+        } catch let error as APIError { XCTAssertEqual(error.status, 400) }
+        var pitch = try await demo.startPitch(tripId: "t-1", candidateIds: ["c-1", "c-2", "c-5"])
+        XCTAssertEqual(pitch.finalists.map(\.candidate.id), ["c-1", "c-2", "c-5"], "Annas Rangfolge allein")
+        XCTAssertEqual(pitch.finalists.map(\.points), [3, 2, 1])
+        XCTAssertEqual(Set(pitch.missing.map(\.name)), ["Du", "Jonas"])
+        pitch = try await demo.setRanking(tripId: "t-1", order: ["c-5", "c-2"])
+        XCTAssertEqual(pitch.myRanking, ["c-5", "c-2"])
+        // c-5: 1 + 3 = 4, c-2: 2 + 2 = 4, c-1: 3 + 0 = 3. Tie on points; one first place each for c-5 (mine) and none for c-2.
+        XCTAssertEqual(pitch.finalists.map(\.candidate.id), ["c-5", "c-2", "c-1"])
+        XCTAssertEqual(pitch.finalists.map(\.place), [1, 2, 3])
+        XCTAssertEqual(pitch.missing.map(\.name), ["Jonas"])
+        let list = try await demo.candidates(tripId: "t-1")
+        XCTAssertEqual(list.filter { $0.finalist == true }.count, 3)
+        var trips = try await demo.trips()
+        XCTAssertEqual(trips.first { $0.id == "t-1" }?.activePhase, .decision)
+        pitch = try await demo.decide(tripId: "t-1", candidateId: "c-5", dateOptionId: nil)
+        XCTAssertEqual(pitch.decidedCandidateId, "c-5")
+        trips = try await demo.trips()
+        XCTAssertEqual(trips.first { $0.id == "t-1" }?.activePhase, .booking)
+        pitch = try await demo.undoDecision(tripId: "t-1")
+        XCTAssertNil(pitch.decidedCandidateId)
+    }
+
+    func testVetoGoesToTheBack() async throws {
+        let demo = DemoBackend()
+        _ = try await demo.startPitch(tripId: "t-1", candidateIds: ["c-1", "c-2"])
+        try await demo.vote(candidateId: "c-1", verdict: .no, veto: true)
+        let pitch = try await demo.pitch(tripId: "t-1")
+        XCTAssertEqual(pitch.finalists.map(\.candidate.id), ["c-2", "c-1"])
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()

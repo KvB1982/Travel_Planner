@@ -23,6 +23,16 @@ public protocol TravelBackend: Sendable {
     func createInvite(tripId: String, role: MemberRole) async throws -> Invite
     /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
     func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
+    /// Moves the trip to a phase by hand, forwards or back. Nothing is deleted.
+    func setPhase(tripId: String, phase: TripPhase) async throws
+    func pitch(tripId: String) async throws -> Pitch
+    /// Names the finalists (two to eight) and opens the decision round.
+    func startPitch(tripId: String, candidateIds: [String]) async throws -> Pitch
+    /// The own order of the finalists, best first. May leave some out.
+    func setRanking(tripId: String, order: [String]) async throws -> Pitch
+    /// Records the winner. The trip moves on to booking.
+    func decide(tripId: String, candidateId: String, dateOptionId: String?) async throws -> Pitch
+    func undoDecision(tripId: String) async throws -> Pitch
     func criteria(tripId: String) async throws -> CriteriaList
     /// Replaces the criteria of the trip. Entries that keep their id keep the verdicts given by hand.
     func setCriteria(tripId: String, criteria: [Criterion]) async throws -> CriteriaList
@@ -217,6 +227,34 @@ public struct APIClient: TravelBackend {
         struct Response: Decodable { var candidates: [CandidateSummary] }
         let query = dateOptionId.map { "?dateOptionId=\($0.pathEscaped)" } ?? ""
         return try await (send("GET", "/trips/\(tripId.pathEscaped)/candidates\(query)") as Response).candidates
+    }
+
+    public func setPhase(tripId: String, phase: TripPhase) async throws {
+        struct Body: Encodable { var phase: String }
+        _ = try await data("PATCH", "/trips/\(tripId.pathEscaped)", body: Body(phase: phase.rawValue))
+    }
+
+    public func pitch(tripId: String) async throws -> Pitch {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/pitch")
+    }
+
+    public func startPitch(tripId: String, candidateIds: [String]) async throws -> Pitch {
+        struct Body: Encodable { var candidateIds: [String] }
+        return try await send("POST", "/trips/\(tripId.pathEscaped)/pitch", body: Body(candidateIds: candidateIds))
+    }
+
+    public func setRanking(tripId: String, order: [String]) async throws -> Pitch {
+        struct Body: Encodable { var order: [String] }
+        return try await send("PUT", "/trips/\(tripId.pathEscaped)/ranking", body: Body(order: order))
+    }
+
+    public func decide(tripId: String, candidateId: String, dateOptionId: String?) async throws -> Pitch {
+        struct Body: Encodable { var candidateId: String; var dateOptionId: String? }
+        return try await send("POST", "/trips/\(tripId.pathEscaped)/decision", body: Body(candidateId: candidateId, dateOptionId: dateOptionId))
+    }
+
+    public func undoDecision(tripId: String) async throws -> Pitch {
+        try await send("DELETE", "/trips/\(tripId.pathEscaped)/decision")
     }
 
     public func criteria(tripId: String) async throws -> CriteriaList {

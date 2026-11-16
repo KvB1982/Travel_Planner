@@ -22,6 +22,9 @@ struct CandidateListView: View {
     @State private var showCompare = false
     @State private var showPresentation = false
     @State private var showCriteria = false
+    /// The phase whose surface is shown; follows the trip until someone picks another.
+    @State private var viewedPhase: TripPhase = .research
+    @State private var phasePicked = false
     @AppStorage("offerSort") private var sortRaw = OfferSort.added.rawValue
     @State private var onlyAvailable = false
     /// The period that prices and availability refer to; nil means the earliest of the trip.
@@ -81,11 +84,13 @@ struct CandidateListView: View {
                     Text(status.label).tag(CandidateStatus?.some(status))
                 }
             }
+            .fixedSize()
             if countries.count > 1 {
                 Picker("Land", selection: $country) {
                     Text("Alle Länder").tag(String?.none)
                     ForEach(countries, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
+                .fixedSize()
             }
             Spacer()
             Menu {
@@ -104,6 +109,19 @@ struct CandidateListView: View {
 
     var body: some View {
         List(selection: $selection) {
+            if let detail, !detail.trip.isWatchlist {
+                Section {
+                    PhaseBar(trip: detail.trip, viewed: Binding(get: { viewedPhase }, set: { viewedPhase = $0; phasePicked = true }),
+                             setPhase: detail.role == .organizer ? { phase in setPhase(phase) } : nil)
+                }
+                .listSectionSpacing(.compact)
+            }
+            if let detail, viewedPhase == .decision, !detail.trip.isWatchlist {
+                PitchSections(tripID: tripID, role: detail.role, candidates: candidates, persons: detail.trip.persons, selection: $selection)
+            } else if let detail, viewedPhase != .research, !detail.trip.isWatchlist {
+                if viewedPhase == .framing { Section { TripHeader(detail: detail) } }
+                PhasePlaceholder(phase: viewedPhase)
+            } else {
             if let detail {
                 Section {
                     TripHeader(detail: detail)
@@ -162,9 +180,20 @@ struct CandidateListView: View {
                     if !candidates.isEmpty { filters }
                 }
             }
+            if let detail, detail.role == .organizer, !detail.trip.isWatchlist, candidates.count >= 2 {
+                Section {
+                    Button("Weiter zur Entscheidung", systemImage: "trophy") {
+                        viewedPhase = .decision
+                        phasePicked = true
+                    }
+                } footer: {
+                    Text("Dort wählst du die Finalisten aus, und die Gruppe bringt sie in eine Rangfolge.")
+                }
+            }
+            }
         }
         .overlay {
-            if loaded && candidates.isEmpty && error == nil {
+            if loaded && candidates.isEmpty && error == nil && viewedPhase == .research {
                 ContentUnavailableView {
                     Label("Noch keine Angebote", systemImage: "square.and.arrow.up")
                 } description: {
@@ -300,6 +329,10 @@ struct CandidateListView: View {
             async let list = backend.candidates(tripId: tripID, dateOptionId: periodID)
             (detail, candidates) = try await (trip, list)
             error = nil
+            if !phasePicked, let trip = detail?.trip {
+                // Open the surface the trip is in; phases without a surface yet fall back to the research.
+                viewedPhase = [.research, .decision].contains(trip.activePhase) ? trip.activePhase : .research
+            }
         } catch is CancellationError {
         } catch {
             self.error = model.message(for: error)
@@ -436,6 +469,18 @@ struct CandidateListView: View {
         }
     }
 
+    private func setPhase(_ phase: TripPhase) {
+        guard let backend = model.backend else { return }
+        Task {
+            do {
+                try await backend.setPhase(tripId: tripID, phase: phase)
+                model.dataChanged()
+            } catch {
+                notice = model.message(for: error)
+            }
+        }
+    }
+
     private func createInvite() {
         guard let backend = model.backend else { return }
         Task {
@@ -535,6 +580,9 @@ private struct CandidateRow: View {
                     if candidate.status == .favorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
                     if candidate.status == .booked { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
                     if let verdict = candidate.criteria { CriteriaLight(verdict: verdict).font(.subheadline) }
+                    if candidate.finalist == true {
+                        Image(systemName: "trophy.fill").font(.subheadline).foregroundStyle(.tint).accessibilityLabel("Finalist")
+                    }
                     Text(candidate.listing.title ?? "Angebot wird gelesen …").font(.headline).lineLimit(2)
                 }
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

@@ -74,6 +74,7 @@ public actor DemoBackend: TravelBackend {
         order.compactMap { details[$0] }.filter { $0.candidate.tripId == tripId }.map { detail in
             var summary = summarize(detail, tripId: tripId)
             summary.criteria = verdict(for: detail, results: false)
+            summary.finalist = finalists[tripId]?.contains(detail.candidate.id) ?? false
             return summary
         }
     }
@@ -98,6 +99,95 @@ public actor DemoBackend: TravelBackend {
                 votes: VoteTally(yes: detail.votes.yes, maybe: detail.votes.maybe, no: detail.votes.no, vetoes: detail.votes.vetoes),
                 myVote: detail.votes.entries.first { $0.userId == user.id }.map { Vote(verdict: $0.verdict, veto: $0.veto) })
         }[0]
+    }
+
+    // MARK: Phases and pitch
+
+    private var finalists: [String: [String]] = [:]
+    private var rankings: [String: [String: [String]]] = [:]
+    private var decided: [String: String] = [:]
+    /// Two fellow travellers who have already ranked, so the result has something to show.
+    private let others = [("u-2", "Anna"), ("u-3", "Jonas")]
+
+    private func tripIndex(_ id: String) throws -> Int {
+        guard let index = trips.firstIndex(where: { $0.id == id }) else { throw APIError(status: 404, code: "not_found", message: "Diese Reise gibt es nicht.") }
+        return index
+    }
+
+    public func setPhase(tripId: String, phase: TripPhase) async throws {
+        let index = try tripIndex(tripId)
+        trips[index].phase = phase.rawValue
+        trips[index].currentPhase = phase.rawValue
+    }
+
+    public func pitch(tripId: String) async throws -> Pitch {
+        _ = try tripIndex(tripId)
+        let ids = finalists[tripId] ?? []
+        let own = rankings[tripId] ?? [:]
+        let count = Double(ids.count)
+        let all = try await candidates(tripId: tripId, dateOptionId: nil)
+        var entries = ids.compactMap { id in all.first { $0.id == id } }.map { candidate -> Pitch.Finalist in
+            var points = 0.0
+            var first = 0
+            for order in own.values {
+                if let position = order.firstIndex(of: candidate.id) {
+                    points += count - Double(position)
+                    if position == 0 { first += 1 }
+                }
+            }
+            let detail = details[candidate.id]
+            return Pitch.Finalist(points: points, firstPlaces: first, candidate: candidate, summary: detail?.listing.profile.summary,
+                                  highlights: detail?.listing.profile.highlights, warnings: detail?.listing.profile.warnings)
+        }
+        // Offers with a veto go behind those without, then by points, then by first places.
+        entries.sort { a, b in
+            let vetoA = a.candidate.votes.vetoes > 0, vetoB = b.candidate.votes.vetoes > 0
+            if vetoA != vetoB { return !vetoA }
+            if a.points != b.points { return (a.points ?? 0) > (b.points ?? 0) }
+            return (a.firstPlaces ?? 0) > (b.firstPlaces ?? 0)
+        }
+        for index in entries.indices { entries[index].place = index + 1 }
+        let people = [(user.id, user.name)] + others
+        return Pitch(phase: trips.first { $0.id == tripId }?.currentPhase, decidedCandidateId: decided[tripId], maxPoints: count * Double(people.count),
+                     finalists: entries,
+                     rankings: people.compactMap { person in own[person.0].map { Pitch.Person(userId: person.0, name: person.1, order: $0) } },
+                     myRanking: own[user.id] ?? [],
+                     missing: ids.isEmpty ? [] : people.filter { own[$0.0] == nil }.map { Pitch.Person(userId: $0.0, name: $0.1) })
+    }
+
+    public func startPitch(tripId: String, candidateIds: [String]) async throws -> Pitch {
+        guard (2...8).contains(candidateIds.count) else {
+            throw APIError(status: 400, code: "invalid_request", message: "Für die Entscheidung braucht es zwei bis acht Angebote.")
+        }
+        finalists[tripId] = candidateIds
+        // Anna has ranked already, in the order given; Jonas has not.
+        rankings[tripId] = ["u-2": candidateIds]
+        try await setPhase(tripId: tripId, phase: .decision)
+        return try await pitch(tripId: tripId)
+    }
+
+    public func setRanking(tripId: String, order: [String]) async throws -> Pitch {
+        let allowed = finalists[tripId] ?? []
+        rankings[tripId, default: [:]][user.id] = order.filter(allowed.contains)
+        return try await pitch(tripId: tripId)
+    }
+
+    public func decide(tripId: String, candidateId: String, dateOptionId: String?) async throws -> Pitch {
+        let index = try tripIndex(tripId)
+        decided[tripId] = candidateId
+        trips[index].decidedCandidateId = candidateId
+        trips[index].status = .decided
+        try await setPhase(tripId: tripId, phase: .booking)
+        return try await pitch(tripId: tripId)
+    }
+
+    public func undoDecision(tripId: String) async throws -> Pitch {
+        let index = try tripIndex(tripId)
+        decided[tripId] = nil
+        trips[index].decidedCandidateId = nil
+        trips[index].status = .planning
+        try await setPhase(tripId: tripId, phase: .decision)
+        return try await pitch(tripId: tripId)
     }
 
     // MARK: Criteria. The sample data measures a handful of things, enough to show the traffic light.
