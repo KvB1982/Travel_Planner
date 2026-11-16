@@ -29,6 +29,8 @@ struct CaptureView: View {
     @State private var page = WebPage()
     @State private var sending = false
     @State private var confirmFewPictures = false
+    /// The site showed a "bot or human?" question; the automatic run has stopped and waits for the person.
+    @State private var gate = false
     /// A reading that is waiting for the answer to "send it although photos are missing?".
     @State private var held: WebPage.Captured?
     @State private var error: String?
@@ -42,7 +44,7 @@ struct CaptureView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
-                        Text(automatic
+                        Text(automatic && !gate
                              ? "Prüfe Preis und Verfügbarkeit für euren Zeitraum\(progressLabel.map { " (\($0))" } ?? "") … Die Seite wird gleich von selbst gelesen."
                              : sending
                              ? (page.progress ?? "Lese die Seite …") + " Das dauert bis zu einer Minute, bitte nichts antippen."
@@ -115,7 +117,17 @@ struct CaptureView: View {
         error = nil
         Task {
             do {
+                if await page.isChallenge() {
+                    // The person can answer the site's question here; the app does not, and does not send this page.
+                    gate = true
+                    throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“. Oder brich ab, dann wird dieses Angebot nicht geprüft.")
+                }
+                if automatic { await page.waitForPrice() }
                 let captured = try await page.capture(quick: automatic)
+                if await page.isChallenge() {
+                    gate = true
+                    throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“.")
+                }
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
@@ -553,6 +565,39 @@ final class WebPage: NSObject, WKNavigationDelegate {
             stable = parts.first == "complete" && last >= 0 && abs(length - last) < 2_000 ? stable + 1 : 0
             last = length
             if stable >= 2 { break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    /// A page that asks "bot or human?" or refuses access instead of showing the advert.
+    /// Such a page must never be sent as if it were the advert.
+    func isChallenge() async -> Bool {
+        let script = """
+        (function () {
+          var title = (document.title || '').toLowerCase();
+          var text = (document.body ? document.body.innerText : '').trim();
+          var words = /(bot oder mensch|bot or (not|human)|mensch oder bot|bist du ein (mensch|roboter)|are you (a )?(human|robot)|kein roboter|not a robot|captcha|just a moment|einen moment|access (to this page has been )?denied|zugriff verweigert|ungewöhnliche(n)? (aktivität|zugriff)|unusual (traffic|activity)|sicherheitsüberprüfung|security check|verify (you are|that you)|press (and|&) hold|gedrückt halten)/i;
+          if (words.test(title)) { return true; }
+          // A real advert has plenty of text; a gate has a few lines.
+          return text.length < 1500 && words.test(text);
+        })()
+        """
+        return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
+    }
+
+    /// For a price check: waits until the page shows a price for the stay or says the dates are taken.
+    /// Adverts fill that in a few seconds after loading; gives up after a quarter of a minute.
+    func waitForPrice() async {
+        let script = """
+        (function () {
+          var text = document.body ? document.body.innerText : '';
+          var price = /\\d[\\d.,]*\\s?(€|eur)[^\\n]{0,40}(nächte|nacht|nights?|gesamt|insgesamt|total)|(nächte|nacht|nights?|gesamt|insgesamt|total)[^\\n]{0,40}\\d[\\d.,]*\\s?(€|eur)|(€|eur)\\s?\\d[\\d.,]*[^\\n]{0,40}(nächte|nacht|nights?|gesamt|insgesamt|total)/i;
+          var taken = /(nicht verfügbar|nicht mehr verfügbar|ausgebucht|belegt|not available|unavailable|sold out|keine verfügbarkeit|leider vergeben)/i;
+          return price.test(text) || taken.test(text);
+        })()
+        """
+        for _ in 0..<30 {
+            if ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true { return }
             try? await Task.sleep(for: .milliseconds(500))
         }
     }
