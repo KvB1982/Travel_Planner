@@ -23,6 +23,7 @@ struct CandidateListView: View {
     @State private var showMap = false
     /// "2 von 5" while all offers are being checked; nil otherwise.
     @State private var checking: String?
+    @State private var confirmCheck = false
     /// Adverts still to be read on this device during a check of the whole trip.
     @State private var deviceQueue: [TripCheck.Check] = []
     @State private var deviceTotal = 0
@@ -80,7 +81,7 @@ struct CandidateListView: View {
                     TripHeader(detail: detail)
                     if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
                         Button {
-                            checkAll()
+                            confirmCheck = true
                         } label: {
                             if let checking {
                                 HStack(spacing: 10) { ProgressView(); Text("Prüfe \(checking) …") }
@@ -89,10 +90,6 @@ struct CandidateListView: View {
                             }
                         }
                         .disabled(checking != nil)
-                    }
-                } footer: {
-                    if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
-                        Text("Fragt alle Angebote für den Zeitraum und die Gäste dieser Reise neu ab. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst.")
                     }
                 }
             }
@@ -191,6 +188,13 @@ struct CandidateListView: View {
         }
         .fullScreenCover(isPresented: $showCompare) {
             CompareView(candidates: candidates, persons: detail?.trip.persons)
+        }
+        // An alert, so both answers are always on screen; a popover would hide "Abbrechen".
+        .alert("Verfügbarkeit und Preise prüfen?", isPresented: $confirmCheck) {
+            Button("Abbrechen", role: .cancel) {}
+            Button("Jetzt prüfen") { checkAll() }
+        } message: {
+            Text("Alle Angebote werden für den Zeitraum und die Gäste dieser Reise neu abgefragt. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst. Das dauert etwa eine Viertelminute je Angebot.")
         }
         .sheet(item: $deviceCheck, onDismiss: nextDeviceCheck) { check in
             let url = check.checkUrl ?? ""
