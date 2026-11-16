@@ -171,20 +171,21 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || (p.startDate === stay.startDate && p.endDate === stay.endDate));
     const inPeriod = (p: (typeof prices)[number], o: (typeof options)[number]) => p.tripId === tripId && p.startDate === o.startDate && p.endDate === o.endDate;
 
+    const partySize = (stay.adults ?? 0) + (stay.children ?? 0);
     const loaded = rows.map(({ candidate, listing, addedByName }) => {
       const mine = allVotes.filter((v) => v.tripListingId === candidate.id);
       const own = sources.filter((s) => s.listingId === listing.id);
       const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
       // A price captured for this trip's dates beats one that came with the shared link.
       const priced = ownPrices.filter((x) => x.totalCents !== null);
-      // The last look for the trip that found nothing at all leaves older trip prices without a say.
+      // A look that found nothing at all says nothing: the page may not have finished loading on the device.
+      // What an earlier look for the same dates found stays, with its own date, and the empty look is named beside it.
+      const empty = (x: (typeof prices)[number] | undefined) => x !== undefined && x.totalCents === null && x.available === null;
       const newestForTrip = ownPrices.find(forThisTrip);
-      const blank = newestForTrip !== undefined && newestForTrip.totalCents === null && newestForTrip.available === null;
-      const price = (blank ? priced.find((x) => !forThisTrip(x)) : (priced.find(forThisTrip) ?? priced[0])) ?? null;
+      const price = priced.find(forThisTrip) ?? priced[0] ?? null;
       // The latest word on whether the trip's dates can be booked, from whichever source said so last.
       const said = ownPrices.find((x) => forThisTrip(x) && x.available !== null);
-      const lastForTrip = ownPrices.find(forThisTrip);
-      const stale = !said || (lastForTrip !== undefined && lastForTrip.capturedAt > said.capturedAt && lastForTrip.available === null && lastForTrip.totalCents === null);
+      const stale = !said;
       const availability = stale ? ("unknown" as const) : said.available ? ("available" as const) : ("unavailable" as const);
       // The page to open for the trip's dates and party, and whether only the device gets an answer from it.
       const first = own[0];
@@ -228,7 +229,11 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         // For the trip's dates and party. "unknown" until a reading for those dates said one or the other.
         availability,
         availabilityCheckedAt: stale ? null : said.capturedAt,
+        // Set when the most recent look for the trip's dates came back without price and without a word on availability.
+        emptyCheckAt: empty(newestForTrip) ? newestForTrip!.capturedAt : null,
         needsDevice,
+        // false when the advert takes fewer guests than the trip has travellers: platforms then show a hint instead of a price.
+        fitsParty: p.maxGuests === null || partySize === 0 ? null : p.maxGuests >= partySize,
         checkUrl: link ? urlForStay(link, stay) : null,
         // What is known for each of the trip's periods, so they can be set side by side.
         periods: options.map((o) => {
@@ -236,16 +241,18 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           const word = seen.find((x) => x.available !== null);
           const amount = seen.find((x) => x.totalCents !== null);
           const newest = seen[0];
-          const nothing = newest !== undefined && newest.totalCents === null && newest.available === null;
+          const told = seen.find((x) => !empty(x));
           return {
             dateOptionId: o.id,
             label: o.label,
             startDate: o.startDate,
             endDate: o.endDate,
-            availability: !word || nothing ? ("unknown" as const) : word.available ? ("available" as const) : ("unavailable" as const),
-            totalCents: nothing ? null : (amount?.totalCents ?? null),
-            kind: nothing ? null : (amount?.kind ?? null),
-            checkedAt: newest?.capturedAt ?? null,
+            availability: !word ? ("unknown" as const) : word.available ? ("available" as const) : ("unavailable" as const),
+            totalCents: amount?.totalCents ?? null,
+            kind: amount?.kind ?? null,
+            // When what is shown here was read; an empty look afterwards does not move it.
+            checkedAt: told?.capturedAt ?? newest?.capturedAt ?? null,
+            emptyCheckAt: empty(newest) ? newest!.capturedAt : null,
             checkUrl: link ? urlForStay(link, { ...stay, startDate: o.startDate, endDate: o.endDate }) : null,
           };
         }),

@@ -339,7 +339,7 @@ export async function processImport(
       latest.available === price.available &&
       (latest.tripId === input.tripId) === forTrip;
     // Reading the same price again is not a new observation.
-    // A look for the trip that found neither price nor answer is recorded too: it ends the say of whatever was known before.
+    // A look for the trip that found neither price nor answer is recorded too, so the list can say that the last look came back empty.
     if ((totalCents !== null || price.available === false || priceBelongsToTrip) && !unchanged) {
       await db.insert(priceSnapshots).values({
         listingSourceId: input.sourceId,

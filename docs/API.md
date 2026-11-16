@@ -489,3 +489,9 @@ Die App bucht nicht. Sie hält fest, was gebucht wurde.
 ## Offline geschriebene Einträge
 
 `POST /trips/:id/expenses` und `POST /trips/:id/checklist-items` nehmen ein optionales Feld `clientId` (UUID, vom Gerät vergeben). Ein zweiter Aufruf mit derselben `clientId` in derselben Reise legt nichts Neues an, sondern antwortet mit 200 statt 201 und liefert den bestehenden Eintrag (`expense` oder `item`) samt Kassenblatt (`ledger`) oder Listen (`checklists`). So kann die App Einträge ohne Netz vormerken und später gefahrlos wiederholt senden.
+
+## Abruf ohne Ergebnis
+
+Liest das Gerät eine Seite für den Zeitraum, bevor Preis und Verfügbarkeit geladen sind, kommt ein Abruf ohne Ergebnis heraus. Er überschreibt nichts mehr: `price`, `availability` und `availabilityCheckedAt` zeigen weiter den letzten Abruf, der etwas fand, mit dessen Zeitpunkt. Zusätzlich nennt `emptyCheckAt` (im Listeneintrag und je Eintrag in `periods`) den Zeitpunkt, wenn der jüngste Abruf für den Zeitraum leer blieb, sonst `null`. `capture` antwortet weiter sofort mit 202; solange `importStatus` nicht `ready`, `partial` oder `failed` ist, läuft die Auswertung noch (üblich 20 bis 40 Sekunden).
+
+`fitsParty` im Listeneintrag ist `false`, wenn das Inserat laut Steckbrief weniger Gäste aufnimmt (`maxGuests`), als die Reise Personen hat, `true`, wenn es passt, und `null`, wenn eines von beiden unbekannt ist. Bei `false` zeigen Plattformen statt eines Preises oft nur einen Hinweis zur Gästezahl.
