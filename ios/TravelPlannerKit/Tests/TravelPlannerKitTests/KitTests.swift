@@ -467,6 +467,22 @@ final class DemoBackendTests: XCTestCase {
         XCTAssertEqual(end.sources.count, 1)
     }
 
+    func testTripCheckSaysWhoReadsWhat() async throws {
+        let check = try APIClient.decoder.decode(TripCheck.self, from: Data("""
+        {"startDate":"2027-05-15","endDate":"2027-05-29","adults":4,"children":4,"checks":[
+          {"candidateId":"a","platform":"airbnb","mode":"server","needsDevice":false,"checkUrl":"https://www.airbnb.de/rooms/1?check_in=2027-05-15"},
+          {"candidateId":"b","platform":"casamundo","mode":"device","needsDevice":true,"checkUrl":"https://www.casamundo.de/rental/x"},
+          {"candidateId":"c","platform":"novasol","mode":"server","needsDevice":false,"checkUrl":null},
+          {"candidateId":"d","platform":"vrbo","mode":"skipped","needsDevice":true,"checkUrl":"https://www.fewo-direkt.de/x"},
+          {"candidateId":"e","platform":"booking","mode":"server","needsDevice":false,"checkUrl":"https://www.booking.com/x"}]}
+        """.utf8))
+        XCTAssertEqual(check.checks.filter(\.wantsDevice).map(\.candidateId), ["a", "b"],
+                       "Airbnb sieht der Server zu wenig, Casamundo gar nicht; ohne Adresse oder eben erst gelesen: nichts zu tun")
+        let demo = DemoBackend()
+        let own = try await demo.checkTrip(tripId: "t-1")
+        XCTAssertEqual(own.checks.filter(\.wantsDevice).map(\.candidateId), ["c-3"])
+    }
+
     func testUnavailableAfterCheck() async throws {
         let demo = DemoBackend()
         var list = try await demo.candidates(tripId: "t-1")

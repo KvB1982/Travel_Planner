@@ -114,8 +114,24 @@ public actor DemoBackend: TravelBackend {
         return ImportResult(candidateId: id, duplicate: false, platform: platform)
     }
 
-    public func capture(candidateId: String, html: String, sourceId: String?) async throws {
+    public func checkTrip(tripId: String) async throws -> TripCheck {
+        let offers = order.compactMap { details[$0] }.filter { $0.candidate.tripId == tripId && $0.candidate.status != .rejected }
+        for offer in offers { try await refresh(candidateId: offer.candidate.id) }
+        return TripCheck(checks: offers.map { offer in
+            let source = offer.sources.first
+            let blocked = source?.platform == "vrbo" || source?.platform == "casamundo"
+            return .init(candidateId: offer.candidate.id, platform: source?.platform, mode: blocked ? "device" : "server",
+                         needsDevice: blocked, checkUrl: blocked ? source?.url : nil)
+        })
+    }
+
+    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool) async throws {
         var detail = try detail(candidateId)
+        if forTrip {
+            detail.candidate.importNote = "Für den Reisezeitraum auf dem Gerät geprüft (\(html.utf8.count / 1024) KB). In der Demo wird die Seite nicht ausgewertet."
+            details[candidateId] = detail
+            return
+        }
         if let sourceId, let index = detail.sources.firstIndex(where: { $0.id == sourceId }) {
             detail.sources[index].read = true
             detail.sources[index].needsDevice = false

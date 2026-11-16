@@ -22,6 +22,12 @@ struct CandidateListView: View {
     @State private var showMap = false
     /// "2 von 5" while all offers are being checked; nil otherwise.
     @State private var checking: String?
+    /// Adverts still to be read on this device during a check of the whole trip.
+    @State private var deviceQueue: [TripCheck.Check] = []
+    @State private var deviceTotal = 0
+    /// How many of them were actually read and sent; the rest were cancelled.
+    @State private var deviceDone = 0
+    @State private var deviceCheck: TripCheck.Check?
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -84,7 +90,7 @@ struct CandidateListView: View {
                     }
                 } footer: {
                     if detail.role.canEdit && !candidates.isEmpty {
-                        Text("Fragt alle Angebote für den Zeitraum und die Gäste dieser Reise neu ab.")
+                        Text("Fragt alle Angebote für den Zeitraum und die Gäste dieser Reise neu ab. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst.")
                     }
                 }
             }
@@ -183,6 +189,12 @@ struct CandidateListView: View {
         .fullScreenCover(isPresented: $showCompare) {
             CompareView(candidates: candidates, persons: detail?.trip.persons)
         }
+        .sheet(item: $deviceCheck, onDismiss: nextDeviceCheck) { check in
+            let url = check.checkUrl ?? ""
+            CaptureView(source: ListingSource(id: check.candidateId, platform: check.platform ?? "other", url: url, canonicalUrl: url),
+                        candidateID: check.candidateId, forTrip: true, automatic: true,
+                        progressLabel: "\(deviceTotal - deviceQueue.count) von \(deviceTotal)") { _, _ in deviceDone += 1 }
+        }
         .sheet(item: $invite) { invite in
             InviteSheet(invite: invite)
         }
@@ -245,36 +257,52 @@ struct CandidateListView: View {
         }
     }
 
-    /// Asks the server to read every offer again for the trip's dates and party, one after the other.
+    /// Has the server check every offer for the trip's dates and party, then reads on this device what the
+    /// server cannot see, one advert after the other.
     private func checkAll() {
         guard let backend = model.backend else { return }
-        let offers = candidates.filter { $0.status != .rejected && $0.importStatus != .pending }
+        checking = "alle Angebote"
         Task {
-            var started = 0, skipped = 0, failed = 0
-            for (index, offer) in offers.enumerated() {
-                checking = "\(index + 1) von \(offers.count)"
-                do {
-                    try await backend.refresh(candidateId: offer.id)
-                    started += 1
-                } catch let error as APIError where error.status == 429 {
-                    skipped += 1
-                } catch {
-                    failed += 1
-                    if (error as? APIError)?.isUnauthorized == true { notice = model.message(for: error); break }
+            do {
+                let result = try await backend.checkTrip(tripId: tripID)
+                model.dataChanged()
+                let onDevice = result.checks.filter(\.wantsDevice)
+                deviceTotal = onDevice.count
+                deviceQueue = onDevice
+                let server = result.checks.filter { $0.mode == "server" }.count
+                let skipped = result.checks.filter { $0.mode == "skipped" }.count
+                if onDevice.isEmpty {
+                    var parts = [server == 1 ? "1 Angebot wird vom Server neu abgefragt" : "\(server) Angebote werden vom Server neu abgefragt"]
+                    if skipped > 0 { parts.append(skipped == 1 ? "1 wurde eben erst geprüft" : "\(skipped) wurden eben erst geprüft") }
+                    notice = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server fertig ist."
+                } else {
+                    deviceCheck = deviceQueue.removeFirst()
                 }
+            } catch {
+                notice = model.message(for: error)
             }
             checking = nil
-            model.dataChanged()
-            var parts = [started == 1 ? "1 Angebot wird neu abgefragt" : "\(started) Angebote werden neu abgefragt"]
-            if skipped > 0 { parts.append(skipped == 1 ? "1 wurde eben erst geprüft" : "\(skipped) wurden eben erst geprüft") }
-            if failed > 0 { parts.append(failed == 1 ? "bei 1 hat es nicht geklappt" : "bei \(failed) hat es nicht geklappt") }
-            let device = offers.filter { $0.needsDevice == true }.count
-            var text = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server fertig ist."
-            if device > 0 {
-                text += device == 1 ? " 1 Angebot sperrt den Server und muss im Steckbrief auf dem Gerät aktualisiert werden."
-                                    : " \(device) Angebote sperren den Server und müssen im Steckbrief auf dem Gerät aktualisiert werden."
+        }
+    }
+
+    /// After one advert was read on the device (or skipped): the next one, or the summary.
+    private func nextDeviceCheck() {
+        if deviceQueue.isEmpty {
+            let left = deviceTotal - deviceDone
+            var text = deviceDone == 0 ? "Auf diesem Gerät wurde kein Angebot gelesen."
+                : deviceDone == 1 ? "1 Angebot wurde auf diesem Gerät für euren Zeitraum gelesen. Der Server wertet es jetzt aus, das Ergebnis erscheint gleich in der Liste."
+                : "\(deviceDone) Angebote wurden auf diesem Gerät für euren Zeitraum gelesen. Der Server wertet sie jetzt aus, die Ergebnisse erscheinen gleich in der Liste."
+            if left > 0 { text += left == 1 ? " 1 Angebot wurde abgebrochen und ist nicht geprüft." : " \(left) Angebote wurden abgebrochen und sind nicht geprüft." }
+            notice = text
+            deviceDone = 0
+            deviceTotal = 0
+        } else {
+            let next = deviceQueue.removeFirst()
+            // The sheet has to be gone before the next one can come up.
+            Task {
+                try? await Task.sleep(for: .milliseconds(600))
+                deviceCheck = next
             }
-            if notice == nil { notice = text }
         }
     }
 

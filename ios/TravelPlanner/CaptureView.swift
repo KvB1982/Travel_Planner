@@ -13,11 +13,18 @@ struct CaptureView: View {
     let candidateID: String
     /// Set when the page belongs to a further source of the offer, not the leading one.
     var sourceID: String?
-    /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
-    var onSent: (_ pictures: Int, _ reviews: Int) -> Void = { _, _ in }
+    /// The page is opened for the dates and party of the trip: its price and availability count for the trip.
+    var forTrip = false
+    /// Reads and sends on its own once the page has loaded, without browsing photos and reviews.
+    /// Used when all offers of a trip are checked one after the other.
+    var automatic = false
+    /// "2 von 3" during such a run.
+    var progressLabel: String?
     /// How many photos the advert is known to have, to warn before a reading that would bring far fewer.
     /// Nil where the server gets the photos from the page itself and the count seen here does not matter.
     var expectedPictures: Int?
+    /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
+    var onSent: (_ pictures: Int, _ reviews: Int) -> Void = { _, _ in }
 
     @State private var page = WebPage()
     @State private var sending = false
@@ -35,7 +42,9 @@ struct CaptureView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
-                        Text(sending
+                        Text(automatic
+                             ? "Prüfe Preis und Verfügbarkeit für euren Zeitraum\(progressLabel.map { " (\($0))" } ?? "") … Die Seite wird gleich von selbst gelesen."
+                             : sending
                              ? (page.progress ?? "Lese die Seite …") + " Das dauert bis zu einer Minute, bitte nichts antippen."
                              : "Stelle Zeitraum und Personen ein und tippe auf „Übernehmen“. Die App blättert dann selbst durch die Bildergalerie und klappt die Bewertungen auf.")
                             .font(.footnote)
@@ -82,6 +91,17 @@ struct CaptureView: View {
             Text("Die App konnte die Bildergalerie dieser Seite nicht vollständig durchblättern. Öffne die Galerie des Inserats selbst, blättere bis zum Ende und tippe noch einmal auf „Übernehmen“. Der Zähler unten zählt mit.")
         }
         .task {
+            guard automatic else { return }
+            // Give the page time to load and to fill in its price, then read it without waiting for a tap.
+            for _ in 0..<40 {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { return }
+                if !page.isLoading { break }
+            }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled && !sending { capture() }
+        }
+        .task {
             // Shows the count growing while the gallery is flipped through.
             while !Task.isCancelled {
                 await page.refreshPictureCount()
@@ -95,7 +115,7 @@ struct CaptureView: View {
         error = nil
         Task {
             do {
-                let captured = try await page.capture()
+                let captured = try await page.capture(quick: automatic)
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
@@ -119,7 +139,7 @@ struct CaptureView: View {
         held = nil
         Task {
             do {
-                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID)
+                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip)
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
                 dismiss()
@@ -579,11 +599,15 @@ final class WebPage: NSObject, WKNavigationDelegate {
     ///
     /// The advert itself is read first. Gallery and reviews are opened afterwards, because on some sites
     /// either leads to a page of its own: the advert must not be lost to it.
-    func capture() async throws -> Captured {
+    /// `quick` reads only the page itself, for a price and availability check: no gallery, no reviews.
+    func capture(quick: Bool = false) async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()
         var photos = await pictures()
+        if quick {
+            return Captured(html: Self.append(pictures: photos, to: advert), pictures: photos.filter(\.gallery).count, reviews: 0)
+        }
 
         progress = "Blättere die Bildergalerie durch …"
         let gallery = await run(Self.browseGallery)

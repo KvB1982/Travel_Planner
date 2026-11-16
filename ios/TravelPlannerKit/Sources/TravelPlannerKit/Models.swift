@@ -231,6 +231,8 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var availabilityCheckedAt: Date?
     /// The platform turns the server away; checking needs a device.
     public var needsDevice: Bool?
+    /// The advert's page for the dates and party of the trip.
+    public var checkUrl: String?
 
     /// The offer cannot be booked for the trip's dates, as far as the last check knows.
     public var isUnavailable: Bool {
@@ -551,6 +553,33 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
         if let cover = listing.coverImageUrl, !cover.isEmpty { return [Photo(id: "cover", url: cover)] }
         return []
     }
+}
+
+/// Answer to "check all offers of the trip": who checks what.
+public struct TripCheck: Codable, Hashable, Sendable {
+    public struct Check: Codable, Hashable, Sendable, Identifiable {
+        public var candidateId: String
+        public var platform: String?
+        /// "server": read in the background. "device": only a device can read it. "skipped": read a moment ago.
+        public var mode: String
+        public var needsDevice: Bool?
+        public var checkUrl: String?
+        public var id: String { candidateId }
+
+        public init(candidateId: String, platform: String? = nil, mode: String, needsDevice: Bool? = nil, checkUrl: String? = nil) {
+            self.candidateId = candidateId; self.platform = platform; self.mode = mode; self.needsDevice = needsDevice; self.checkUrl = checkUrl
+        }
+
+        /// Worth opening on the device: the server cannot read it, or sees too little on this platform to tell
+        /// whether the dates are free.
+        public var wantsDevice: Bool {
+            guard let checkUrl, !checkUrl.isEmpty, mode != "skipped" else { return false }
+            return mode == "device" || needsDevice == true || platform == "airbnb" || platform == "vrbo"
+        }
+    }
+    public var checks: [Check]
+
+    public init(checks: [Check]) { self.checks = checks }
 }
 
 public struct ImportResult: Codable, Hashable, Sendable {
