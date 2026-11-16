@@ -124,13 +124,19 @@ export function ledgerRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid);
-    const body = parseBody(z.object(expenseFields), req.body);
+    const { clientId, ...body } = parseBody(z.object({ ...expenseFields, clientId: z.string().uuid().optional() }), req.body);
+    // Sent before, perhaps while the answer got lost on the way: the entry is there already.
+    const known = async () => (clientId ? (await db.select().from(expenses).where(and(eq(expenses.tripId, tripId), eq(expenses.clientId, clientId))).limit(1))[0] : undefined);
+    const before = await known();
+    if (before) return reply.code(200).send({ expense: before, ledger: await ledger(tripId, uid) });
     await checkExpense(tripId, body);
     if (body.mode === "custom" && !Object.values(body.weights).some((w) => w > 0)) throw new HttpError(400, "invalid_request", "Eine eigene Aufteilung braucht mindestens einen Anteil.");
     const [expense] = await db
       .insert(expenses)
-      .values({ tripId, title: body.title, amountCents: body.amountCents, category: body.category ?? null, spentOn: body.spentOn ?? new Date().toISOString().slice(0, 10), paidBy: body.paidBy, mode: body.mode ?? null, among: body.among, weights: body.weights, note: body.note ?? null, createdBy: uid })
+      .values({ tripId, title: body.title, amountCents: body.amountCents, category: body.category ?? null, spentOn: body.spentOn ?? new Date().toISOString().slice(0, 10), paidBy: body.paidBy, mode: body.mode ?? null, among: body.among, weights: body.weights, note: body.note ?? null, createdBy: uid, clientId: clientId ?? null })
+      .onConflictDoNothing()
       .returning();
+    if (!expense) return reply.code(200).send({ expense: await known(), ledger: await ledger(tripId, uid) });
     await logActivity(ctx, tripId, uid, "expense_added", { expenseId: expense!.id, amountCents: body.amountCents });
     return reply.code(201).send({ expense, ledger: await ledger(tripId, uid) });
   });

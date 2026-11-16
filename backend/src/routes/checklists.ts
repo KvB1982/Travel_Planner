@@ -66,11 +66,17 @@ export function checklistRoutes(app: FastifyInstance, ctx: AppContext): void {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid);
-    const body = parseBody(z.object({ ...itemFields, list: itemFields.list.default("packing"), done: itemFields.done.default(false), private: itemFields.private.default(false), position: itemFields.position.optional() }), req.body);
+    const body = parseBody(z.object({ ...itemFields, list: itemFields.list.default("packing"), done: itemFields.done.default(false), private: itemFields.private.default(false), position: itemFields.position.optional(), clientId: z.string().uuid().optional() }), req.body);
+    // Sent before from a device that was offline: the entry is there already.
+    const known = async () => (body.clientId ? (await db.select().from(checklistItems).where(and(eq(checklistItems.tripId, tripId), eq(checklistItems.clientId, body.clientId))).limit(1))[0] : undefined);
+    const before = await known();
+    if (before) return reply.code(200).send({ item: before, checklists: await lists(tripId, uid) });
     const [item] = await db
       .insert(checklistItems)
       .values({ ...body, tripId, position: body.position ?? (await nextPosition(tripId, body.list)), createdBy: uid, ...(body.done ? { doneBy: uid, doneAt: new Date() } : {}) })
+      .onConflictDoNothing()
       .returning();
+    if (!item) return reply.code(200).send({ item: await known(), checklists: await lists(tripId, uid) });
     return reply.code(201).send({ item, checklists: await lists(tripId, uid) });
   });
 

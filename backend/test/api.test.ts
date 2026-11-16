@@ -869,6 +869,28 @@ describe("on the trip", () => {
   });
 });
 
+describe("written offline", () => {
+  it("keeps an entry once when the device sends it twice", async () => {
+    const s = await setup();
+    const parties = (await s.call("POST", `/trips/${s.tripId}/parties/suggest`, s.owner)).body.ledger.parties as { id: string }[];
+    const clientId = "7b0e3c1a-5a57-4c0e-9d0e-0d6f1f2a3b4c";
+    const expense = { title: "Eis", amountCents: 1200, paidBy: parties[0]!.id, clientId };
+    const first = await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, expense);
+    expect(first.status).toBe(201);
+    const again = await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, expense);
+    expect(again.status).toBe(200);
+    expect(again.body.expense.id).toBe(first.body.expense.id);
+    expect(again.body.ledger.totalCents).toBe(1200);
+
+    const item = { title: "Sonnencreme", clientId };
+    const one = await s.call("POST", `/trips/${s.tripId}/checklist-items`, s.owner, item);
+    const two = await s.call("POST", `/trips/${s.tripId}/checklist-items`, s.owner, item);
+    expect([one.status, two.status]).toEqual([201, 200]);
+    expect(two.body.item.id).toBe(one.body.item.id);
+    expect(two.body.checklists.lists.find((l: { list: string }) => l.list === "packing").total).toBe(1);
+  });
+});
+
 describe("sign in with Apple", () => {
   it("opens the linked account and nothing else", async () => {
     const { generateKeyPairSync, createSign } = await import("node:crypto");
