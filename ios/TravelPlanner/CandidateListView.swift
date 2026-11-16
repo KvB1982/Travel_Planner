@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import TravelPlannerKit
 
@@ -452,11 +453,19 @@ struct CandidateListView: View {
                 if !hiddenPage.isLoading { break }
             }
             try? await Task.sleep(for: .seconds(2))
-            if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
+            let platform = check.platform ?? "?"
+            if await hiddenPage.isChallenge() {
+                WebPage.log.info("Prüflauf \(platform, privacy: .public): Sicherheitsabfrage")
+                needsPerson.append(check); continue
+            }
             await hiddenPage.waitForPrice()
-            if await hiddenPage.lacksDates() { withoutDates += 1; continue }
+            if await hiddenPage.lacksDates() {
+                WebPage.log.info("Prüflauf \(platform, privacy: .public): Seite ohne Zeitraum")
+                withoutDates += 1; continue
+            }
             do {
                 let captured = try await hiddenPage.capture(quick: true)
+                WebPage.log.info("Prüflauf \(platform, privacy: .public): \(captured.html.count) Zeichen gelesen")
                 if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
                 guard captured.html.count >= 500 else { failed += 1; continue }
                 try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,

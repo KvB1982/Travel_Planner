@@ -94,8 +94,9 @@ struct CandidateDetailView: View {
             // Only further sources are named; without a name the page counts for the leading source, on any server.
             CaptureView(source: source, candidateID: candidateID,
                         sourceID: source.id == detail?.sources.first?.id || source.primary == true ? nil : source.id,
-                        expectedPictures: expectedPictures(for: source)) { pictures, reviews in
-                sentNote = "Gesendet: \(pictures == 1 ? "1 Bild" : "\(pictures) Bilder") und \(reviews == 1 ? "1 Bewertung" : "\(reviews) Bewertungen") im Wortlaut. Der Server wertet das jetzt aus, das dauert bis zu einer Minute."
+                        expectedPictures: expectedPictures(for: source),
+                        knownPictures: source.id == detail?.sources.first?.id || source.primary == true ? detail?.photos?.count ?? 0 : 0) { pictures, reviews in
+                sentNote = "Gesendet: \(pictures == 0 ? "keine neuen Bilder" : pictures == 1 ? "1 Bild" : "\(pictures) Bilder") und \(reviews == 1 ? "1 Bewertung" : "\(reviews) Bewertungen") im Wortlaut. Der Server wertet das jetzt aus, das dauert bis zu einer Minute."
             }
         }
     }

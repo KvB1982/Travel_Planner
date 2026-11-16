@@ -25,11 +25,15 @@ struct CaptureView: View {
     /// How many photos the advert is known to have, to warn before a reading that would bring far fewer.
     /// Nil where the server gets the photos from the page itself and the count seen here does not matter.
     var expectedPictures: Int?
+    /// How many photos of this offer the server already holds. With enough of them the gallery is not read again.
+    var knownPictures = 0
     /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
     var onSent: (_ pictures: Int, _ reviews: Int) -> Void = { _, _ in }
 
     @State private var page = WebPage()
     @State private var sending = false
+    /// Browse the gallery and send its photos. Off by default when the offer has its photos already.
+    @State private var readPictures = true
     @State private var confirmFewPictures = false
     /// The site showed a "bot or human?" question; the automatic run has stopped and waits for the person.
     @State private var gate = false
@@ -50,7 +54,9 @@ struct CaptureView: View {
                              ? "Prüfe Preis und Verfügbarkeit für euren Zeitraum\(progressLabel.map { " (\($0))" } ?? "") … Die Seite wird gleich von selbst gelesen."
                              : sending
                              ? (page.progress ?? "Lese die Seite …") + " Das dauert bis zu einer Minute, bitte nichts antippen."
-                             : "Stelle Zeitraum und Personen ein und tippe auf „Übernehmen“. Die App blättert dann selbst durch die Bildergalerie und klappt die Bewertungen auf.")
+                             : readPictures
+                             ? "Stelle Zeitraum und Personen ein und tippe auf „Übernehmen“. Die App blättert dann selbst durch die Bildergalerie und klappt die Bewertungen auf."
+                             : "Stelle Zeitraum und Personen ein und tippe auf „Übernehmen“. Die Bilder bleiben, wie sie sind, die App klappt nur die Bewertungen auf.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -59,6 +65,11 @@ struct CaptureView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(page.pictureCount + page.reviewCount > 0 ? Color.accentColor : Color.secondary)
                             .contentTransition(.numericText())
+                    }
+                    if knownPictures >= 5, !automatic {
+                        Toggle("Bilder neu einlesen (\(knownPictures) sind schon da)", isOn: $readPictures)
+                            .font(.footnote)
+                            .disabled(sending)
                     }
                     Button {
                         capture()
@@ -82,6 +93,7 @@ struct CaptureView: View {
             }
         }
         .onAppear {
+            readPictures = knownPictures < 5
             if let url = URL(string: source.url) { page.load(url) }
         }
         // The automatic browsing found far fewer photos than the advert has: ask before a poorer set is sent.
@@ -129,7 +141,7 @@ struct CaptureView: View {
                     gate = true
                     throw APIError(status: 0, code: "no_dates", message: "Die Seite hat den Zeitraum der Reise nicht übernommen und zeigt keinen Preis dafür. Stelle Zeitraum und Gäste hier auf der Seite selbst ein und tippe dann auf „Übernehmen“. Oder brich ab, dann bleibt dieses Angebot ungeprüft.")
                 }
-                let captured = try await page.capture(quick: automatic)
+                let captured = try await page.capture(quick: automatic, gallery: readPictures)
                 if await page.isChallenge() {
                     gate = true
                     throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“.")
@@ -137,7 +149,7 @@ struct CaptureView: View {
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
-                if let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < expectedPictures {
+                if readPictures, let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < expectedPictures {
                     held = captured
                     sending = false
                     confirmFewPictures = true
@@ -173,7 +185,7 @@ struct CaptureView: View {
 @MainActor
 @Observable
 final class WebPage: NSObject, WKNavigationDelegate {
-    private static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Auslesen")
+    static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Auslesen")
     let webView: WKWebView
     var isLoading = false
     /// Large pictures the page has shown so far, including ones a gallery has since swapped out.
@@ -668,13 +680,22 @@ final class WebPage: NSObject, WKNavigationDelegate {
     /// The advert itself is read first. Gallery and reviews are opened afterwards, because on some sites
     /// either leads to a page of its own: the advert must not be lost to it.
     /// `quick` reads only the page itself, for a price and availability check: no gallery, no reviews.
-    func capture(quick: Bool = false) async throws -> Captured {
+    /// `gallery: false` leaves the photos alone, for an offer whose photos the server already has: the gallery is
+    /// not browsed and no photos are sent, so the stored ones stay as they are.
+    func capture(quick: Bool = false, gallery readGallery: Bool = true) async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()
         var photos = await pictures()
         if quick {
             return Captured(html: Self.append(pictures: photos, to: advert), pictures: photos.filter(\.gallery).count, reviews: 0)
+        }
+        if !readGallery {
+            progress = "Klappe die Bewertungen auf …"
+            let reviews = await run(Self.expandReviews)
+            progress = nil
+            let page = reviews.stayed ? ((try? await outerHTML()) ?? advert) : advert
+            return Captured(html: Self.append(reviews: reviews.reviews, to: page), pictures: 0, reviews: reviews.reviews.count)
         }
 
         progress = "Blättere die Bildergalerie durch …"
