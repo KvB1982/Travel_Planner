@@ -407,6 +407,78 @@ final class GroupingTests: XCTestCase {
     }
 }
 
+final class CriteriaAndSortingTests: XCTestCase {
+    func testServerShapesDecode() throws {
+        let list = try APIClient.decoder.decode(CriteriaList.self, from: Data("""
+        {"criteria":[{"id":"a","key":"bedrooms","label":null,"level":"must","target":4},
+                     {"id":"b","key":"amenities.pool","label":null,"level":"wish","target":null},
+                     {"id":"c","key":"custom","label":"Ruhige Lage","level":"must","target":null}],
+         "measurable":[{"key":"bedrooms","label":"Schlafzimmer","group":"space","format":"number","rule":"min"}]}
+        """.utf8))
+        XCTAssertEqual(list.criteria.map(\.isMust), [true, false, true])
+        XCTAssertEqual(list.measurable?.first?.rule, "min")
+        let verdict = try APIClient.decoder.decode(CriteriaVerdict.self, from: Data("""
+        {"light":"yellow","must":{"met":2,"missed":0,"unknown":1},"wish":{"met":1,"missed":1,"unknown":0},
+         "results":[{"id":"a","key":"bedrooms","label":"Schlafzimmer","level":"must","rule":"min","format":"number","target":4,"value":5,"status":"met","manual":false},
+                    {"id":"b","key":"amenities.pool","label":"Pool","level":"wish","rule":"yes","format":"boolean","target":null,"value":false,"status":"missed","manual":false},
+                    {"id":"c","key":"custom","label":"Ruhige Lage","level":"must","rule":null,"format":null,"target":null,"value":null,"status":"unknown","manual":false}]}
+        """.utf8))
+        XCTAssertEqual(verdict.rank, 1)
+        XCTAssertEqual(verdict.results?.map { $0.value?.text }, ["5", "Nein", nil])
+        let period = try APIClient.decoder.decode(OfferPeriod.self, from: Data(#"{"dateOptionId":"d1","label":null,"startDate":"2027-05-15","endDate":"2027-05-29","availability":"unavailable","totalCents":null,"kind":null,"checkedAt":null,"checkUrl":null}"#.utf8))
+        XCTAssertEqual(period.availability, "unavailable")
+    }
+
+    func testTrafficLightInSampleData() async throws {
+        let demo = DemoBackend()
+        var list = try await demo.candidates(tripId: "t-1")
+        XCTAssertNil(list.first?.criteria, "ohne Kriterien keine Ampel")
+        let saved = try await demo.setCriteria(tripId: "t-1", criteria: [
+            Criterion(key: "bedrooms", level: "must", target: 5),
+            Criterion(key: "amenities.petsAllowed", level: "wish"),
+            Criterion(key: "custom", label: "Ruhige Lage", level: "wish"),
+        ])
+        XCTAssertFalse(saved.criteria.contains { $0.id.isEmpty })
+        list = try await demo.candidates(tripId: "t-1")
+        let light = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.criteria?.light) })
+        XCTAssertEqual(light["c-1"], "red", "4 Schlafzimmer bei Muss 5")
+        XCTAssertEqual(light["c-5"], "yellow", "5 Schlafzimmer, aber Haustiere unbekannt")
+        let detail = try await demo.candidate("c-1")
+        XCTAssertEqual(detail.criteria?.results?.first?.status, "missed")
+        // A verdict by hand beats the measured value.
+        try await demo.setCriteriaChecks(candidateId: "c-1", checks: [saved.criteria[0].id: "met"])
+        let after = try await demo.candidate("c-1")
+        XCTAssertEqual(after.criteria?.results?.first?.status, "met")
+        XCTAssertEqual(after.criteria?.results?.first?.manual, true)
+    }
+
+    private func offer(_ id: String, cents: Int?, forTrip: Bool = true, available: Bool? = nil, rating: Rating? = nil,
+                       light: String? = nil, yes: Int = 0, no: Int = 0) -> CandidateSummary {
+        var summary = CandidateSummary(id: id, addedBy: "A", listing: ListingSummary(id: "l" + id, rating: rating),
+                                       price: cents.map { PriceSummary(totalCents: $0, forThisTrip: forTrip, available: available) },
+                                       votes: VoteTally(yes: yes, no: no))
+        summary.criteria = light.map { CriteriaVerdict(light: $0) }
+        return summary
+    }
+
+    func testSortingKeepsEverythingAndPutsUnknownLast() {
+        let offers = [
+            offer("a", cents: 500_000, rating: Rating(value: 4.5, scale: 5), light: "yellow", yes: 1),
+            offer("b", cents: nil, rating: Rating(value: 9.4, scale: 10), light: "green"),
+            offer("c", cents: 300_000, forTrip: false, light: "red", no: 2),
+            offer("d", cents: 420_000, rating: nil, light: nil, yes: 3),
+            offer("e", cents: 100_000, available: false, rating: Rating(value: 4.9, scale: 5)),
+        ]
+        XCTAssertEqual(OfferSort.added.sorted(offers).map(\.id), ["a", "b", "c", "d", "e"])
+        XCTAssertEqual(OfferSort.price.sorted(offers).map(\.id), ["d", "a", "b", "c", "e"],
+                       "Linkpreis und nicht verfügbar zählen nicht als Preis")
+        XCTAssertEqual(OfferSort.rating.sorted(offers).map(\.id), ["e", "b", "a", "c", "d"], "4,9 von 5 vor 9,4 von 10")
+        XCTAssertEqual(OfferSort.criteria.sorted(offers).map(\.id), ["b", "a", "c", "d", "e"])
+        XCTAssertEqual(OfferSort.votes.sorted(offers).map(\.id), ["d", "a", "c", "b", "e"])
+        for sort in OfferSort.allCases { XCTAssertEqual(Set(sort.sorted(offers).map(\.id)).count, 5) }
+    }
+}
+
 final class DemoBackendTests: XCTestCase {
     func testVoteAndCountsStayConsistent() async throws {
         let demo = DemoBackend()

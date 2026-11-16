@@ -21,6 +21,11 @@ struct CandidateListView: View {
     @State private var moving: CandidateSummary?
     @State private var showCompare = false
     @State private var showPresentation = false
+    @State private var showCriteria = false
+    @AppStorage("offerSort") private var sortRaw = OfferSort.added.rawValue
+    @State private var onlyAvailable = false
+    /// The period that prices and availability refer to; nil means the earliest of the trip.
+    @State private var periodID: String?
     @State private var showMap = false
     /// "2 von 5" while all offers are being checked; nil otherwise.
     @State private var checking: String?
@@ -37,12 +42,15 @@ struct CandidateListView: View {
     /// Adverts the hidden run could not read because the site wants a person; shown once the summary is closed.
     @State private var pendingVisible: [TripCheck.Check] = []
 
+    private var sort: OfferSort { OfferSort(rawValue: sortRaw) ?? .added }
+
     private var visible: [CandidateSummary] {
-        candidates.filter { candidate in
+        sort.sorted(candidates.filter { candidate in
             if let country, OfferGrouping.country(of: candidate) != country { return false }
+            if onlyAvailable && candidate.isUnavailable { return false }
             if let filter { return candidate.status == filter }
             return candidate.status != .rejected
-        }
+        })
     }
 
     /// What the presentation walks through: the offers on screen that are still in the running.
@@ -80,6 +88,15 @@ struct CandidateListView: View {
                 }
             }
             Spacer()
+            Menu {
+                Picker("Sortieren", selection: $sortRaw) {
+                    ForEach(OfferSort.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Toggle("Nur verfügbare zeigen", isOn: $onlyAvailable)
+            } label: {
+                Label("Sortieren und filtern", systemImage: sort == .added && !onlyAvailable ? "arrow.up.arrow.down" : "arrow.up.arrow.down.circle.fill")
+                    .labelStyle(.iconOnly)
+            }
         }
         .pickerStyle(.menu)
         .textCase(nil)
@@ -90,6 +107,15 @@ struct CandidateListView: View {
             if let detail {
                 Section {
                     TripHeader(detail: detail)
+                    if detail.dateOptions.count > 1 {
+                        // Prices, availability and the check refer to the period chosen here.
+                        Picker("Zeitraum", selection: $periodID) {
+                            ForEach(Array(detail.dateOptions.enumerated()), id: \.element.id) { index, option in
+                                Text(option.label ?? Format.dateRange(option.startDate, option.endDate) ?? "Zeitraum \(index + 1)")
+                                    .tag(index == 0 ? String?.none : String?.some(option.id))
+                            }
+                        }
+                    }
                     if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
                         Button {
                             confirmCheck = true
@@ -178,6 +204,11 @@ struct CandidateListView: View {
                     Button("Vergleichen", systemImage: "rectangle.split.3x1") { showCompare = true }
                 }
             }
+            if detail?.role.canEdit ?? false, detail?.trip.isWatchlist != true {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Kriterien", systemImage: "checklist") { showCriteria = true }
+                }
+            }
             // The watchlist is personal: nobody can be invited to it.
             if detail?.role == .organizer, detail?.trip.isWatchlist != true {
                 ToolbarItem(placement: .secondaryAction) {
@@ -219,6 +250,7 @@ struct CandidateListView: View {
             // Rejected offers stay off the map unless the list is filtered to show them.
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
+        .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
         .fullScreenCover(isPresented: $showPresentation) {
             PresentationView(candidates: presentable, persons: detail?.trip.persons)
         }
@@ -237,7 +269,7 @@ struct CandidateListView: View {
         .sheet(item: $deviceCheck, onDismiss: nextDeviceCheck) { check in
             let url = check.checkUrl ?? ""
             CaptureView(source: ListingSource(id: check.candidateId, platform: check.platform ?? "other", url: url, canonicalUrl: url),
-                        candidateID: check.candidateId, forTrip: true, automatic: true,
+                        candidateID: check.candidateId, forTrip: true, dateOptionID: periodID, automatic: true,
                         progressLabel: "\(deviceTotal - deviceQueue.count) von \(deviceTotal)") { _, _ in deviceDone += 1 }
         }
         .sheet(item: $moving) { candidate in
@@ -249,6 +281,7 @@ struct CandidateListView: View {
             InviteSheet(invite: invite)
         }
         .refreshable { await load() }
+        .onChange(of: periodID) { model.dataChanged() }
         .task(id: model.revision) {
             await load()
             // Imports finish in the background on the server; look again until none is pending.
@@ -264,7 +297,7 @@ struct CandidateListView: View {
         guard let backend = model.backend else { return }
         do {
             async let trip = backend.trip(tripID)
-            async let list = backend.candidates(tripId: tripID)
+            async let list = backend.candidates(tripId: tripID, dateOptionId: periodID)
             (detail, candidates) = try await (trip, list)
             error = nil
         } catch is CancellationError {
@@ -314,7 +347,7 @@ struct CandidateListView: View {
         checking = "alle Angebote"
         Task {
             do {
-                let result = try await backend.checkTrip(tripId: tripID)
+                let result = try await backend.checkTrip(tripId: tripID, dateOptionId: periodID)
                 model.dataChanged()
                 let onDevice = result.checks.filter(\.wantsDevice)
                 deviceTotal = onDevice.count
@@ -360,12 +393,13 @@ struct CandidateListView: View {
                 if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
                 guard captured.html.count >= 500 else { failed += 1; continue }
                 try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,
-                                          url: hiddenPage.advertURL ?? address)
+                                          url: hiddenPage.advertURL ?? address, dateOptionId: periodID)
                 done += 1
                 model.dataChanged()
             } catch {
                 failed += 1
-                if (error as? APIError)?.isUnauthorized == true { notice = model.message(for: error); return }
+                // Signed out, or the day's allowance on the server is used up: going on would fail the same way.
+                if let api = error as? APIError, api.isUnauthorized || api.code == "daily_limit" { notice = model.message(for: error); return }
             }
         }
         hiddenPage.load(URL(string: "about:blank")!)
@@ -500,6 +534,7 @@ private struct CandidateRow: View {
                 HStack(spacing: 6) {
                     if candidate.status == .favorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
                     if candidate.status == .booked { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
+                    if let verdict = candidate.criteria { CriteriaLight(verdict: verdict).font(.subheadline) }
                     Text(candidate.listing.title ?? "Angebot wird gelesen …").font(.headline).lineLimit(2)
                 }
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

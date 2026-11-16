@@ -21,15 +21,21 @@ public protocol TravelBackend: Sendable {
     func trip(_ id: String) async throws -> TripDetail
     func createTrip(_ trip: NewTrip) async throws -> Trip
     func createInvite(tripId: String, role: MemberRole) async throws -> Invite
-    func candidates(tripId: String) async throws -> [CandidateSummary]
+    /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
+    func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
+    func criteria(tripId: String) async throws -> CriteriaList
+    /// Replaces the criteria of the trip. Entries that keep their id keep the verdicts given by hand.
+    func setCriteria(tripId: String, criteria: [Criterion]) async throws -> CriteriaList
+    /// Sets the verdicts given by hand for one offer, by criterion id: "met" or "missed". Replaces all earlier ones.
+    func setCriteriaChecks(candidateId: String, checks: [String: String]) async throws
     func candidate(_ id: String) async throws -> CandidateDetail
     func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult
     /// Hands a page read on the device to the server. `sourceId` names the source it belongs to; nil means the leading one.
     /// `forTrip` says the page was opened for the dates and party of the trip, so its price and availability count for it.
     /// `url` is the address the page was read from, so the server can tell which dates it was opened for.
-    func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws
+    func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?, dateOptionId: String?) async throws
     /// Checks every offer of the trip for its dates and party. Tells which offers a device has to read.
-    func checkTrip(tripId: String) async throws -> TripCheck
+    func checkTrip(tripId: String, dateOptionId: String?) async throws -> TripCheck
     /// Starts the search for the same house on other platforms. Costs money on the server, so only on request.
     func searchOtherPlatforms(candidateId: String) async throws
     /// Confirms or dismisses a page the search suggested.
@@ -207,9 +213,26 @@ public struct APIClient: TravelBackend {
         return try await send("POST", "/trips/\(tripId.pathEscaped)/invites", body: Body(role: role, maxUses: 1, expiresInDays: 14))
     }
 
-    public func candidates(tripId: String) async throws -> [CandidateSummary] {
+    public func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary] {
         struct Response: Decodable { var candidates: [CandidateSummary] }
-        return try await (send("GET", "/trips/\(tripId.pathEscaped)/candidates") as Response).candidates
+        let query = dateOptionId.map { "?dateOptionId=\($0.pathEscaped)" } ?? ""
+        return try await (send("GET", "/trips/\(tripId.pathEscaped)/candidates\(query)") as Response).candidates
+    }
+
+    public func criteria(tripId: String) async throws -> CriteriaList {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/criteria")
+    }
+
+    public func setCriteria(tripId: String, criteria: [Criterion]) async throws -> CriteriaList {
+        struct Entry: Encodable { var id: String?; var key: String; var label: String?; var level: String; var target: Double? }
+        struct Body: Encodable { var criteria: [Entry] }
+        let entries = criteria.map { Entry(id: $0.id.isEmpty ? nil : $0.id, key: $0.key, label: $0.label, level: $0.level, target: $0.target) }
+        return try await send("PUT", "/trips/\(tripId.pathEscaped)/criteria", body: Body(criteria: entries))
+    }
+
+    public func setCriteriaChecks(candidateId: String, checks: [String: String]) async throws {
+        struct Body: Encodable { var criteriaChecks: [String: String] }
+        _ = try await data("PATCH", "/candidates/\(candidateId.pathEscaped)", body: Body(criteriaChecks: checks))
     }
 
     public func candidate(_ id: String) async throws -> CandidateDetail {
@@ -222,16 +245,17 @@ public struct APIClient: TravelBackend {
         return try await send("POST", "/trips/\(tripId.pathEscaped)/imports", body: Body(url: url, html: page))
     }
 
-    public func checkTrip(tripId: String) async throws -> TripCheck {
-        try await send("POST", "/trips/\(tripId.pathEscaped)/refresh")
+    public func checkTrip(tripId: String, dateOptionId: String?) async throws -> TripCheck {
+        struct Body: Encodable { var dateOptionId: String? }
+        return try await send("POST", "/trips/\(tripId.pathEscaped)/refresh", body: dateOptionId.map { Body(dateOptionId: $0) })
     }
 
-    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws {
-        struct Body: Encodable { var html: String; var sourceId: String?; var forTrip: Bool?; var url: String? }
+    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?, dateOptionId: String?) async throws {
+        struct Body: Encodable { var html: String; var sourceId: String?; var forTrip: Bool?; var url: String?; var dateOptionId: String? }
         guard html.utf8.count <= Self.maxPageBytes else {
             throw APIError(status: 0, code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen.")
         }
-        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, sourceId: sourceId, forTrip: forTrip ? true : nil, url: url))
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, sourceId: sourceId, forTrip: forTrip ? true : nil, url: url, dateOptionId: forTrip ? dateOptionId : nil))
     }
 
     public func searchOtherPlatforms(candidateId: String) async throws {
@@ -305,6 +329,18 @@ extension String {
 
 public extension TravelBackend {
     func capture(candidateId: String, html: String, sourceId: String?) async throws {
-        try await capture(candidateId: candidateId, html: html, sourceId: sourceId, forTrip: false, url: nil)
+        try await capture(candidateId: candidateId, html: html, sourceId: sourceId, forTrip: false, url: nil, dateOptionId: nil)
+    }
+
+    func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws {
+        try await capture(candidateId: candidateId, html: html, sourceId: sourceId, forTrip: forTrip, url: url, dateOptionId: nil)
+    }
+
+    func candidates(tripId: String) async throws -> [CandidateSummary] {
+        try await candidates(tripId: tripId, dateOptionId: nil)
+    }
+
+    func checkTrip(tripId: String) async throws -> TripCheck {
+        try await checkTrip(tripId: tripId, dateOptionId: nil)
     }
 }

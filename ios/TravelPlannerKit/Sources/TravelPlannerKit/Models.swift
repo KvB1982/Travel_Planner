@@ -236,6 +236,10 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var needsDevice: Bool?
     /// The advert's page for the dates and party of the trip.
     public var checkUrl: String?
+    /// How the offer does against the trip's criteria; nil when the trip has none.
+    public var criteria: CriteriaVerdict?
+    /// Price and availability for each period of the trip.
+    public var periods: [OfferPeriod]?
 
     /// The offer cannot be booked for the trip's dates, as far as the last check knows.
     public var isUnavailable: Bool {
@@ -433,6 +437,111 @@ public struct Photo: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// One requirement of the trip: a must or a wish, measured by the server or judged by people.
+public struct Criterion: Codable, Identifiable, Hashable, Sendable {
+    /// Empty for a criterion that has not been saved yet.
+    public var id: String
+    /// What is measured, such as "bedrooms" or "amenities.pool"; "custom" for one only people can judge.
+    public var key: String
+    public var label: String?
+    /// "must" or "wish".
+    public var level: String
+    public var target: Double?
+
+    public init(id: String = "", key: String, label: String? = nil, level: String = "must", target: Double? = nil) {
+        self.id = id; self.key = key; self.label = label; self.level = level; self.target = target
+    }
+
+    public var isMust: Bool { level == "must" }
+}
+
+/// Something the server can measure on a profile, offered when a criterion is added.
+public struct Measurable: Codable, Hashable, Sendable, Identifiable {
+    public var key: String
+    public var label: String
+    public var group: String?
+    public var format: String?
+    /// "min": at least the target. "max": at most. "yes": has to be there, no target.
+    public var rule: String?
+    public var id: String { key }
+
+    public init(key: String, label: String, group: String? = nil, format: String? = nil, rule: String? = nil) {
+        self.key = key; self.label = label; self.group = group; self.format = format; self.rule = rule
+    }
+}
+
+public struct CriteriaList: Codable, Hashable, Sendable {
+    public var criteria: [Criterion]
+    public var measurable: [Measurable]?
+    public init(criteria: [Criterion], measurable: [Measurable]? = nil) { self.criteria = criteria; self.measurable = measurable }
+}
+
+/// How an offer does against the criteria of its trip.
+public struct CriteriaVerdict: Codable, Hashable, Sendable {
+    public struct Count: Codable, Hashable, Sendable {
+        public var met: Int
+        public var missed: Int
+        public var unknown: Int
+        public init(met: Int = 0, missed: Int = 0, unknown: Int = 0) { self.met = met; self.missed = missed; self.unknown = unknown }
+    }
+    public struct Result: Codable, Hashable, Sendable, Identifiable {
+        public var id: String
+        public var key: String
+        public var label: String?
+        public var level: String
+        public var rule: String?
+        public var format: String?
+        public var target: Double?
+        /// The measured value: a number, yes or no, or text. Kept as shown text.
+        public var value: ShownValue?
+        /// "met", "missed" or "unknown".
+        public var status: String
+        public var manual: Bool?
+    }
+    /// "green", "yellow" or "red".
+    public var light: String
+    public var must: Count?
+    public var wish: Count?
+    public var results: [Result]?
+
+    public init(light: String, must: Count? = nil, wish: Count? = nil, results: [Result]? = nil) {
+        self.light = light; self.must = must; self.wish = wish; self.results = results
+    }
+
+    /// For sorting: green first.
+    public var rank: Int { light == "green" ? 0 : light == "yellow" ? 1 : 2 }
+}
+
+/// A value of unknown type from the server, turned into text once.
+public struct ShownValue: Codable, Hashable, Sendable {
+    public var text: String
+    public init(_ text: String) { self.text = text }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let flag = try? container.decode(Bool.self) { text = flag ? "Ja" : "Nein" }
+        else if let number = try? container.decode(Double.self) { text = Format.number(number) }
+        else { text = (try? container.decode(String.self)) ?? "" }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(text)
+    }
+}
+
+/// Price and availability of an offer for one of the trip's possible periods.
+public struct OfferPeriod: Codable, Hashable, Sendable, Identifiable {
+    public var dateOptionId: String
+    public var label: String?
+    public var startDate: String?
+    public var endDate: String?
+    public var availability: String?
+    public var totalCents: Int?
+    public var kind: PriceKind?
+    public var checkedAt: Date?
+    public var checkUrl: String?
+    public var id: String { dateOptionId }
+}
+
 /// A hint on an offer, such as "price is for six people". The group can hide hints it has dealt with.
 public struct Hint: Codable, Hashable, Sendable, Identifiable {
     public var text: String
@@ -507,6 +616,8 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     public var warnings: [Hint]?
     /// Nil on servers without the search for other platforms.
     public var otherPlatforms: OtherPlatforms?
+    /// The offer against the trip's criteria, with one result per criterion.
+    public var criteria: CriteriaVerdict?
 
     /// Hints of the offer, taken from the profile when the server sent no list of its own.
     public var hints: [Hint] {
@@ -522,7 +633,7 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews, warnings, otherPlatforms
+        case candidate, role, listing, sources, prices, votes, comments, photos, reviewSummary, reviews, warnings, otherPlatforms, criteria
     }
 
     /// The server sends the summary (`reviewSummary`) and the single reviews (`reviews`, a list) side by side.
@@ -539,6 +650,7 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
         photos = (try? container.decodeIfPresent([Photo].self, forKey: .photos)) ?? nil
         warnings = (try? container.decodeIfPresent([Hint].self, forKey: .warnings)) ?? nil
         otherPlatforms = (try? container.decodeIfPresent(OtherPlatforms.self, forKey: .otherPlatforms)) ?? nil
+        criteria = (try? container.decodeIfPresent(CriteriaVerdict.self, forKey: .criteria)) ?? nil
 
         var combined = ((try? container.decodeIfPresent(Reviews.self, forKey: .reviewSummary)) ?? nil) ?? Reviews()
         if let items = (try? container.decodeIfPresent([Reviews.Item].self, forKey: .reviews)) ?? nil {

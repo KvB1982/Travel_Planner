@@ -15,6 +15,8 @@ struct CaptureView: View {
     var sourceID: String?
     /// The page is opened for the dates and party of the trip: its price and availability count for the trip.
     var forTrip = false
+    /// Which of the trip's periods the page was opened for; nil means the earliest.
+    var dateOptionID: String?
     /// Reads and sends on its own once the page has loaded, without browsing photos and reviews.
     /// Used when all offers of a trip are checked one after the other.
     var automatic = false
@@ -156,7 +158,7 @@ struct CaptureView: View {
         Task {
             do {
                 try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip,
-                                          url: page.advertURL ?? source.url)
+                                          url: page.advertURL ?? source.url, dateOptionId: dateOptionID)
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
                 dismiss()

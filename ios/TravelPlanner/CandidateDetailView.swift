@@ -171,6 +171,12 @@ struct CandidateDetailView: View {
 
             hintsSection(detail, canEdit: canEdit)
 
+            if let verdict = detail.criteria, !(verdict.results ?? []).isEmpty {
+                CriteriaSection(verdict: verdict, canEdit: canEdit) { checks in
+                    perform { try await $0.setCriteriaChecks(candidateId: candidateID, checks: checks) }
+                }
+            }
+
             // High up on purpose: where the house is decides more than most of the rows below.
             LocationSection(detail: detail) { mapTarget = $0 }
 

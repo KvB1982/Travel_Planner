@@ -70,8 +70,16 @@ public actor DemoBackend: TravelBackend {
         Invite(token: "demo", url: "https://reisen.example/einladung/demo", role: role, expiresAt: nil, maxUses: 1)
     }
 
-    public func candidates(tripId: String) async throws -> [CandidateSummary] {
+    public func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary] {
         order.compactMap { details[$0] }.filter { $0.candidate.tripId == tripId }.map { detail in
+            var summary = summarize(detail, tripId: tripId)
+            summary.criteria = verdict(for: detail, results: false)
+            return summary
+        }
+    }
+
+    private func summarize(_ detail: CandidateDetail, tripId: String) -> CandidateSummary {
+        [detail].map { detail in
             let profile = detail.listing.profile
             let price = detail.prices.first
             return CandidateSummary(
@@ -89,10 +97,86 @@ public actor DemoBackend: TravelBackend {
                                                 forThisTrip: $0.tripId == tripId, capturedAt: $0.capturedAt, available: $0.available) },
                 votes: VoteTally(yes: detail.votes.yes, maybe: detail.votes.maybe, no: detail.votes.no, vetoes: detail.votes.vetoes),
                 myVote: detail.votes.entries.first { $0.userId == user.id }.map { Vote(verdict: $0.verdict, veto: $0.veto) })
-        }
+        }[0]
     }
 
-    public func candidate(_ id: String) async throws -> CandidateDetail { try detail(id) }
+    // MARK: Criteria. The sample data measures a handful of things, enough to show the traffic light.
+
+    private var criteriaByTrip: [String: [Criterion]] = [:]
+    private var manualChecks: [String: [String: String]] = [:]
+
+    private static let measurable = [
+        Measurable(key: "bedrooms", label: "Schlafzimmer", group: "space", format: "number", rule: "min"),
+        Measurable(key: "bathrooms", label: "Bäder", group: "space", format: "number", rule: "min"),
+        Measurable(key: "maxGuests", label: "Gäste", group: "space", format: "number", rule: "min"),
+        Measurable(key: "price.total", label: "Gesamtpreis", group: "price", format: "eur", rule: "max"),
+        Measurable(key: "amenities.pool", label: "Pool", group: "amenities", format: "boolean", rule: "yes"),
+        Measurable(key: "amenities.airConditioning", label: "Klimaanlage", group: "amenities", format: "boolean", rule: "yes"),
+        Measurable(key: "amenities.petsAllowed", label: "Haustiere erlaubt", group: "amenities", format: "boolean", rule: "yes"),
+    ]
+
+    public func criteria(tripId: String) async throws -> CriteriaList {
+        CriteriaList(criteria: criteriaByTrip[tripId] ?? [], measurable: Self.measurable)
+    }
+
+    public func setCriteria(tripId: String, criteria: [Criterion]) async throws -> CriteriaList {
+        criteriaByTrip[tripId] = criteria.map { entry in
+            var entry = entry
+            if entry.id.isEmpty { entry.id = nextID("k") }
+            return entry
+        }
+        return try await self.criteria(tripId: tripId)
+    }
+
+    public func setCriteriaChecks(candidateId: String, checks: [String: String]) async throws {
+        _ = try detail(candidateId)
+        manualChecks[candidateId] = checks
+    }
+
+    private func verdict(for detail: CandidateDetail, results wanted: Bool) -> CriteriaVerdict? {
+        let list = criteriaByTrip[detail.candidate.tripId] ?? []
+        guard !list.isEmpty else { return nil }
+        let profile = detail.listing.profile
+        var must = CriteriaVerdict.Count(), wish = CriteriaVerdict.Count()
+        var results: [CriteriaVerdict.Result] = []
+        for criterion in list {
+            let known = Self.measurable.first { $0.key == criterion.key }
+            var number: Double?
+            var flag: Bool?
+            switch criterion.key {
+            case "bedrooms": number = profile.bedrooms
+            case "bathrooms": number = profile.bathrooms
+            case "maxGuests": number = profile.maxGuests
+            case "price.total": number = detail.prices.first { $0.tripId == detail.candidate.tripId }?.totalCents.map { Double($0) / 100 }
+            default: if criterion.key.hasPrefix("amenities.") { flag = profile.amenity(String(criterion.key.dropFirst(10))) }
+            }
+            var status = "unknown"
+            if let number, let target = criterion.target {
+                status = (known?.rule == "max" ? number <= target : number >= target) ? "met" : "missed"
+            } else if let flag {
+                status = flag ? "met" : "missed"
+            }
+            let manual = manualChecks[detail.candidate.id]?[criterion.id]
+            if let manual { status = manual }
+            if criterion.isMust {
+                if status == "met" { must.met += 1 } else if status == "missed" { must.missed += 1 } else { must.unknown += 1 }
+            } else {
+                if status == "met" { wish.met += 1 } else if status == "missed" { wish.missed += 1 } else { wish.unknown += 1 }
+            }
+            results.append(.init(id: criterion.id, key: criterion.key, label: criterion.label ?? known?.label, level: criterion.level,
+                                 rule: known?.rule, format: known?.format, target: criterion.target,
+                                 value: number.map { ShownValue(Format.number($0)) } ?? flag.map { ShownValue($0 ? "Ja" : "Nein") },
+                                 status: status, manual: manual != nil))
+        }
+        let light = must.missed > 0 ? "red" : (must.unknown > 0 || wish.missed > 0 || wish.unknown > 0) ? "yellow" : "green"
+        return CriteriaVerdict(light: light, must: must, wish: wish, results: wanted ? results : nil)
+    }
+
+    public func candidate(_ id: String) async throws -> CandidateDetail {
+        var found = try detail(id)
+        found.criteria = verdict(for: found, results: true)
+        return found
+    }
 
     public func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult {
         if let existing = details.values.first(where: { $0.candidate.tripId == tripId && $0.sources.contains { $0.url == url } }) {
@@ -116,7 +200,7 @@ public actor DemoBackend: TravelBackend {
         return ImportResult(candidateId: id, duplicate: false, platform: platform)
     }
 
-    public func checkTrip(tripId: String) async throws -> TripCheck {
+    public func checkTrip(tripId: String, dateOptionId: String?) async throws -> TripCheck {
         let offers = order.compactMap { details[$0] }.filter { $0.candidate.tripId == tripId && $0.candidate.status != .rejected }
         for offer in offers { try await refresh(candidateId: offer.candidate.id) }
         return TripCheck(checks: offers.map { offer in
@@ -127,7 +211,7 @@ public actor DemoBackend: TravelBackend {
         })
     }
 
-    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws {
+    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?, dateOptionId: String?) async throws {
         var detail = try detail(candidateId)
         if forTrip {
             detail.candidate.importNote = "Für den Reisezeitraum auf dem Gerät geprüft (\(html.utf8.count / 1024) KB). In der Demo wird die Seite nicht ausgewertet."

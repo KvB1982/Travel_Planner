@@ -69,6 +69,10 @@ Im Steckbrief startet „Auf anderen Plattformen suchen“ die Suche des Servers
 
 Mit Apple Karten (MapKit, ohne Schlüssel und ohne Kosten). Der Steckbrief zeigt die Lage mit einem Ausschnitt von rund 30 km; ein Tipp öffnet die große Karte mit Satellitenansicht, festen Ausschnitten (Haus, Umgebung, Region) und dem Absprung zu Apple Karten oder Google Maps. Fehlen Koordinaten, sucht die App den Ortsnamen und zeigt einen Kreis als ungefähre Lage. „Karte“ in der Angebotsliste zeigt alle Angebote der Reise mit Preis; ein Tipp wählt aus, „Öffnen“ springt zum Steckbrief.
 
+## Kriterien, Zeiträume, Sortieren
+
+Über „…“ und „Kriterien“ legt die Reise Muss- und Wunsch-Kriterien fest (`GET`/`PUT /trips/:id/criteria`). Jedes Angebot zeigt dazu eine Ampel in der Liste und im Steckbrief die Ergebnisse je Kriterium, die sich von Hand überstimmen lassen (`criteriaChecks`). Hat eine Reise mehrere Zeiträume, schaltet ein Umschalter in der Angebotsliste um, worauf sich Preise, Verfügbarkeit und Prüflauf beziehen (`dateOptionId`). Das Menü mit den zwei Pfeilen sortiert nach Preis, Bewertung, Kriterien oder Stimmen und blendet nicht verfügbare Angebote aus. Außerdem gibt es einen Präsentationsmodus (Abspielsymbol): Angebote im Vollbild durchblättern, Wischen stimmt ab.
+
 ## Noch nicht enthalten
 
 Schnellabstimmung per Wischen, Aktivitäten, Steckbrief von Hand korrigieren, Preis von Hand eintragen, lokaler Zwischenspeicher (SwiftData), Push, „Mit Apple anmelden“.
