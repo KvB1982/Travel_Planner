@@ -33,6 +33,20 @@ public protocol TravelBackend: Sendable {
     /// Records the winner. The trip moves on to booking.
     func decide(tripId: String, candidateId: String, dateOptionId: String?) async throws -> Pitch
     func undoDecision(tripId: String) async throws -> Pitch
+    /// The shared purse: households, expenses, balances and the suggested settling payments.
+    func ledger(tripId: String) async throws -> Ledger
+    /// Sets up one household per member as a start. Fails when there are households already.
+    func suggestParties(tripId: String) async throws -> Ledger
+    /// Replaces the households. Entries that keep their id keep their expenses.
+    func setParties(tripId: String, parties: [PartyDraft]) async throws -> Ledger
+    func addExpense(tripId: String, expense: ExpenseDraft) async throws -> Ledger
+    func updateExpense(expenseId: String, expense: ExpenseDraft) async throws -> Ledger
+    func deleteExpense(expenseId: String) async throws -> Ledger
+    /// Ticks off a settling payment as made.
+    func addPayment(tripId: String, from: String, to: String, amountCents: Int) async throws -> Ledger
+    func deletePayment(tripId: String, paymentId: String) async throws -> Ledger
+    /// How the trip splits by default: "equal" or "heads", and how much a child counts.
+    func setSplit(tripId: String, splitMode: String, childWeight: Double) async throws
     func criteria(tripId: String) async throws -> CriteriaList
     /// Replaces the criteria of the trip. Entries that keep their id keep the verdicts given by hand.
     func setCriteria(tripId: String, criteria: [Criterion]) async throws -> CriteriaList
@@ -255,6 +269,49 @@ public struct APIClient: TravelBackend {
 
     public func undoDecision(tripId: String) async throws -> Pitch {
         try await send("DELETE", "/trips/\(tripId.pathEscaped)/decision")
+    }
+
+    // MARK: Shared purse
+
+    private struct LedgerAnswer: Decodable { var ledger: Ledger }
+
+    public func ledger(tripId: String) async throws -> Ledger {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/ledger")
+    }
+
+    public func suggestParties(tripId: String) async throws -> Ledger {
+        try await (send("POST", "/trips/\(tripId.pathEscaped)/parties/suggest") as LedgerAnswer).ledger
+    }
+
+    public func setParties(tripId: String, parties: [PartyDraft]) async throws -> Ledger {
+        struct Body: Encodable { var parties: [PartyDraft] }
+        return try await (send("PUT", "/trips/\(tripId.pathEscaped)/parties", body: Body(parties: parties)) as LedgerAnswer).ledger
+    }
+
+    public func addExpense(tripId: String, expense: ExpenseDraft) async throws -> Ledger {
+        try await (send("POST", "/trips/\(tripId.pathEscaped)/expenses", body: expense) as LedgerAnswer).ledger
+    }
+
+    public func updateExpense(expenseId: String, expense: ExpenseDraft) async throws -> Ledger {
+        try await (send("PATCH", "/expenses/\(expenseId.pathEscaped)", body: expense) as LedgerAnswer).ledger
+    }
+
+    public func deleteExpense(expenseId: String) async throws -> Ledger {
+        try await (send("DELETE", "/expenses/\(expenseId.pathEscaped)") as LedgerAnswer).ledger
+    }
+
+    public func addPayment(tripId: String, from: String, to: String, amountCents: Int) async throws -> Ledger {
+        struct Body: Encodable { var fromParty: String; var toParty: String; var amountCents: Int }
+        return try await (send("POST", "/trips/\(tripId.pathEscaped)/payments", body: Body(fromParty: from, toParty: to, amountCents: amountCents)) as LedgerAnswer).ledger
+    }
+
+    public func deletePayment(tripId: String, paymentId: String) async throws -> Ledger {
+        try await (send("DELETE", "/trips/\(tripId.pathEscaped)/payments/\(paymentId.pathEscaped)") as LedgerAnswer).ledger
+    }
+
+    public func setSplit(tripId: String, splitMode: String, childWeight: Double) async throws {
+        struct Body: Encodable { var splitMode: String; var childWeight: Double }
+        _ = try await data("PATCH", "/trips/\(tripId.pathEscaped)", body: Body(splitMode: splitMode, childWeight: childWeight))
     }
 
     public func criteria(tripId: String) async throws -> CriteriaList {

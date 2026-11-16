@@ -703,3 +703,83 @@ final class DemoBackendTests: XCTestCase {
         XCTAssertEqual(again.candidateId, first.candidateId)
     }
 }
+
+final class LedgerTests: XCTestCase {
+    func testAmountsAsPeopleTypeThem() {
+        XCTAssertEqual(Format.cents(from: "84,50"), 8450)
+        XCTAssertEqual(Format.cents(from: "84.5"), 8450)
+        XCTAssertEqual(Format.cents(from: "1.234,00 €"), 123_400)
+        XCTAssertEqual(Format.cents(from: "1.234"), 123_400)
+        XCTAssertEqual(Format.cents(from: "12"), 1200)
+        XCTAssertNil(Format.cents(from: ""))
+        XCTAssertNil(Format.cents(from: "0"))
+        XCTAssertNil(Format.cents(from: "abc"))
+    }
+
+    func testSharesAddUpToTheCent() {
+        let parties = ["a", "b", "c"].map { LedgerParty(id: $0, name: $0) }
+        let shares = LedgerMath.shares(of: Expense(id: "e", title: "x", amountCents: 1000, paidBy: "a"), parties: parties, splitMode: "equal", childWeight: 1)
+        XCTAssertEqual(shares?.values.reduce(0, +), 1000)
+        XCTAssertEqual(shares?.values.sorted(), [333, 333, 334])
+    }
+
+    func testHeadsCountChildrenByWeight() {
+        let parties = [LedgerParty(id: "a", name: "A", adults: 2, children: 2), LedgerParty(id: "b", name: "B", adults: 1, children: 0)]
+        let shares = LedgerMath.shares(of: Expense(id: "e", title: "x", amountCents: 8000, paidBy: "a", mode: "heads"), parties: parties, splitMode: "equal", childWeight: 0.5)
+        XCTAssertEqual(shares, ["a": 6000, "b": 2000])
+    }
+
+    func testExpenseOfRemovedHouseholdIsLeftOut() {
+        let parties = [LedgerParty(id: "a", name: "A"), LedgerParty(id: "b", name: "B")]
+        let ledger = LedgerMath.ledger(parties: parties, expenses: [Expense(id: "e", title: "x", amountCents: 500, paidBy: "weg")], payments: [],
+                                       splitMode: "equal", childWeight: 1, myPartyId: nil)
+        XCTAssertEqual(ledger.totalCents, 0)
+        XCTAssertEqual(ledger.expenses.first?.unsplit, true)
+    }
+
+    func testSampleLedgerBalancesAndSettles() async throws {
+        let demo = DemoBackend()
+        let ledger = try await demo.ledger(tripId: "t-1")
+        XCTAssertEqual(ledger.myPartyId, "p-1")
+        XCTAssertEqual(ledger.totalCents, 178_260)
+        XCTAssertEqual(ledger.parties.reduce(0) { $0 + $1.balanceCents }, 0)
+        XCTAssertEqual(ledger.parties.reduce(0) { $0 + $1.shareCents }, ledger.totalCents)
+        XCTAssertFalse(ledger.transfers.isEmpty)
+        // Ticking off every suggestion leaves nobody owing anything.
+        var settled = ledger
+        for transfer in ledger.transfers {
+            settled = try await demo.addPayment(tripId: "t-1", from: transfer.from, to: transfer.to, amountCents: transfer.amountCents)
+        }
+        XCTAssertTrue(settled.transfers.isEmpty)
+        XCTAssertTrue(settled.parties.allSatisfy { $0.balanceCents == 0 })
+    }
+
+    func testExpensesNeedHouseholdsAndCanBeChanged() async throws {
+        let demo = DemoBackend()
+        do {
+            _ = try await demo.addExpense(tripId: "t-2", expense: ExpenseDraft(title: "Fähre", amountCents: 1000, paidBy: "p"))
+            XCTFail("Ohne Haushalte darf es keine Ausgabe geben")
+        } catch let error as APIError { XCTAssertEqual(error.code, "no_parties") }
+        let start = try await demo.suggestParties(tripId: "t-2")
+        XCTAssertEqual(start.parties.count, 3)
+        let payer = start.parties[0].id
+        var ledger = try await demo.addExpense(tripId: "t-2", expense: ExpenseDraft(title: "Fähre", amountCents: 9000, paidBy: payer))
+        XCTAssertEqual(ledger.parties[0].balanceCents, 6000)
+        let id = try XCTUnwrap(ledger.expenses.first?.id)
+        ledger = try await demo.updateExpense(expenseId: id, expense: ExpenseDraft(title: "Fähre", amountCents: 9000, paidBy: payer, among: [payer, start.parties[1].id]))
+        XCTAssertEqual(ledger.parties[0].balanceCents, 4500)
+        ledger = try await demo.deleteExpense(expenseId: id)
+        XCTAssertTrue(ledger.expenses.isEmpty)
+    }
+
+    func testLedgerDecodesAndDraftSendsNullMode() throws {
+        let json = #"{"splitMode":"heads","childWeight":0.5,"myPartyId":"a","totalCents":100,"parties":[{"id":"a","name":"A","adults":2,"children":1,"memberIds":[],"paidCents":100,"shareCents":100,"balanceCents":0}],"expenses":[{"id":"e","title":"x","amountCents":100,"paidBy":"a","mode":null,"among":[],"weights":{},"spentOn":"2027-05-16","unsplit":false}],"payments":[],"transfers":[]}"#
+        let ledger = try JSONDecoder().decode(Ledger.self, from: Data(json.utf8))
+        XCTAssertEqual(ledger.childWeight, 0.5)
+        XCTAssertEqual(ledger.expenses.first?.spentOn, "2027-05-16")
+        let sent = String(decoding: try JSONEncoder().encode(ExpenseDraft(title: "x", amountCents: 1, paidBy: "a")), as: UTF8.self)
+        XCTAssertTrue(sent.contains(#""mode":null"#))
+        let party = String(decoding: try JSONEncoder().encode(PartyDraft(name: "Neu")), as: UTF8.self)
+        XCTAssertFalse(party.contains("localID"))
+    }
+}

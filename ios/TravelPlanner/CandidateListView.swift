@@ -22,6 +22,7 @@ struct CandidateListView: View {
     @State private var showCompare = false
     @State private var showPresentation = false
     @State private var showCriteria = false
+    @State private var showLedger = false
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
     @State private var phasePicked = false
@@ -238,6 +239,11 @@ struct CandidateListView: View {
                     Button("Kriterien", systemImage: "checklist") { showCriteria = true }
                 }
             }
+            if detail != nil, detail?.trip.isWatchlist != true {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Gemeinsame Kasse", systemImage: "eurosign.circle") { showLedger = true }
+                }
+            }
             // The watchlist is personal: nobody can be invited to it.
             if detail?.role == .organizer, detail?.trip.isWatchlist != true {
                 ToolbarItem(placement: .secondaryAction) {
@@ -280,6 +286,7 @@ struct CandidateListView: View {
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
+        .sheet(isPresented: $showLedger) { LedgerView(tripID: tripID, role: detail?.role ?? .guest, members: detail?.members ?? []) }
         .fullScreenCover(isPresented: $showPresentation) {
             PresentationView(candidates: presentable, persons: detail?.trip.persons)
         }

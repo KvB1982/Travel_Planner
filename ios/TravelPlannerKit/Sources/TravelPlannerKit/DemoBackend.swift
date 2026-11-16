@@ -101,6 +101,94 @@ public actor DemoBackend: TravelBackend {
         }[0]
     }
 
+    // MARK: Shared purse
+
+    private struct Purse {
+        var parties: [LedgerParty] = []
+        var expenses: [Expense] = []
+        var payments: [LedgerPayment] = []
+        var splitMode = "equal"
+        var childWeight = 1.0
+    }
+    /// The first trip comes with households and a few expenses, so the purse has something to show.
+    private var purses: [String: Purse] = ["t-1": Purse(
+        parties: [LedgerParty(id: "p-1", name: "Familie von B.", adults: 2, children: 2, memberIds: ["u-1"]),
+                  LedgerParty(id: "p-2", name: "Anna und Tom", adults: 2, children: 2, memberIds: ["u-2"]),
+                  LedgerParty(id: "p-3", name: "Jonas", adults: 1, children: 0, memberIds: ["u-3"])],
+        expenses: [Expense(id: "e-1", title: "Anzahlung Haus", amountCents: 145_800, paidBy: "p-1", spentOn: "2027-01-12", category: "Unterkunft"),
+                   Expense(id: "e-2", title: "Großeinkauf", amountCents: 23_460, paidBy: "p-2", spentOn: "2027-05-15", category: "Lebensmittel", mode: "heads"),
+                   Expense(id: "e-3", title: "Weinprobe", amountCents: 9_000, paidBy: "p-3", spentOn: "2027-05-18", category: "Ausflug",
+                           mode: "custom", weights: ["p-1": 2, "p-2": 1, "p-3": 1])])]
+
+    private func bill(_ tripId: String) throws -> Ledger {
+        _ = try tripIndex(tripId)
+        let purse = purses[tripId] ?? Purse()
+        return LedgerMath.ledger(parties: purse.parties, expenses: purse.expenses, payments: purse.payments, splitMode: purse.splitMode,
+                                 childWeight: purse.childWeight, myPartyId: purse.parties.first { $0.memberIds.contains(user.id) }?.id)
+    }
+
+    public func ledger(tripId: String) async throws -> Ledger { try bill(tripId) }
+
+    public func suggestParties(tripId: String) async throws -> Ledger {
+        guard (purses[tripId]?.parties ?? []).isEmpty else { throw APIError(status: 409, code: "already_set_up", message: "Es gibt schon Haushalte.") }
+        let members = try await trip(tripId).members
+        purses[tripId, default: Purse()].parties = members.map { LedgerParty(id: nextID("p"), name: $0.name, adults: 1, children: 0, memberIds: [$0.id]) }
+        return try bill(tripId)
+    }
+
+    public func setParties(tripId: String, parties: [PartyDraft]) async throws -> Ledger {
+        purses[tripId, default: Purse()].parties = parties.map {
+            LedgerParty(id: $0.serverID ?? nextID("p"), name: $0.name, adults: $0.adults, children: $0.children, memberIds: $0.memberIds)
+        }
+        return try bill(tripId)
+    }
+
+    private func expense(_ id: String, from draft: ExpenseDraft) -> Expense {
+        Expense(id: id, title: draft.title, amountCents: draft.amountCents, paidBy: draft.paidBy, spentOn: draft.spentOn, category: draft.category,
+                mode: draft.mode, among: draft.among, weights: draft.weights, note: draft.note)
+    }
+
+    public func addExpense(tripId: String, expense draft: ExpenseDraft) async throws -> Ledger {
+        guard !(purses[tripId]?.parties ?? []).isEmpty else { throw APIError(status: 409, code: "no_parties", message: "Lege zuerst die Haushalte an.") }
+        purses[tripId, default: Purse()].expenses.append(expense(nextID("e"), from: draft))
+        return try bill(tripId)
+    }
+
+    private func purse(ofExpense id: String) throws -> String {
+        guard let key = purses.first(where: { $0.value.expenses.contains { $0.id == id } })?.key else {
+            throw APIError(status: 404, code: "not_found", message: "Diese Ausgabe gibt es nicht.")
+        }
+        return key
+    }
+
+    public func updateExpense(expenseId: String, expense draft: ExpenseDraft) async throws -> Ledger {
+        let key = try purse(ofExpense: expenseId)
+        if let index = purses[key]?.expenses.firstIndex(where: { $0.id == expenseId }) { purses[key]?.expenses[index] = expense(expenseId, from: draft) }
+        return try bill(key)
+    }
+
+    public func deleteExpense(expenseId: String) async throws -> Ledger {
+        let key = try purse(ofExpense: expenseId)
+        purses[key]?.expenses.removeAll { $0.id == expenseId }
+        return try bill(key)
+    }
+
+    public func addPayment(tripId: String, from: String, to: String, amountCents: Int) async throws -> Ledger {
+        purses[tripId, default: Purse()].payments.append(LedgerPayment(id: nextID("z"), fromParty: from, toParty: to, amountCents: amountCents))
+        return try bill(tripId)
+    }
+
+    public func deletePayment(tripId: String, paymentId: String) async throws -> Ledger {
+        purses[tripId]?.payments.removeAll { $0.id == paymentId }
+        return try bill(tripId)
+    }
+
+    public func setSplit(tripId: String, splitMode: String, childWeight: Double) async throws {
+        _ = try tripIndex(tripId)
+        purses[tripId, default: Purse()].splitMode = splitMode
+        purses[tripId, default: Purse()].childWeight = childWeight
+    }
+
     // MARK: Phases and pitch
 
     private var finalists: [String: [String]] = [:]
