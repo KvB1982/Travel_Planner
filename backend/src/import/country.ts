@@ -32,3 +32,48 @@ export function germanCountry(raw: string | null): string | null {
   const trimmed = raw.trim();
   return table.get(key(trimmed)) ?? trimmed;
 }
+
+/** Rough outlines (south, north, west, east) of the countries holidays usually go to, islands included. */
+const OUTLINES: Record<string, [number, number, number, number]> = {
+  Kroatien: [42.3, 46.6, 13.4, 19.5],
+  Italien: [35.4, 47.2, 6.6, 18.6],
+  Spanien: [27.5, 43.9, -18.3, 4.4],
+  Frankreich: [41.3, 51.2, -5.3, 9.7],
+  Griechenland: [34.7, 41.8, 19.3, 29.7],
+  Portugal: [32.3, 42.2, -31.5, -6.1],
+  Deutschland: [47.2, 55.1, 5.8, 15.1],
+  Österreich: [46.3, 49.1, 9.5, 17.2],
+  Schweiz: [45.8, 47.9, 5.9, 10.5],
+  Dänemark: [54.5, 57.8, 8.0, 15.3],
+  Niederlande: [50.7, 53.6, 3.3, 7.3],
+  Belgien: [49.4, 51.6, 2.5, 6.5],
+  Schweden: [55.2, 69.1, 10.9, 24.2],
+  Norwegen: [57.9, 71.3, 4.4, 31.2],
+  Finnland: [59.7, 70.1, 19.4, 31.6],
+  Polen: [49.0, 54.9, 14.1, 24.2],
+  Tschechien: [48.5, 51.1, 12.0, 18.9],
+  Slowenien: [45.4, 46.9, 13.3, 16.7],
+  Ungarn: [45.7, 48.6, 16.1, 22.9],
+  Montenegro: [41.8, 43.6, 18.4, 20.4],
+  Albanien: [39.6, 42.7, 19.2, 21.1],
+  Türkei: [35.8, 42.2, 25.6, 44.9],
+  Zypern: [34.5, 35.8, 32.2, 34.7],
+  Malta: [35.7, 36.1, 14.1, 14.6],
+  Bulgarien: [41.2, 44.3, 22.3, 28.7],
+  "Vereinigtes Königreich": [49.8, 60.9, -8.7, 1.8],
+  Irland: [51.3, 55.5, -10.7, -5.9],
+  Ägypten: [21.9, 31.8, 24.6, 37.0],
+  Marokko: [27.6, 36.0, -13.3, -0.9],
+  Tunesien: [30.2, 37.6, 7.5, 11.7],
+};
+
+/**
+ * False only when the position clearly lies outside the country the advert names: pages carry
+ * other coordinates too (where the visitor or the server is), and one of those must not become the house.
+ */
+export function positionFitsCountry(lat: number, lon: number, country: string | null): boolean {
+  const box = country ? OUTLINES[germanCountry(country) ?? ""] : undefined;
+  if (!box) return true;
+  const margin = 0.5;
+  return lat >= box[0] - margin && lat <= box[1] + margin && lon >= box[2] - margin && lon <= box[3] + margin;
+}

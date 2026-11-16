@@ -41,6 +41,7 @@ Regeln:
 - Ausstattung: true nur, wenn sie genannt ist. false nur, wenn sie ausdrücklich ausgeschlossen ist. Sonst null.
 - beds zählt Betten, sleepingPlaces zählt Schlafplätze. Ein Doppelbett ist ein Bett und zwei Schlafplätze. Ein Schlafsofa zählt als Schlafplatz und gehört mit Raum in bedDetails.
 - bedDetails ist eine Liste von Objekten der Form {"room": "Schlafzimmer 1", "beds": "1 Doppelbett"}, ein Eintrag je Raum mit Schlafgelegenheit.
+- lat und lon sind ausschließlich die Position der Unterkunft (Kartenmittelpunkt des Inserats). Seiten enthalten auch den Standort des Besuchers oder eines Rechenzentrums (zum Beispiel unter userLocation, geoLocation, ipLocation, currentLocation): das ist nie die Unterkunft. Passt eine Position nicht zu Ort und Land des Inserats, bleiben lat und lon null.
 - Entfernungen in Metern, Flughafen in Kilometern. Fahrzeiten sind keine Entfernungen: lass das Feld dann null und nenne die Fahrzeit in warnings.
 - price: Beträge in Euro als Zahl. kind ist "total" bei einem Gesamtpreis für einen konkreten Zeitraum, "from" bei einem Ab-Preis, "range" bei einer Preisspanne. Nenne unter included, was laut Seite im Preis enthalten ist, und unter extraCosts jede zusätzliche oder verbrauchsabhängige Position (Endreinigung, Bettwäsche, Strom, Wasser, Kurtaxe, Servicegebühr). Jede Position hat die Form {"item": "Endreinigung", "amountEur": 120, "note": null}. amountEur ist eine Zahl oder null, wenn kein Betrag genannt ist, dann steht in note zum Beispiel "nach Verbrauch".
 - packageTrip nur bei Hotels und Pauschalreisen füllen.

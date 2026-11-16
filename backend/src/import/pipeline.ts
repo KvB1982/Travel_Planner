@@ -2,6 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { dateOptions, listings, listingSources, priceSnapshots, tripListings, trips } from "../db/schema.js";
 import { extractBlocks, profileFromBlocks } from "./blocks.js";
+import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
@@ -225,6 +226,13 @@ export async function processImport(
       profile.warnings = [...new Set([...extracted.warnings, ...fromLink])].slice(0, 5);
     }
 
+    // A position outside the advert's own country is somebody else's: the visitor's, or the server's.
+    if (profile.lat !== null && profile.lon !== null && !positionFitsCountry(profile.lat, profile.lon, profile.country)) {
+      console.warn(`import ${input.link.platform}/${input.link.externalId}: position dropped, it lies outside ${profile.country}`);
+      profile.lat = null;
+      profile.lon = null;
+      profile.uncertain = profile.uncertain.filter((u) => u !== "lat" && u !== "lon");
+    }
     // These platforms show the neighbourhood, not the house, until someone has booked.
     if (!secondary && profile.lat !== null && APPROXIMATE_POSITION.has(input.link.platform)) profile.uncertain = [...new Set([...profile.uncertain, "lat", "lon"])];
 
