@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { AppContext } from "../app.js";
-import { activities, activityResponses, bookings, listings, rooms, travelLegs, tripListings, tripParties, trips, users } from "../db/schema.js";
+import { activities, activityResponses, bookings, houseInfo, listings, rooms, travelLegs, tripListings, tripParties, trips, users } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam, type Role } from "../http.js";
 import { logActivity } from "./trips.js";
 
@@ -148,6 +148,93 @@ export function planRoutes(app: FastifyInstance, ctx: AppContext): void {
     if (named.length === 0) throw new HttpError(409, "nothing_known", "Der Steckbrief nennt keine Zimmer. Lege sie von Hand an.");
     await db.insert(rooms).values(named.map((r, position) => ({ tripId, name: r.name.slice(0, 80), beds: r.beds, position })));
     return { plan: await plan(tripId, uid) };
+  });
+
+  const houseFields = {
+    address: short(400),
+    lat: z.number().min(-90).max(90).nullish(),
+    lon: z.number().min(-180).max(180).nullish(),
+    checkInFrom: short(40),
+    checkOutUntil: short(40),
+    keyInfo: short(1000),
+    wifiName: short(120),
+    wifiPassword: short(200),
+    contactName: short(120),
+    contactPhone: short(60),
+    rules: z.string().max(5000).nullish(),
+    waste: z.string().max(2000).nullish(),
+    emergency: z.string().max(2000).nullish(),
+    notes: z.string().max(5000).nullish(),
+  };
+
+  /** The folder as the group filled it in, and beside it what the advert and the booking already say. */
+  async function house(tripId: string) {
+    const [row] = await db.select().from(houseInfo).where(eq(houseInfo.tripId, tripId)).limit(1);
+    const [trip] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
+    const [chosen] = trip?.decidedCandidateId
+      ? await db.select({ profile: listings.profile }).from(tripListings).innerJoin(listings, eq(listings.id, tripListings.listingId)).where(and(eq(tripListings.id, trip.decidedCandidateId), eq(tripListings.tripId, tripId))).limit(1)
+      : [];
+    const [stay] = await db.select().from(bookings).where(and(eq(bookings.tripId, tripId), eq(bookings.kind, "accommodation"), sql`${bookings.status} <> 'cancelled'`)).orderBy(asc(bookings.startsAt)).limit(1);
+    const p = chosen?.profile;
+    const time = (v: string | null | undefined) => (v && v.length > 10 ? v.slice(11) : null);
+    const { tripId: _t, ...own } = row ?? { tripId, ...Object.fromEntries(Object.keys(houseFields).map((k) => [k, null])), updatedBy: null, updatedAt: null };
+    return {
+      house: own,
+      suggestions: {
+        title: p?.title ?? stay?.title ?? null,
+        address: stay?.place ?? ([p?.place, p?.region, p?.country].filter(Boolean).join(", ") || null),
+        lat: p?.lat ?? null,
+        lon: p?.lon ?? null,
+        checkInFrom: time(stay?.startsAt) ?? p?.rules.checkInFrom ?? null,
+        checkOutUntil: time(stay?.endsAt) ?? p?.rules.checkOutUntil ?? null,
+        arrival: stay?.startsAt ?? null,
+        departure: stay?.endsAt ?? null,
+        bookingId: stay?.id ?? null,
+        reference: stay?.reference ?? null,
+      },
+    };
+  }
+
+  app.get("/trips/:tripId/house", async (req) => {
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, userId(req));
+    return house(tripId);
+  });
+
+  /** Only the fields that are sent change; null empties one. */
+  app.put("/trips/:tripId/house", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "member");
+    const body = parseBody(z.object(houseFields).partial(), req.body);
+    if (Object.keys(body).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");
+    const set = { ...body, updatedBy: uid, updatedAt: new Date() };
+    await db.insert(houseInfo).values({ tripId, ...set }).onConflictDoUpdate({ target: houseInfo.tripId, set });
+    return house(tripId);
+  });
+
+  /** One day of the trip at a glance. The app says which day it is where the group is. */
+  app.get("/trips/:tripId/today", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid);
+    const { date } = parseBody(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(new Date().toISOString().slice(0, 10)) }), req.query);
+    const on = (v: string | null) => v !== null && v.slice(0, 10) === date;
+    const spans = (from: string | null, to: string | null) => from !== null && from.slice(0, 10) <= date && (to ?? from).slice(0, 10) >= date;
+    const all = await plan(tripId, uid);
+    const booked = await db.select().from(bookings).where(and(eq(bookings.tripId, tripId), sql`${bookings.status} <> 'cancelled'`)).orderBy(asc(bookings.startsAt));
+    const h = await house(tripId);
+    return {
+      date,
+      arrivalDay: on(h.suggestions.arrival),
+      departureDay: on(h.suggestions.departure),
+      legs: all.legs.filter((l) => on(l.departAt) || on(l.arriveAt)),
+      activities: all.activities.filter((a) => a.status !== "cancelled" && spans(a.startsAt, a.endsAt)),
+      // Things that begin or end today: the ferry, the hire car, the house itself.
+      bookings: booked.filter((b) => on(b.startsAt) || on(b.endsAt)).map((b) => ({ id: b.id, kind: b.kind, title: b.title, startsAt: b.startsAt, endsAt: b.endsAt, place: b.place, reference: b.reference, begins: on(b.startsAt), ends: on(b.endsAt) })),
+      ideas: all.activities.filter((a) => a.status === "idea" && !a.startsAt).length,
+      ...h,
+    };
   });
 
   /** Say whether one comes along. Everyone answers for themselves. */

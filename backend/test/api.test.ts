@@ -834,6 +834,41 @@ describe("getting ready", () => {
   });
 });
 
+describe("on the trip", () => {
+  it("keeps the house folder and shows one day at a glance", async () => {
+    const s = await setup();
+    const guest = await s.join("guest", "Freund");
+    const id = (await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).body.candidateId as string;
+    await s.ctx.queue.idle();
+    const empty = (await s.call("GET", `/trips/${s.tripId}/house`, s.owner)).body;
+    expect(empty.house.wifiName).toBeNull();
+    expect(empty.suggestions.arrival).toBeNull();
+
+    await s.call("POST", `/trips/${s.tripId}/decision`, s.owner, { candidateId: id });
+    await s.call("POST", `/trips/${s.tripId}/bookings`, s.owner, { candidateId: id, status: "booked", reference: "NOV-1", startsAt: "2027-08-21T16:00", endsAt: "2027-08-28T10:00" });
+    const filled = await s.call("PUT", `/trips/${s.tripId}/house`, s.owner, { wifiName: "Villa", wifiPassword: "sonne", keyInfo: "Schlüsselkasten 4711" });
+    expect(filled.body.house).toMatchObject({ wifiName: "Villa", keyInfo: "Schlüsselkasten 4711", address: null });
+    expect(filled.body.suggestions).toMatchObject({ checkInFrom: "16:00", checkOutUntil: "10:00", reference: "NOV-1" });
+    expect(filled.body.suggestions.title).toBeTruthy();
+    expect((await s.call("PUT", `/trips/${s.tripId}/house`, s.owner, { wifiPassword: null })).body.house).toMatchObject({ wifiName: "Villa", wifiPassword: null });
+    expect((await s.call("PUT", `/trips/${s.tripId}/house`, guest, { wifiName: "x" })).status).toBe(403);
+    expect((await s.call("GET", `/trips/${s.tripId}/house`, guest)).body.house.wifiName).toBe("Villa");
+
+    await s.call("POST", `/trips/${s.tripId}/activities`, s.owner, { title: "Markt", status: "planned", startsAt: "2027-08-23T09:00" });
+    await s.call("POST", `/trips/${s.tripId}/activities`, s.owner, { title: "Irgendwann" });
+    await s.call("POST", `/trips/${s.tripId}/legs`, s.owner, { departAt: "2027-08-20T06:00", arriveAt: "2027-08-21T15:00" });
+    const arrival = (await s.call("GET", `/trips/${s.tripId}/today?date=2027-08-21`, s.owner)).body;
+    expect(arrival).toMatchObject({ date: "2027-08-21", arrivalDay: true, departureDay: false, ideas: 1 });
+    expect(arrival.legs).toHaveLength(1);
+    expect(arrival.bookings[0]).toMatchObject({ begins: true, ends: false });
+    expect(arrival.activities).toHaveLength(0);
+    const market = (await s.call("GET", `/trips/${s.tripId}/today?date=2027-08-23`, s.owner)).body;
+    expect(market.activities.map((a: { title: string }) => a.title)).toEqual(["Markt"]);
+    expect(market.bookings).toHaveLength(0);
+    expect((await s.call("GET", `/trips/${s.tripId}/today?date=morgen`, s.owner)).status).toBe(400);
+  });
+});
+
 describe("sign in with Apple", () => {
   it("opens the linked account and nothing else", async () => {
     const { generateKeyPairSync, createSign } = await import("node:crypto");

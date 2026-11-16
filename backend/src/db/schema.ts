@@ -607,3 +607,26 @@ export const activityResponses = pgTable(
   },
   (t) => [primaryKey({ columns: [t.activityId, t.userId] })],
 );
+
+/** What one needs at the house: how to get in, the WLAN, who to call. One per trip. */
+export const houseInfo = pgTable("house_info", {
+  tripId: uuid("trip_id")
+    .primaryKey()
+    .references(() => trips.id, { onDelete: "cascade" }),
+  address: text("address"),
+  lat: doublePrecision("lat"),
+  lon: doublePrecision("lon"),
+  checkInFrom: text("check_in_from"),
+  checkOutUntil: text("check_out_until"),
+  keyInfo: text("key_info"),
+  wifiName: text("wifi_name"),
+  wifiPassword: text("wifi_password"),
+  contactName: text("contact_name"),
+  contactPhone: text("contact_phone"),
+  rules: text("rules"),
+  waste: text("waste"),
+  emergency: text("emergency"),
+  notes: text("notes"),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
