@@ -431,3 +431,25 @@ Die App bucht nicht. Sie hält fest, was gebucht wurde.
 - `assignedTo` (Mitglied) oder `assignedParty` (Haushalt) für "wer bringt was mit" und Aufgaben, `dueOn` für Fristen.
 - Vorlagen: `POST /trips/:id/checklists/template` mit `{ "template": "beach", "private": false }`. Vorhandene Einträge gleichen Namens bleiben, die Antwort nennt `added`. Vorlagen: `basics`, `beach`, `ski`, `toddler`, `dog`, `home` (Aufgaben vor der Abreise), `firstDay` (Einkauf für den ersten Tag).
 - Alle schreibenden Aufrufe liefern die Listen unter `checklists` mit zurück.
+
+## Vorbereitung: Anreise, Zimmer, Aktivitäten
+
+`GET /trips/:id/plan`:
+
+```json
+{ "legs": [ { "id": "…", "partyId": "…", "direction": "outbound", "mode": "car", "fromPlace": "München", "toPlace": "Zadar",
+              "departAt": "2027-08-20T06:00", "arriveAt": null, "stops": [ { "place": "Ljubljana", "note": "Übernachtung" } ],
+              "bookingId": null, "notes": null, "position": 0 } ],
+  "rooms": [ { "id": "…", "name": "Schlafzimmer 1", "beds": "1 Doppelbett", "partyId": null, "occupants": ["Oma", "Opa"], "notes": null, "position": 0 } ],
+  "activities": [ { "id": "…", "title": "Bootstour Kornaten", "place": null, "url": null, "status": "idea", "startsAt": null, "endsAt": null,
+                    "costCents": 4500, "costNote": "pro Person", "bookingId": null, "notes": null, "createdBy": "…",
+                    "responses": [ { "userId": "…", "name": "Tante", "answer": "maybe" } ],
+                    "tally": { "yes": 1, "maybe": 1, "no": 0 }, "myAnswer": "yes" } ] }
+```
+
+- Anreise: `POST /trips/:id/legs`, `PATCH /legs/:id`, `DELETE /legs/:id`. `direction` ist `outbound`, `return` oder `during`, `mode` ist `car`, `flight`, `train`, `ferry`, `bus` oder `other`. `partyId` ist der Haushalt aus der Kasse, `bookingId` verknüpft einen Flug oder eine Fähre aus den Buchungen. Zeiten sind Ortszeit als `2027-08-20` oder `2027-08-20T06:00`.
+- Zimmer: `POST /trips/:id/rooms` (Pflicht `name`), `PATCH /rooms/:id`, `DELETE /rooms/:id`. `occupants` sind frei geschriebene Namen, `partyId` ordnet das Zimmer einem Haushalt zu.
+- `POST /trips/:id/rooms/suggest` legt die Zimmer so an, wie der Steckbrief des entschiedenen Angebots sie nennt. Fehler 409: `already_set_up` (es gibt schon Zimmer), `no_decision`, `nothing_known`.
+- Aktivitäten: `POST /trips/:id/activities` (Pflicht `title`, auch Gäste), `PATCH /activities/:id`, `DELETE /activities/:id`. `status` ist `idea`, `planned`, `done` oder `cancelled`. Mit `startsAt` stehen sie in der Reihenfolge des Kalenders, Ideen ohne Termin danach.
+- Zu- und Absage: `PUT /activities/:id/response` mit `{ "answer": "yes" | "maybe" | "no" | null }`, jeder für sich, `null` nimmt die Antwort zurück.
+- Alle schreibenden Aufrufe liefern den ganzen Plan unter `plan` mit zurück, dazu den Eintrag unter `leg`, `room` oder `activity`. Im PATCH reichen die geänderten Felder, geleerte als `null`.

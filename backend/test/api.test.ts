@@ -797,3 +797,39 @@ describe("bookings, documents and lists", () => {
     expect(ticked.body.checklists.lists.find((l: { list: string }) => l.list === "packing")).toMatchObject({ total: 11, done: 1 });
   });
 });
+
+describe("getting ready", () => {
+  it("plans the way there, the rooms and what to do", async () => {
+    const s = await setup();
+    const aunt = await s.join("member", "Tante");
+    const id = (await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).body.candidateId as string;
+    await s.ctx.queue.idle();
+    const parties = (await s.call("POST", `/trips/${s.tripId}/parties/suggest`, s.owner)).body.ledger.parties as { id: string }[];
+
+    const leg = await s.call("POST", `/trips/${s.tripId}/legs`, s.owner, { partyId: parties[0]!.id, direction: "outbound", mode: "car", fromPlace: "München", toPlace: "Zadar", departAt: "2027-08-20T06:00", stops: [{ place: "Ljubljana", note: "Übernachtung" }] });
+    expect(leg.status).toBe(201);
+    expect(leg.body.plan.legs).toHaveLength(1);
+    expect((await s.call("POST", `/trips/${s.tripId}/legs`, s.owner, { partyId: "00000000-0000-4000-8000-000000000000" })).status).toBe(400);
+    expect((await s.call("PATCH", `/legs/${leg.body.leg.id}`, aunt, { arriveAt: "2027-08-21T15:00" })).body.leg.arriveAt).toBe("2027-08-21T15:00");
+
+    // Rooms from the advert need a decision first.
+    expect((await s.call("POST", `/trips/${s.tripId}/rooms/suggest`, s.owner)).body.error.code).toBe("no_decision");
+    await s.call("POST", `/trips/${s.tripId}/decision`, s.owner, { candidateId: id });
+    const suggested = await s.call("POST", `/trips/${s.tripId}/rooms/suggest`, s.owner);
+    const made = suggested.status === 200 ? suggested.body.plan.rooms : (await s.call("POST", `/trips/${s.tripId}/rooms`, s.owner, { name: "Schlafzimmer 1" })).body.plan.rooms;
+    expect(made.length).toBeGreaterThan(0);
+    expect((await s.call("POST", `/trips/${s.tripId}/rooms/suggest`, s.owner)).body.error.code).toBe("already_set_up");
+    const room = await s.call("PATCH", `/rooms/${made[0].id}`, s.owner, { partyId: parties[0]!.id, occupants: ["Oma", "Opa"] });
+    expect(room.body.room.occupants).toEqual(["Oma", "Opa"]);
+
+    const idea = await s.call("POST", `/trips/${s.tripId}/activities`, aunt, { title: "Bootstour Kornaten", costCents: 4500, costNote: "pro Person" });
+    await s.call("POST", `/trips/${s.tripId}/activities`, s.owner, { title: "Markt in Zadar", status: "planned", startsAt: "2027-08-23T09:00" });
+    await s.call("PUT", `/activities/${idea.body.activity.id}/response`, s.owner, { answer: "yes" });
+    const plan = (await s.call("PUT", `/activities/${idea.body.activity.id}/response`, aunt, { answer: "maybe" })).body.plan;
+    // The dated one comes first, the idea after it.
+    expect(plan.activities.map((a: { title: string }) => a.title)).toEqual(["Markt in Zadar", "Bootstour Kornaten"]);
+    expect(plan.activities[1]).toMatchObject({ tally: { yes: 1, maybe: 1, no: 0 }, myAnswer: "maybe" });
+    expect((await s.call("PUT", `/activities/${idea.body.activity.id}/response`, aunt, { answer: null })).body.plan.activities[1].tally.maybe).toBe(0);
+    expect((await s.call("DELETE", `/activities/${idea.body.activity.id}`, s.owner)).body.plan.activities).toHaveLength(1);
+  });
+});

@@ -522,3 +522,88 @@ export const checklistItems = pgTable(
   },
   (t) => [index("checklist_items_trip_idx").on(t.tripId, t.list, t.position)],
 );
+
+/** How one household gets there: a drive with stops, a flight, a train. */
+export const travelLegs = pgTable(
+  "travel_legs",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    partyId: uuid("party_id"),
+    direction: text("direction").$type<"outbound" | "return" | "during">().notNull().default("outbound"),
+    mode: text("mode").$type<"car" | "flight" | "train" | "ferry" | "bus" | "other">().notNull().default("car"),
+    fromPlace: text("from_place"),
+    toPlace: text("to_place"),
+    departAt: text("depart_at"),
+    arriveAt: text("arrive_at"),
+    /** Stops on the way: a night halfway, a charging stop, a ferry port. */
+    stops: jsonb("stops").$type<{ place: string; note: string | null }[]>().notNull().default([]),
+    bookingId: uuid("booking_id"),
+    notes: text("notes"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("travel_legs_trip_idx").on(t.tripId, t.position)],
+);
+
+/** Who sleeps where. */
+export const rooms = pgTable(
+  "rooms",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    beds: text("beds"),
+    partyId: uuid("party_id"),
+    /** Names as the group writes them; not everyone travelling has an account. */
+    occupants: jsonb("occupants").$type<string[]>().notNull().default([]),
+    notes: text("notes"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("rooms_trip_idx").on(t.tripId, t.position)],
+);
+
+/** Something to do on the trip: an idea first, then a date in the calendar. */
+export const activities = pgTable(
+  "activities",
+  {
+    id: id(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    place: text("place"),
+    url: text("url"),
+    status: text("status").$type<"idea" | "planned" | "done" | "cancelled">().notNull().default("idea"),
+    startsAt: text("starts_at"),
+    endsAt: text("ends_at"),
+    costCents: integer("cost_cents"),
+    /** What the cost refers to, as the group needs it: per person, per family, in total. */
+    costNote: text("cost_note"),
+    bookingId: uuid("booking_id"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("activities_trip_idx").on(t.tripId, t.startsAt)],
+);
+
+export const activityResponses = pgTable(
+  "activity_responses",
+  {
+    activityId: uuid("activity_id")
+      .notNull()
+      .references(() => activities.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    answer: verdict("answer").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.activityId, t.userId] })],
+);
