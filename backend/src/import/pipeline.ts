@@ -4,11 +4,13 @@ import { dateOptions, listings, listingSources, priceSnapshots, tripListings, tr
 import { extractBlocks, profileFromBlocks } from "./blocks.js";
 import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
-import { UnsafeUrlError, type PageFetcher } from "./fetch.js";
+import { looksBlocked, UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
 import { analyzeLink, embeddedTarget, nightsBetween, urlForStay, type LinkInfo } from "./url.js";
 
 const APPROXIMATE_POSITION = new Set(["airbnb", "vrbo"]);
+/** A title a security check left behind in place of the advert's own. */
+const SECURITY_CHECK_TITLE = /Bot oder Mensch|Bot or human|Just a moment|Access Denied|Sicherheitsüberprüfung/i;
 
 export interface ImportDeps {
   db: Db;
@@ -176,6 +178,11 @@ export async function processImport(
       html = page.html;
     }
 
+    if (fromDevice && looksBlocked(200, html)) {
+      // The platform showed the device a "bot or human?" check instead of the advert. Nothing of it is the property's.
+      console.warn(`import ${input.link.platform}/${input.link.externalId}: device sent a security check page (${html.length} bytes), nothing taken over`);
+      return;
+    }
     const blocks = extractBlocks(html);
     // Shape of what arrived, for diagnosis; never content.
     console.info(
@@ -186,6 +193,8 @@ export async function processImport(
 
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
     const before = current?.profile ?? emptyProfile(input.link.kind);
+    const readBefore = sources.find((x) => x.id === input.sourceId)?.extract != null && Boolean(before.title) && !SECURITY_CHECK_TITLE.test(before.title ?? "");
+    const checkOnly = !secondary && fromDevice && priceBelongsToTrip && readBefore;
     let profile: Profile;
     // The price this source showed. For the leading source it is the profile's own.
     let price: Profile["price"];
@@ -194,6 +203,12 @@ export async function processImport(
       const { title: _t, summary: _s, highlights: _h, warnings: _w, price: _p, reviews: _r, reviewSummary: _rs, uncertain: _u, coverImageUrl: _c, ...facts } = extracted;
       profile = mergeProfiles(before, before.photos.length ? { ...facts, photos: [] } : facts);
       price = structuredClone(extracted.price);
+    } else if (checkOnly) {
+      // A look at price and availability for the trip. The page may show less, or something else, than the
+      // full reading did; name, text, pictures and facts stay as they are.
+      profile = structuredClone(before);
+      profile.price = mergeProfiles(before, extracted, true).price;
+      price = profile.price;
     } else {
       // What was read from the page replaces what was only seeded from the link.
       profile = mergeProfiles(before, extracted, true);
@@ -207,6 +222,11 @@ export async function processImport(
       price = profile.price;
     }
     if (priceBelongsToTrip) {
+      // Only what this very page showed is the trip's price. An amount an earlier reading or the shared
+      // link left behind is for other dates and must not be carried over under the trip's.
+      price.totalEur = extracted.price.totalEur;
+      price.kind = extracted.price.kind;
+      price.rangeMaxEur = extracted.price.rangeMaxEur;
       // The page was asked for the trip's dates and party, so whatever price it showed belongs to those,
       // not to what the sharer had selected in the link.
       price.startDate = stay.startDate;
@@ -225,7 +245,7 @@ export async function processImport(
     price.available = extracted.price.available;
     // A stay that cannot be booked has no price; whatever figure the page still showed is for other dates.
     if (price.available === false) price.totalEur = null;
-    if (!secondary) {
+    if (!secondary && !checkOnly) {
       // Hints from the link itself (one guest only, contradictory dates) stay visible next to what the page showed.
       // Not when the page was read for the trip itself: then the sharer's guest count and dates are beside the point.
       const fromLink = priceBelongsToTrip ? before.warnings.filter((w) => !input.link.warnings.includes(w)) : before.warnings;
@@ -248,8 +268,8 @@ export async function processImport(
     // wipe the ones an earlier reading of the same source found.
     const earlier = sources.find((s) => s.id === input.sourceId)?.extract;
     const own = {
-      title: extracted.title,
-      rating: extracted.rating,
+      title: checkOnly ? (earlier?.title ?? extracted.title) : extracted.title,
+      rating: checkOnly ? (earlier?.rating ?? extracted.rating) : extracted.rating,
       reviews: extracted.reviews.length ? extracted.reviews : (earlier?.reviews ?? []),
       // A summary resting on fewer reviews than the one before (a quick look at the page) does not replace it.
       reviewSummary:
@@ -309,7 +329,8 @@ export async function processImport(
       latest.available === price.available &&
       (latest.tripId === input.tripId) === forTrip;
     // Reading the same price again is not a new observation.
-    if ((totalCents !== null || price.available === false) && !unchanged) {
+    // A look for the trip that found neither price nor answer is recorded too: it ends the say of whatever was known before.
+    if ((totalCents !== null || price.available === false || priceBelongsToTrip) && !unchanged) {
       await db.insert(priceSnapshots).values({
         listingSourceId: input.sourceId,
         tripId: forTrip ? input.tripId : null,

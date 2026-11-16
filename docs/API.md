@@ -234,3 +234,9 @@ In `GET /trips/:tripId/candidates` steht je Angebot:
 - `needsDevice` und `checkUrl`: ob nur das Gerät prüfen kann, und die Seite mit den Reisedaten.
 
 Grenzen: Ob ein Zeitraum frei ist, steht bei den meisten Plattformen nur in der gerenderten Seite. Der Server-Abruf sieht bei Airbnb und FeWo-direkt wenig Text und oft keinen Gesamtpreis; verlässlich ist dort das Auslesen auf dem Gerät. Bleibt nach dem Server-Lauf `availability` auf `unknown`, lohnt der Gerätelauf über `checkUrl`.
+
+### Prüflauf: was ein capture mit `forTrip: true` ändert
+
+- Übernommen werden nur Preis und Verfügbarkeit. Titel, Texte, Bilder, Lage und Hinweise bleiben, wie die vollständige Einlesung sie hinterlassen hat. Ausnahme: Das Angebot wurde noch nie vollständig eingelesen.
+- Der Betrag muss auf genau dieser Seite stehen. Ein früher gelesener Betrag wird nicht unter dem Reisezeitraum weitergeführt. Findet der Prüflauf weder Betrag noch Aussage zur Verfügbarkeit, gilt der Reisepreis als unbekannt; `price` zeigt dann wieder den Preis aus dem geteilten Link (`forThisTrip: false`).
+- Sicherheitsabfragen ("Bot oder Mensch?", "Just a moment…", "Access Denied") verwirft der Server, auch wenn das Gerät sie schickt. Die Antwort bleibt 202, am Angebot ändert sich nichts.

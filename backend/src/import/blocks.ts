@@ -717,5 +717,23 @@ export function modelInput(blocks: PageBlocks, limits = { state: 14_000, digest:
     parts.push(`<captured_reviews count="${lines.length}">\n${lines.join("\n")}\n</captured_reviews>`);
   }
   if (blocks.text) parts.push(`<visible_text>\n${cut(blocks.text, limits.text)}\n</visible_text>`);
+  // Long pages put the booking box far down. What it says about price and availability must not fall to the cut.
+  if (blocks.text.length > limits.text) {
+    const lines = blocks.text.slice(limits.text).split("\n");
+    const wanted = new Set<number>();
+    for (const [i, line] of lines.entries()) {
+      if (/€|EUR\b|gesamt|total|nächte|nights|nicht (mehr )?verfügbar|ausgebucht|belegt|not available|unavailable|mindestaufenthalt|kaution|endreinigung|gebühr/i.test(line)) for (const j of [i - 1, i, i + 1]) wanted.add(j);
+    }
+    const kept: string[] = [];
+    let used = 0;
+    for (const i of [...wanted].sort((x, y) => x - y)) {
+      const line = lines[i]?.trim().slice(0, 300);
+      if (!line) continue;
+      used += line.length + 1;
+      if (used > 5000) break;
+      kept.push(line);
+    }
+    if (kept.length) parts.push(`<price_lines_further_down>\n${kept.join("\n")}\n</price_lines_further_down>`);
+  }
   return parts.join("\n\n");
 }
