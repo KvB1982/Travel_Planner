@@ -123,6 +123,10 @@ struct CaptureView: View {
                     throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“. Oder brich ab, dann wird dieses Angebot nicht geprüft.")
                 }
                 if automatic { await page.waitForPrice() }
+                if forTrip, await page.lacksDates() {
+                    gate = true
+                    throw APIError(status: 0, code: "no_dates", message: "Die Seite hat den Zeitraum der Reise nicht übernommen und zeigt keinen Preis dafür. Stelle Zeitraum und Gäste hier auf der Seite selbst ein und tippe dann auf „Übernehmen“. Oder brich ab, dann bleibt dieses Angebot ungeprüft.")
+                }
                 let captured = try await page.capture(quick: automatic)
                 if await page.isChallenge() {
                     gate = true
@@ -585,6 +589,18 @@ final class WebPage: NSObject, WKNavigationDelegate {
           if (words.test(title)) { return true; }
           // A real advert has plenty of text; a gate has a few lines.
           return text.length < 1500 && words.test(text);
+        })()
+        """
+        return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
+    }
+
+    /// The page asks to pick dates first: it was opened without the dates of the trip, so whatever price
+    /// it shows says nothing about the trip.
+    func lacksDates() async -> Bool {
+        let script = """
+        (function () {
+          var text = document.body ? document.body.innerText : '';
+          return /(wähle deine daten für genaue preise|zeitraum wählen, um preise|daten (hinzufügen|eingeben|auswählen),? um (den |die )?preis|reisedaten (eingeben|auswählen) für (genaue )?preise|add dates for prices|select dates to see)/i.test(text);
         })()
         """
         return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
