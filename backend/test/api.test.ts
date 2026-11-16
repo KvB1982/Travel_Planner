@@ -58,7 +58,7 @@ describe("trips and invites", () => {
     expect(detail.body).toMatchObject({ role: "organizer", trip: { title: "Sommer 2027", adults: 4, children: 4 } });
     expect(detail.body.dateOptions).toHaveLength(1);
     expect(detail.body.members).toHaveLength(1);
-    expect((await s.call("GET", "/trips", s.owner)).body.trips).toHaveLength(1);
+    expect((await s.call("GET", "/trips", s.owner)).body.trips.filter((t: { kind: string }) => t.kind === "trip")).toHaveLength(1);
   });
 
   it("rejects a date option that ends before it starts", async () => {
@@ -536,5 +536,46 @@ describe("checking a whole trip", () => {
     expect((await s.call("POST", `/trips/${s.tripId}/check`, s.owner)).body.checks).toHaveLength(1);
     const guest = await s.join("guest", "Oma");
     expect((await s.call("POST", `/trips/${s.tripId}/check`, guest)).status).toBe(403);
+  });
+});
+
+describe("moving candidates and the watchlist", () => {
+  it("gives everyone a watchlist and moves a candidate there and back", async () => {
+    const s = await setup();
+    const trips = (await s.call("GET", "/trips", s.owner)).body.trips as { id: string; kind: string; title: string }[];
+    const shelf = trips.find((t) => t.kind === "watchlist")!;
+    expect(shelf.title).toBe("Merkliste");
+    expect(trips.filter((t) => t.kind === "watchlist")).toHaveLength(1);
+    expect((await s.call("GET", "/trips", s.owner)).body.trips.filter((t: { kind: string }) => t.kind === "watchlist")).toHaveLength(1);
+    expect((await s.call("POST", `/trips/${shelf.id}/invites`, s.owner, {})).status).toBe(409);
+    expect((await s.call("POST", `/trips/${shelf.id}/refresh`, s.owner)).status).toBe(409);
+
+    const added = await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" });
+    const id = added.body.candidateId as string;
+    await s.ctx.queue.idle();
+    await s.call("PATCH", `/candidates/${id}`, s.owner, { status: "favorite", notes: "Mit Pool" });
+    await s.call("PUT", `/candidates/${id}/vote`, s.owner, { verdict: "yes" });
+
+    const moved = await s.call("POST", `/candidates/${id}/move`, s.owner, { tripId: shelf.id });
+    expect(moved.status).toBe(200);
+    expect(moved.body).toMatchObject({ candidateId: id, tripId: shelf.id });
+    expect((await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates).toHaveLength(0);
+    const onShelf = (await s.call("GET", `/trips/${shelf.id}/candidates`, s.owner)).body.candidates;
+    expect(onShelf).toHaveLength(1);
+    expect(onShelf[0]).toMatchObject({ id, status: "new" });
+    const detail = (await s.call("GET", `/candidates/${id}`, s.owner)).body;
+    expect(detail.candidate.notes).toBe("Mit Pool");
+    expect(detail.votes).toMatchObject({ yes: 0, maybe: 0, no: 0 });
+
+    // Somebody who is not in the target trip cannot move anything there.
+    const other = await s.join("member", "Tante");
+    const theirs = ((await s.call("GET", "/trips", other)).body.trips as { id: string; kind: string }[]).find((t) => t.kind === "watchlist")!;
+    expect(theirs.id).not.toBe(shelf.id);
+    expect((await s.call("POST", `/candidates/${id}/move`, s.owner, { tripId: theirs.id })).status).toBe(404);
+
+    expect((await s.call("POST", `/candidates/${id}/move`, s.owner, { tripId: s.tripId })).status).toBe(200);
+    const again = await s.call("POST", `/trips/${shelf.id}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" });
+    await s.ctx.queue.idle();
+    expect((await s.call("POST", `/candidates/${again.body.candidateId}/move`, s.owner, { tripId: s.tripId })).status).toBe(409);
   });
 });

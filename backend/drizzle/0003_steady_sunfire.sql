@@ -1,0 +1,2 @@
+ALTER TABLE "trips" ADD COLUMN "kind" text DEFAULT 'trip' NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "trips_watchlist_owner_idx" ON "trips" USING btree ("created_by") WHERE "trips"."kind" = 'watchlist';
