@@ -467,6 +467,33 @@ final class DemoBackendTests: XCTestCase {
         XCTAssertEqual(end.sources.count, 1)
     }
 
+    func testUnavailableAfterCheck() async throws {
+        let demo = DemoBackend()
+        var list = try await demo.candidates(tripId: "t-1")
+        XCTAssertFalse(list.contains(where: \.isUnavailable))
+        for offer in list { try await demo.refresh(candidateId: offer.id) }
+        list = try await demo.candidates(tripId: "t-1")
+        XCTAssertEqual(list.filter(\.isUnavailable).map(\.id), ["c-2"])
+    }
+
+    func testAvailabilityFields() throws {
+        func row(_ extra: String, price: String = "null") throws -> CandidateSummary {
+            try APIClient.decoder.decode(CandidateSummary.self, from: Data("""
+            {"id":"c1","status":"new","importStatus":"ready","importNote":null,"tags":[],"addedBy":"A","createdAt":"2026-11-15T09:17:52.123Z",
+             "listing":{"id":"l1","kind":"vacation_home","title":null,"place":null,"country":null,"lat":null,"lon":null,"coverImageUrl":null,
+               "fillPercent":0,"maxGuests":null,"bedrooms":null,"bathrooms":null,"rating":null,"platforms":[]},
+             "price":\(price),"votes":{"yes":0,"maybe":0,"no":0,"vetoes":0},"myVote":null\(extra)}
+            """.utf8))
+        }
+        XCTAssertFalse(try row("").isUnavailable)
+        XCTAssertTrue(try row(#","availability":"unavailable","availabilityCheckedAt":"2026-11-16T00:00:00.000Z""#).isUnavailable)
+        XCTAssertFalse(try row(#","availability":"unknown""#).isUnavailable)
+        let own = #"{"totalCents":1,"rangeMaxCents":null,"kind":"total","nights":7,"persons":8,"startDate":null,"endDate":null,"forThisTrip":true,"capturedAt":null,"available":false}"#
+        XCTAssertTrue(try row("", price: own).isUnavailable)
+        XCTAssertFalse(try row("", price: own.replacingOccurrences(of: #""forThisTrip":true"#, with: #""forThisTrip":false"#)).isUnavailable,
+                       "belegt in einem anderen Zeitraum sagt nichts über die Reise")
+    }
+
     func testDeleteRemovesOfferAndUpdatesCounts() async throws {
         let demo = DemoBackend()
         try await demo.delete(candidateId: "c-1")

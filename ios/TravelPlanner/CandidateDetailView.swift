@@ -424,6 +424,10 @@ struct CandidateDetailView: View {
                     if current.tripId != tripID {
                         Text("Dieser Preis gilt für einen anderen Zeitraum als eure Reise.").font(.footnote).foregroundStyle(.orange)
                     }
+                    if current.tripId == tripID, current.available == false {
+                        Label("Im Reisezeitraum nicht verfügbar", systemImage: "calendar.badge.exclamationmark")
+                            .font(.footnote.weight(.semibold)).foregroundStyle(.red)
+                    }
                 }
                 ForEach(current.breakdown ?? [], id: \.self) { line in
                     LabeledContent(line.item, value: line.amountCents.map { Format.euro(cents: $0) } ?? "nicht beziffert")

@@ -84,7 +84,7 @@ public actor DemoBackend: TravelBackend {
                                         region: profile.region),
                 price: price.map { PriceSummary(totalCents: $0.totalCents, rangeMaxCents: $0.rangeMaxCents, kind: $0.kind, nights: $0.nights,
                                                 persons: $0.persons, startDate: $0.startDate, endDate: $0.endDate,
-                                                forThisTrip: $0.tripId == tripId, capturedAt: $0.capturedAt) },
+                                                forThisTrip: $0.tripId == tripId, capturedAt: $0.capturedAt, available: $0.available) },
                 votes: VoteTally(yes: detail.votes.yes, maybe: detail.votes.maybe, no: detail.votes.no, vetoes: detail.votes.vetoes),
                 myVote: detail.votes.entries.first { $0.userId == user.id }.map { Vote(verdict: $0.verdict, veto: $0.veto) })
         }
@@ -167,9 +167,13 @@ public actor DemoBackend: TravelBackend {
         details[candidateId] = detail
     }
 
+    /// In the sample data a check finds one offer booked out, to show what that looks like.
     public func refresh(candidateId: String) async throws {
-        _ = try detail(candidateId)
-        throw APIError(status: 0, code: "demo", message: "Mit Beispieldaten gibt es keinen Server, der das Inserat neu abrufen könnte.")
+        var detail = try detail(candidateId)
+        guard candidateId == "c-2", !detail.prices.isEmpty else { return }
+        detail.prices[0].available = false
+        detail.prices[0].capturedAt = .now
+        details[candidateId] = detail
     }
 
     public func setHiddenWarnings(candidateId: String, hidden: [String]) async throws {

@@ -20,6 +20,8 @@ struct CandidateListView: View {
     @State private var pendingDelete: CandidateSummary?
     @State private var showCompare = false
     @State private var showMap = false
+    /// "2 von 5" while all offers are being checked; nil otherwise.
+    @State private var checking: String?
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -68,6 +70,22 @@ struct CandidateListView: View {
             if let detail {
                 Section {
                     TripHeader(detail: detail)
+                    if detail.role.canEdit && !candidates.isEmpty {
+                        Button {
+                            checkAll()
+                        } label: {
+                            if let checking {
+                                HStack(spacing: 10) { ProgressView(); Text("Prüfe \(checking) …") }
+                            } else {
+                                Label("Verfügbarkeit und Preise prüfen", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                        }
+                        .disabled(checking != nil)
+                    }
+                } footer: {
+                    if detail.role.canEdit && !candidates.isEmpty {
+                        Text("Fragt alle Angebote für den Zeitraum und die Gäste dieser Reise neu ab.")
+                    }
                 }
             }
             if let error {
@@ -227,6 +245,39 @@ struct CandidateListView: View {
         }
     }
 
+    /// Asks the server to read every offer again for the trip's dates and party, one after the other.
+    private func checkAll() {
+        guard let backend = model.backend else { return }
+        let offers = candidates.filter { $0.status != .rejected && $0.importStatus != .pending }
+        Task {
+            var started = 0, skipped = 0, failed = 0
+            for (index, offer) in offers.enumerated() {
+                checking = "\(index + 1) von \(offers.count)"
+                do {
+                    try await backend.refresh(candidateId: offer.id)
+                    started += 1
+                } catch let error as APIError where error.status == 429 {
+                    skipped += 1
+                } catch {
+                    failed += 1
+                    if (error as? APIError)?.isUnauthorized == true { notice = model.message(for: error); break }
+                }
+            }
+            checking = nil
+            model.dataChanged()
+            var parts = [started == 1 ? "1 Angebot wird neu abgefragt" : "\(started) Angebote werden neu abgefragt"]
+            if skipped > 0 { parts.append(skipped == 1 ? "1 wurde eben erst geprüft" : "\(skipped) wurden eben erst geprüft") }
+            if failed > 0 { parts.append(failed == 1 ? "bei 1 hat es nicht geklappt" : "bei \(failed) hat es nicht geklappt") }
+            let device = offers.filter { $0.needsDevice == true }.count
+            var text = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server fertig ist."
+            if device > 0 {
+                text += device == 1 ? " 1 Angebot sperrt den Server und muss im Steckbrief auf dem Gerät aktualisiert werden."
+                                    : " \(device) Angebote sperren den Server und müssen im Steckbrief auf dem Gerät aktualisiert werden."
+            }
+            if notice == nil { notice = text }
+        }
+    }
+
     private func createInvite() {
         guard let backend = model.backend else { return }
         Task {
@@ -316,6 +367,10 @@ private struct CandidateRow: View {
                     Text(candidate.listing.title ?? "Angebot wird gelesen …").font(.headline).lineLimit(2)
                 }
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                if candidate.isUnavailable {
+                    Label("Im Reisezeitraum nicht verfügbar", systemImage: "calendar.badge.exclamationmark")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.red)
+                }
                 switch candidate.importStatus {
                 case .pending:
                     Label("Wird ausgelesen …", systemImage: "arrow.triangle.2.circlepath").font(.footnote).foregroundStyle(.secondary)
@@ -341,6 +396,8 @@ private struct CandidateRow: View {
             }
         }
         .padding(.vertical, 2)
+        // Booked out for the trip's dates: still there to look at, but out of the running.
+        .opacity(candidate.isUnavailable ? 0.45 : 1)
     }
 
     private var subtitle: String {

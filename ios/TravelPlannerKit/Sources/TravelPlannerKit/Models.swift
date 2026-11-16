@@ -169,9 +169,12 @@ public struct PriceSummary: Codable, Hashable, Sendable {
     public var endDate: String?
     public var forThisTrip: Bool
     public var capturedAt: Date?
+    /// False when the platform said the offer cannot be booked for these dates. Nil when it said nothing.
+    public var available: Bool?
 
     public init(totalCents: Int?, rangeMaxCents: Int? = nil, kind: PriceKind = .total, nights: Int? = nil, persons: Int? = nil,
-                startDate: String? = nil, endDate: String? = nil, forThisTrip: Bool = true, capturedAt: Date? = nil) {
+                startDate: String? = nil, endDate: String? = nil, forThisTrip: Bool = true, capturedAt: Date? = nil, available: Bool? = nil) {
+        self.available = available
         self.totalCents = totalCents; self.rangeMaxCents = rangeMaxCents; self.kind = kind; self.nights = nights; self.persons = persons
         self.startDate = startDate; self.endDate = endDate; self.forThisTrip = forThisTrip; self.capturedAt = capturedAt
     }
@@ -223,6 +226,16 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var price: PriceSummary?
     public var votes: VoteTally
     public var myVote: Vote?
+    /// "available", "unavailable" or "unknown" for the dates and party of the trip. Nil on servers that do not check.
+    public var availability: String?
+    public var availabilityCheckedAt: Date?
+    /// The platform turns the server away; checking needs a device.
+    public var needsDevice: Bool?
+
+    /// The offer cannot be booked for the trip's dates, as far as the last check knows.
+    public var isUnavailable: Bool {
+        availability == "unavailable" || (price?.forThisTrip == true && price?.available == false)
+    }
 
     public init(id: String, status: CandidateStatus = .new, importStatus: ImportStatus = .ready, importNote: String? = nil, tags: [String] = [],
                 addedBy: String, createdAt: Date = .now, listing: ListingSummary, price: PriceSummary? = nil, votes: VoteTally = .init(), myVote: Vote? = nil) {
