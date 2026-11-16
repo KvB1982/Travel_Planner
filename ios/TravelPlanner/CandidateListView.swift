@@ -366,7 +366,7 @@ struct CandidateListView: View {
         for (id, sent) in evaluating {
             let candidate = candidates.first { $0.id == id }
             let margin = sent.addingTimeInterval(-5)
-            let fresh = [candidate?.price?.capturedAt, candidate?.availabilityCheckedAt, candidate?.emptyCheckAt].compactMap { $0 }.contains { $0 > margin }
+            let fresh = [candidate?.price?.checkedAt, candidate?.price?.capturedAt, candidate?.availabilityCheckedAt, candidate?.emptyCheckAt].compactMap { $0 }.contains { $0 > margin }
             if candidate == nil || fresh || Date.now.timeIntervalSince(sent) > 90 { evaluating[id] = nil }
         }
     }

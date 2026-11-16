@@ -183,6 +183,8 @@ public struct PriceSummary: Codable, Hashable, Sendable {
     public var endDate: String?
     public var forThisTrip: Bool
     public var capturedAt: Date?
+    /// When the price was last confirmed by a check. `capturedAt` stays the moment it was first seen like this.
+    public var checkedAt: Date?
     /// False when the platform said the offer cannot be booked for these dates. Nil when it said nothing.
     public var available: Bool?
 
