@@ -93,7 +93,8 @@ struct CaptureView: View {
             }
         }
         .onAppear {
-            readPictures = knownPictures < 5
+            // Worth browsing once more when the advert says it has clearly more photos than the server holds.
+            readPictures = knownPictures < 5 || (expectedPictures ?? 0) > knownPictures + max(3, knownPictures / 2)
             if let url = URL(string: source.url) { page.load(url) }
         }
         // The automatic browsing found far fewer photos than the advert has: ask before a poorer set is sent.
@@ -620,21 +621,30 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
     }
 
-    /// For a price check: waits until the page shows a price for the stay or says the dates are taken.
-    /// Adverts fill that in a few seconds after loading; gives up after a quarter of a minute.
+    /// For a price check: waits until the booking box shows a total for the stay or says the dates are taken.
+    /// A price per night alone does not count: adverts show that at once, the total only seconds later, and a page
+    /// read in between brings the server nothing. Gives up after twenty seconds.
     func waitForPrice() async {
         let script = """
         (function () {
           var text = document.body ? document.body.innerText : '';
-          var price = /\\d[\\d.,]*\\s?(€|eur)[^\\n]{0,40}(nächte|nacht|nights?|gesamt|insgesamt|total)|(nächte|nacht|nights?|gesamt|insgesamt|total)[^\\n]{0,40}\\d[\\d.,]*\\s?(€|eur)|(€|eur)\\s?\\d[\\d.,]*[^\\n]{0,40}(nächte|nacht|nights?|gesamt|insgesamt|total)/i;
-          var taken = /(nicht verfügbar|nicht mehr verfügbar|ausgebucht|belegt|not available|unavailable|sold out|keine verfügbarkeit|leider vergeben)/i;
+          var money = '(\\\\d[\\\\d.,]*\\\\s?(€|eur)|(€|eur)\\\\s?\\\\d[\\\\d.,]*)';
+          var whole = '(gesamt|insgesamt|total|summe|für\\\\s+\\\\d+\\\\s+(nächte|nacht|nights?)|\\\\d+\\\\s+(nächte|nights)|vor steuern|inkl\\\\. (aller )?gebühren)';
+          var price = new RegExp(money + '[^\\\\n]{0,60}' + whole + '|' + whole + '[^\\\\n]{0,60}' + money + '|' + whole + '[^\\\\n]{0,30}\\\\n\\\\s*' + money + '|' + money + '[^\\\\n]{0,30}\\\\n\\\\s*' + whole, 'i');
+          var taken = /(nicht verfügbar|nicht mehr verfügbar|ausgebucht|belegt|not available|unavailable|sold out|keine verfügbarkeit|leider vergeben|maximal \\d+ gäste|zu viele gäste)/i;
           return price.test(text) || taken.test(text);
         })()
         """
-        for _ in 0..<30 {
-            if ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true { return }
+        for _ in 0..<40 {
+            if ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true {
+                // The box often fills in two steps; give the rest of it a moment.
+                try? await Task.sleep(for: .milliseconds(1500))
+                Self.log.info("Preis oder Belegung steht auf der Seite")
+                return
+            }
             try? await Task.sleep(for: .milliseconds(500))
         }
+        Self.log.info("Nach 20 Sekunden weder Gesamtpreis noch Belegung auf der Seite")
     }
 
     private func outerHTML() async throws -> String {

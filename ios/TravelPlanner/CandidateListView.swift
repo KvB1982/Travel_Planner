@@ -365,7 +365,8 @@ struct CandidateListView: View {
     private func settleEvaluating() {
         for (id, sent) in evaluating {
             let candidate = candidates.first { $0.id == id }
-            let fresh = (candidate?.price?.capturedAt).map { $0 > sent.addingTimeInterval(-5) } ?? false
+            let margin = sent.addingTimeInterval(-5)
+            let fresh = [candidate?.price?.capturedAt, candidate?.availabilityCheckedAt, candidate?.emptyCheckAt].compactMap { $0 }.contains { $0 > margin }
             if candidate == nil || fresh || Date.now.timeIntervalSince(sent) > 90 { evaluating[id] = nil }
         }
     }
@@ -705,6 +706,13 @@ private struct CandidateRow: View {
                     }
                     Spacer()
                     VoteBadges(votes: candidate.votes)
+                }
+                if !evaluating, candidate.emptyCheckAt != nil {
+                    Label("Letzter Abruf ohne Ergebnis, bitte erneut prüfen", systemImage: "arrow.clockwise.circle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if candidate.fitsParty == false {
+                    Label("Zu klein für eure Personenzahl", systemImage: "person.2.slash").font(.caption).foregroundStyle(.orange)
                 }
             }
         }

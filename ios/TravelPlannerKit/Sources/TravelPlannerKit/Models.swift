@@ -253,6 +253,11 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var criteria: CriteriaVerdict?
     /// Price and availability for each period of the trip.
     public var periods: [OfferPeriod]?
+    /// Set when the latest check for the dates brought neither price nor availability: the page was read too early
+    /// or showed nothing. Price and availability then still show the last check that had a result.
+    public var emptyCheckAt: Date?
+    /// False when the house holds fewer guests than the trip has travellers; nil when unknown.
+    public var fitsParty: Bool?
 
     /// The offer cannot be booked for the trip's dates, as far as the last check knows.
     public var isUnavailable: Bool {
@@ -664,6 +669,7 @@ public struct OfferPeriod: Codable, Hashable, Sendable, Identifiable {
     public var kind: PriceKind?
     public var checkedAt: Date?
     public var checkUrl: String?
+    public var emptyCheckAt: Date?
     public var id: String { dateOptionId }
 }
 
