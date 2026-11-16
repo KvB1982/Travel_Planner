@@ -124,7 +124,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "organizer");
     await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
-    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases) }).partial(), req.body);
+    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases), splitMode: z.enum(["equal", "heads"]), childWeight: z.number().min(0).max(1) }).partial(), req.body);
     const { voteDeadline, ...rest } = body;
     const values = { ...rest, ...(voteDeadline !== undefined ? { voteDeadline: voteDeadline ? new Date(voteDeadline) : null } : {}) };
     if (Object.keys(values).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");
