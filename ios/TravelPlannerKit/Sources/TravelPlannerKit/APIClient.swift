@@ -26,7 +26,8 @@ public protocol TravelBackend: Sendable {
     func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult
     /// Hands a page read on the device to the server. `sourceId` names the source it belongs to; nil means the leading one.
     /// `forTrip` says the page was opened for the dates and party of the trip, so its price and availability count for it.
-    func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool) async throws
+    /// `url` is the address the page was read from, so the server can tell which dates it was opened for.
+    func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws
     /// Checks every offer of the trip for its dates and party. Tells which offers a device has to read.
     func checkTrip(tripId: String) async throws -> TripCheck
     /// Starts the search for the same house on other platforms. Costs money on the server, so only on request.
@@ -222,12 +223,12 @@ public struct APIClient: TravelBackend {
         try await send("POST", "/trips/\(tripId.pathEscaped)/refresh")
     }
 
-    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool) async throws {
-        struct Body: Encodable { var html: String; var sourceId: String?; var forTrip: Bool? }
+    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws {
+        struct Body: Encodable { var html: String; var sourceId: String?; var forTrip: Bool?; var url: String? }
         guard html.utf8.count <= Self.maxPageBytes else {
             throw APIError(status: 0, code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen.")
         }
-        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, sourceId: sourceId, forTrip: forTrip ? true : nil))
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, sourceId: sourceId, forTrip: forTrip ? true : nil, url: url))
     }
 
     public func searchOtherPlatforms(candidateId: String) async throws {
@@ -294,6 +295,6 @@ extension String {
 
 public extension TravelBackend {
     func capture(candidateId: String, html: String, sourceId: String?) async throws {
-        try await capture(candidateId: candidateId, html: html, sourceId: sourceId, forTrip: false)
+        try await capture(candidateId: candidateId, html: html, sourceId: sourceId, forTrip: false, url: nil)
     }
 }

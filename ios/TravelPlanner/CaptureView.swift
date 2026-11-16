@@ -151,7 +151,8 @@ struct CaptureView: View {
         held = nil
         Task {
             do {
-                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip)
+                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip,
+                                          url: page.advertURL ?? source.url)
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
                 dismiss()
@@ -524,7 +525,11 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
     }
 
+    /// The address of the advert as first reached, after the site's own redirects.
+    private(set) var advertURL: String?
+
     func load(_ url: URL) {
+        advertURL = nil
         isLoading = true
         webView.load(URLRequest(url: url))
     }
@@ -702,7 +707,10 @@ final class WebPage: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { isLoading = true }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { isLoading = false }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isLoading = false
+        if advertURL == nil { advertURL = webView.url?.absoluteString }
+    }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { isLoading = false }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { isLoading = false }
 }

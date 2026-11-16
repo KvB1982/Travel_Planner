@@ -125,7 +125,7 @@ public actor DemoBackend: TravelBackend {
         })
     }
 
-    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool) async throws {
+    public func capture(candidateId: String, html: String, sourceId: String?, forTrip: Bool, url: String?) async throws {
         var detail = try detail(candidateId)
         if forTrip {
             detail.candidate.importNote = "Für den Reisezeitraum auf dem Gerät geprüft (\(html.utf8.count / 1024) KB). In der Demo wird die Seite nicht ausgewertet."
