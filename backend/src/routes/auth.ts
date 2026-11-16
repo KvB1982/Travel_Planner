@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { appleKeys, verifyAppleToken } from "../auth/apple.js";
 import { hashToken, newToken, safeEqual } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
 import { invites, sessions, tripMembers, trips, users } from "../db/schema.js";
@@ -84,11 +85,58 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(201).send({ token: sessionToken, user: { id: result.uid, name: result.name }, tripId: result.tripId, role: result.role });
   });
 
-  app.get("/me", async (req) => {
-    const uid = userId(req);
-    const [user] = await db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.id, uid)).limit(1);
-    return { user };
+  const keys = ctx.appleKeys ?? appleKeys();
+  const appleBody = z.object({ identityToken: z.string().min(20).max(8000), nonce: z.string().min(8).max(200).optional(), deviceName: z.string().max(80).optional() });
+  const identityOf = async (body: z.infer<typeof appleBody>) => {
+    const audiences = ctx.config.APPLE_CLIENT_IDS.split(",").map((s) => s.trim()).filter(Boolean);
+    let identity;
+    try {
+      identity = await verifyAppleToken(body.identityToken, audiences, keys, { nonce: body.nonce });
+    } catch (err) {
+      app.log.error({ err }, "apple keys unavailable");
+      throw new HttpError(503, "apple_unavailable", "Apple ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.");
+    }
+    if (!identity) throw new HttpError(401, "apple_token_invalid", "Die Anmeldung mit Apple konnte nicht bestätigt werden.");
+    return identity;
+  };
+
+  /**
+   * Sign in with Apple. Opens a session for the account this Apple ID is linked to.
+   * New accounts still come from an invite only: an Apple ID nobody linked is turned away.
+   */
+  app.post("/auth/apple", strictLimit, async (req, reply) => {
+    const body = parseBody(appleBody, req.body);
+    const identity = await identityOf(body);
+    const [user] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.appleSub, identity.sub)).limit(1);
+    if (!user) throw new HttpError(404, "apple_not_linked", "Diese Apple-ID ist mit keinem Konto verknüpft. Tritt zuerst mit einer Einladung bei und verknüpfe sie dann in den Einstellungen.");
+    const token = await createSession(ctx, user.id, body.deviceName);
+    return reply.code(201).send({ token, user });
   });
+
+  /** Link the Apple ID to the account one is signed in with, so that it opens this account on any device. */
+  app.put("/me/apple", strictLimit, async (req) => {
+    const uid = userId(req);
+    const identity = await identityOf(parseBody(appleBody, req.body));
+    const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.appleSub, identity.sub)).limit(1);
+    if (taken && taken.id !== uid) throw new HttpError(409, "apple_in_use", "Diese Apple-ID gehört schon zu einem anderen Konto.");
+    await db.update(users).set({ appleSub: identity.sub, ...(identity.email ? { email: sql`coalesce(${users.email}, ${identity.email})` } : {}) }).where(eq(users.id, uid));
+    return { user: await me(uid) };
+  });
+
+  /** Take the link away again. Sessions that are open stay open. */
+  app.delete("/me/apple", async (req) => {
+    const uid = userId(req);
+    await db.update(users).set({ appleSub: null }).where(eq(users.id, uid));
+    return { user: await me(uid) };
+  });
+
+  async function me(uid: string) {
+    const [user] = await db.select({ id: users.id, name: users.name, email: users.email, appleSub: users.appleSub }).from(users).where(eq(users.id, uid)).limit(1);
+    const { appleSub, ...rest } = user!;
+    return { ...rest, apple: appleSub !== null };
+  }
+
+  app.get("/me", async (req) => ({ user: await me(userId(req)) }));
 
   app.post("/auth/logout", async (req, reply) => {
     userId(req);

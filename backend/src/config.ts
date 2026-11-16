@@ -15,6 +15,8 @@ const schema = z.object({
   DAILY_SEARCHES: z.coerce.number().int().min(1).default(30),
   /** Where uploaded documents are kept. In the container a volume is mounted here. */
   FILES_DIR: z.string().default("/data/files"),
+  /** The app's bundle identifiers, separated by commas: who "Sign in with Apple" tokens have to be issued for. */
+  APPLE_CLIENT_IDS: z.string().default("com.von-bleichert.travelplanner"),
 });
 
 export type Config = z.infer<typeof schema>;

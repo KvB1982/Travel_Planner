@@ -32,7 +32,22 @@ Fehler haben immer die Form `{"error": {"code": "...", "message": "..."}}`. Die 
 | GET | `/me` | Eigenes Konto. |
 | POST | `/auth/logout` | Aktuelle Sitzung beenden. |
 
-Geplant, aber noch nicht umgesetzt: „Mit Apple anmelden" und die Anmeldung per E-Mail-Link für das Web.
+### Mit Apple anmelden
+
+Die Apple-ID öffnet ein bestehendes Konto auf jedem Gerät, sie legt keines an. Neue Personen kommen weiter nur per Einladung dazu und verknüpfen danach ihre Apple-ID.
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| PUT | `/me/apple` | Angemeldet: Apple-ID mit dem eigenen Konto verknüpfen. Körper: `identityToken`, optional `nonce`. Antwort `{ user }` mit `apple: true`. 409 `apple_in_use`, wenn sie schon zu einem anderen Konto gehört. |
+| POST | `/auth/apple` | Ohne Anmeldung: Sitzung für das verknüpfte Konto. Körper: `identityToken`, optional `nonce`, `deviceName`. Antwort 201 `{ token, user }`. 404 `apple_not_linked`, wenn die Apple-ID zu keinem Konto gehört. |
+| DELETE | `/me/apple` | Verknüpfung lösen. |
+
+- `identityToken` ist das Token aus `ASAuthorizationAppleIDCredential.identityToken` als Text. Der Server prüft Signatur, Aussteller, Ablauf und dass es für die Bundle-ID der App ausgestellt ist (`APPLE_CLIENT_IDS`, Vorgabe `com.von-bleichert.travelplanner`).
+- `nonce`: Wer beim Anfordern eine Nonce setzt, schickt hier den ungehashten Wert mit; im Token steht dann dessen SHA-256 als Hex.
+- Fehler: 401 `apple_token_invalid`, 503 `apple_unavailable` (Apples Schlüssel nicht abrufbar).
+- `GET /me` nennt unter `user.apple`, ob eine Apple-ID verknüpft ist.
+
+Geplant, aber noch nicht umgesetzt: die Anmeldung per E-Mail-Link für das Web.
 
 ## Reisen
 
