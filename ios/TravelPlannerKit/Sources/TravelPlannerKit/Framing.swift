@@ -94,6 +94,10 @@ public struct ActivityEvent: Decodable, Identifiable, Hashable, Sendable {
         case "expense_added": return "hat eine Ausgabe\(amount) eingetragen"
         case "expense_removed": return "hat eine Ausgabe\(amount) gelöscht"
         case "payment_noted": return "hat eine Ausgleichszahlung\(amount) abgehakt"
+        case "booking_added": return "hat eine Buchung eingetragen" + (words["kind"].flatMap(BookingKind.init(rawValue:)).map { " (\($0.label))" } ?? "")
+        case "booking_removed": return "hat eine Buchung gelöscht"
+        case "document_added": return "hat ein Dokument hochgeladen"
+        case "document_removed": return "hat ein Dokument gelöscht"
         default: return "hat etwas geändert"
         }
     }
