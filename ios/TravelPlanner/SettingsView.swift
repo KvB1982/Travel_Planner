@@ -71,6 +71,8 @@ struct SettingsView: View {
 
                 Section("App") {
                     LabeledContent("Version", value: version)
+                    LabeledContent("Herkunft", value: origin)
+                    if let built { LabeledContent("Gebaut am", value: built) }
                 }
             }
             .navigationTitle("Einstellungen")
@@ -89,5 +91,21 @@ struct SettingsView: View {
     private var version: String {
         let info = Bundle.main.infoDictionary
         return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    }
+
+    /// Where this copy of the app came from, so two copies with the same number can be told apart.
+    private var origin: String {
+        #if DEBUG
+        return "Entwicklerversion vom Mac"
+        #else
+        return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" ? "TestFlight" : "App Store"
+        #endif
+    }
+
+    /// When the app itself was built, read from its program file.
+    private var built: String? {
+        guard let path = Bundle.main.executablePath,
+              let date = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
+        return date.formatted(.dateTime.day().month().year().hour().minute().locale(Locale(identifier: "de_DE")))
     }
 }
