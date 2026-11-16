@@ -317,6 +317,7 @@ struct CandidateListView: View {
 private struct InviteSheet: View {
     let invite: Invite
     @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
 
     var body: some View {
         NavigationStack {
@@ -326,8 +327,15 @@ private struct InviteSheet: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Text(invite.url).font(.callout.monospaced()).textSelection(.enabled).multilineTextAlignment(.center)
-                if let url = URL(string: invite.url) {
-                    ShareLink("Einladung senden", item: url).buttonStyle(.borderedProminent)
+                HStack(spacing: 12) {
+                    Button(copied ? "Kopiert" : "Link kopieren", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                        UIPasteboard.general.string = invite.url
+                        copied = true
+                    }
+                    .buttonStyle(.bordered)
+                    if let url = URL(string: invite.url) {
+                        ShareLink("Einladung senden", item: url).buttonStyle(.borderedProminent)
+                    }
                 }
                 Spacer()
             }
