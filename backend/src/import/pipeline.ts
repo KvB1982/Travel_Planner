@@ -198,7 +198,15 @@ export async function processImport(
       `import ${input.link.platform}/${input.link.externalId}${secondary ? " (further source)" : ""}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}, reviews ${blocks.reviews.length}, captured ${blocks.captured.total} marked ${blocks.captured.marked}, review blocks ${blocks.capturedReviews.length}`,
     );
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
-    const { profile: extracted, note } = await deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
+    const read = () => deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
+    let { profile: extracted, note } = await read();
+    // The same page has been seen to give a price on one reading and nothing on the next.
+    // A look for the trip that comes back empty is therefore read once more before it counts as empty.
+    if (priceBelongsToTrip && extracted.price.totalEur === null && extracted.price.available === null) {
+      console.info(`import ${input.link.platform}/${input.link.externalId}: no price and no availability for the trip, reading once more`);
+      const second = await read();
+      if (second.profile.price.totalEur !== null || second.profile.price.available !== null) ({ profile: extracted, note } = second);
+    }
 
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
     const before = current?.profile ?? emptyProfile(input.link.kind);
