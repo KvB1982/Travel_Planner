@@ -60,6 +60,12 @@ public protocol TravelBackend: Sendable {
     func deleteActivity(activityId: String) async throws -> TripPlan
     /// "yes", "maybe" or "no"; nil takes the answer back.
     func respond(activityId: String, answer: String?) async throws -> TripPlan
+    /// The house book of the trip with what fact sheet and booking suggest for empty fields.
+    func house(tripId: String) async throws -> HouseBook
+    /// Changes only the given fields; `.null` empties one.
+    func updateHouse(tripId: String, changes: [String: PatchValue]) async throws -> HouseBook
+    /// What happens on this day at the destination, as `JJJJ-MM-TT`.
+    func today(tripId: String, date: String) async throws -> TripDay
     /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
     func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
     /// Moves the trip to a phase by hand, forwards or back. Nothing is deleted.
@@ -483,6 +489,20 @@ public struct APIClient: TravelBackend {
             enum CodingKeys: String, CodingKey { case answer }
         }
         return try await (send("PUT", "/activities/\(activityId.pathEscaped)/response", body: Body(answer: answer)) as PlanAnswer).plan
+    }
+
+    // MARK: On the road
+
+    public func house(tripId: String) async throws -> HouseBook {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/house")
+    }
+
+    public func updateHouse(tripId: String, changes: [String: PatchValue]) async throws -> HouseBook {
+        try await send("PUT", "/trips/\(tripId.pathEscaped)/house", body: changes)
+    }
+
+    public func today(tripId: String, date: String) async throws -> TripDay {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/today?date=\(date.pathEscaped)")
     }
 
     // MARK: Frame of the trip

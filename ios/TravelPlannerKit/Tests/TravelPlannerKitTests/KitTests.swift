@@ -975,3 +975,37 @@ final class PlanTests: XCTestCase {
         } catch let error as APIError { XCTAssertEqual(error.code, "no_decision") }
     }
 }
+
+final class HouseTests: XCTestCase {
+    func testHouseBookDecodesAndTellsChanges() throws {
+        let json = #"{"house":{"address":null,"lat":null,"lon":null,"checkInFrom":null,"keyInfo":"Schlüsselkasten 4711","wifiName":"Villa","wifiPassword":"geheim","updatedBy":"u","updatedAt":"2027-01-01T00:00:00Z"},"suggestions":{"title":"Haus","address":"Sukošan","lat":44.05,"lon":15.31,"checkInFrom":"16:00","checkOutUntil":"10:00","arrival":"2027-08-21T16:00","bookingId":"b","reference":"NOV-123"}}"#
+        let book = try JSONDecoder().decode(HouseBook.self, from: Data(json.utf8))
+        XCTAssertEqual(book.house.text("keyInfo"), "Schlüsselkasten 4711")
+        XCTAssertNil(book.house.text("address"))
+        XCTAssertEqual(book.suggestions.text("address"), "Sukošan")
+        var typed = Dictionary(uniqueKeysWithValues: House.fields.map { ($0.key, book.house.text($0.key) ?? "") })
+        XCTAssertTrue(book.changes(typed: typed).isEmpty)
+        typed["address"] = "Sukošan"; typed["wifiName"] = " "
+        XCTAssertEqual(book.changes(typed: typed), ["address": .text("Sukošan"), "wifiName": .null])
+        let empty = try JSONDecoder().decode(HouseBook.self, from: Data(#"{"house":null,"suggestions":{}}"#.utf8))
+        XCTAssertNil(empty.house.text("wifiName"))
+    }
+
+    func testHouseAndTodayInSampleData() async throws {
+        let demo = DemoBackend()
+        var book = try await demo.house(tripId: "t-1")
+        XCTAssertEqual(book.suggestions.checkInFrom, "16:00")
+        book = try await demo.updateHouse(tripId: "t-1", changes: ["address": .text("Via Roma 1"), "waste": .null])
+        XCTAssertEqual(book.house.address, "Via Roma 1")
+        XCTAssertNil(book.house.waste)
+        let arrival = try await demo.today(tripId: "t-1", date: "2027-05-15")
+        XCTAssertTrue(arrival.arrivalDay)
+        XCTAssertEqual(arrival.legs.count, 2)
+        XCTAssertEqual(arrival.bookings.first?.begins, true)
+        let middle = try await demo.today(tripId: "t-1", date: "2027-05-18")
+        XCTAssertEqual(middle.activities.map(\.title), ["Weinprobe in Radda"])
+        XCTAssertEqual(middle.ideas, 1)
+        let quiet = try await demo.today(tripId: "t-1", date: "2027-05-20")
+        XCTAssertTrue(quiet.isEmpty)
+    }
+}

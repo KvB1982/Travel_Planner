@@ -26,6 +26,7 @@ struct CandidateListView: View {
     @State private var framingSheet: FramingSheet?
     @State private var bookingRequests = BookingRequests()
     @State private var planSheet: PlanSheet?
+    @State private var houseEditing: HouseBook?
     @State private var removingPeriod: DateOption?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
@@ -124,6 +125,8 @@ struct CandidateListView: View {
             BookingSections(detail: detail, candidates: candidates, requests: $bookingRequests)
         case .preparation:
             PreparationSections(detail: detail, sheet: $planSheet)
+        case .travelling:
+            TravellingSections(detail: detail, editing: $houseEditing, showLedger: { showLedger = true })
         default:
             PhasePlaceholder(phase: viewedPhase)
         }
@@ -304,6 +307,9 @@ struct CandidateListView: View {
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
+        .sheet(item: $houseEditing) { book in
+            HouseEditor(book: book) { changes in frame { _ = try await $0.updateHouse(tripId: tripID, changes: changes) } }
+        }
         .modifier(PlanPresenter(tripID: tripID, sheet: $planSheet, run: frame))
         .modifier(BookingPresenter(tripID: tripID, requests: $bookingRequests, run: frame))
         .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, run: frame))
@@ -359,7 +365,7 @@ struct CandidateListView: View {
             error = nil
             if !phasePicked, let trip = detail?.trip {
                 // Open the surface the trip is in; phases without a surface yet fall back to the research.
-                viewedPhase = [.framing, .research, .decision, .booking, .preparation].contains(trip.activePhase) ? trip.activePhase : .research
+                viewedPhase = [.framing, .research, .decision, .booking, .preparation, .travelling].contains(trip.activePhase) ? trip.activePhase : .research
             }
         } catch is CancellationError {
         } catch {

@@ -406,6 +406,54 @@ public actor DemoBackend: TravelBackend {
         return try preparation(key)
     }
 
+    // MARK: On the road
+
+    private var houses: [String: House] = ["t-1": {
+        var house = House()
+        house.keyInfo = "Schlüsselkasten links neben der Tür, Code 4711"
+        house.wifiName = "CasaOlivia"; house.wifiPassword = "chianti2027"
+        house.contactName = "Signora Bianchi"; house.contactPhone = "+39 0577 123456"
+        house.waste = "Restmüll montags, Glas in den Container an der Dorfstraße"
+        return house
+    }()]
+
+    private func book(_ tripId: String) throws -> HouseBook {
+        _ = try tripIndex(tripId)
+        let stay = (booked[tripId] ?? []).first { $0.kind == .accommodation && $0.status != "cancelled" }
+        let suggestions = HouseBook.Suggestions(title: stay?.title, address: stay?.place, checkInFrom: stay?.startsAt.map { String($0.suffix(5)) },
+                                                checkOutUntil: stay?.endsAt.map { String($0.suffix(5)) }, arrival: stay?.startsAt, departure: stay?.endsAt,
+                                                reference: stay?.reference)
+        return HouseBook(house: houses[tripId] ?? House(), suggestions: suggestions)
+    }
+
+    public func house(tripId: String) async throws -> HouseBook { try book(tripId) }
+
+    public func updateHouse(tripId: String, changes: [String: PatchValue]) async throws -> HouseBook {
+        _ = try tripIndex(tripId)
+        var house = houses[tripId] ?? House()
+        for (key, value) in changes {
+            guard House.fields.contains(where: { $0.key == key }) else { throw APIError(status: 400, code: "invalid_request", message: "\(key): unbekannt") }
+            if case .text(let text) = value { house.set(key, text) } else { house.set(key, nil) }
+        }
+        houses[tripId] = house
+        return try book(tripId)
+    }
+
+    public func today(tripId: String, date: String) async throws -> TripDay {
+        let plan = try preparation(tripId)
+        let stays = (booked[tripId] ?? []).filter { $0.status != "cancelled" }
+        func on(_ text: String?) -> Bool { text?.hasPrefix(date) == true }
+        let marks = stays.filter { on($0.startsAt) || on($0.endsAt) }.map {
+            TripDay.BookingMark(id: $0.id, kind: $0.kind, title: $0.title, startsAt: $0.startsAt, endsAt: $0.endsAt, place: $0.place, reference: $0.reference,
+                                begins: on($0.startsAt), ends: on($0.endsAt))
+        }
+        let home = stays.first { $0.kind == .accommodation }
+        return TripDay(date: date, arrivalDay: on(home?.startsAt), departureDay: on(home?.endsAt),
+                       legs: plan.legs.filter { on($0.departAt) || on($0.arriveAt) },
+                       activities: plan.activities.filter { on($0.startsAt) && $0.status != "cancelled" }, bookings: marks,
+                       ideas: plan.activities.filter { $0.startsAt == nil && $0.status == "idea" }.count)
+    }
+
     // MARK: Frame of the trip
 
     private var periods: [String: [DateOption]] = [
