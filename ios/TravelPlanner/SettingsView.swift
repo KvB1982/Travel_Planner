@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage(Settings.showCheckRun) private var showCheckRun = false
     @AppStorage(Settings.showWarnings) private var showWarnings = false
     @State private var confirmSignOut = false
+    @State private var appleError: String?
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,27 @@ struct SettingsView: View {
                     }
                     Button(model.isDemo ? "Beispieldaten verlassen" : "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                         confirmSignOut = true
+                    }
+                }
+
+                if !model.isDemo, let user = model.user {
+                    Section {
+                        if user.apple == true {
+                            Label("Apple-ID verknüpft", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                            Button("Verknüpfung lösen", role: .destructive) {
+                                Task { do { try await model.unlinkApple(); appleError = nil } catch { appleError = model.message(for: error) } }
+                            }
+                        } else {
+                            AppleButton(label: .continue) { token, nonce in
+                                Task { do { try await model.linkApple(identityToken: token, nonce: nonce); appleError = nil } catch { appleError = model.message(for: error) } }
+                            } failed: { appleError = $0 }
+                        }
+                        if let appleError { Label(appleError, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    } header: {
+                        Text("Auf mehreren Geräten")
+                    } footer: {
+                        Text(user.apple == true ? "Auf einem weiteren Gerät meldest du dich auf dem Startbildschirm mit Apple an und landest in diesem Konto."
+                                                : "Verknüpfe deine Apple-ID mit diesem Konto. Danach öffnest du es auf weiteren Geräten ohne neue Einladung.")
                     }
                 }
 

@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @State private var name = ""
     @State private var server = ""
     @State private var secret = ""
+    @State private var appleServer = ""
     @State private var busy = false
     @State private var error: String?
 
@@ -34,6 +35,22 @@ struct OnboardingView: View {
                     Text("Mit Einladung beitreten")
                 } footer: {
                     Text("Den Link bekommst du von der Person, die die Reise organisiert.")
+                }
+
+                Section {
+                    TextField("Serveradresse", text: $appleServer)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    AppleButton { token, nonce in
+                        run { try await model.signInWithApple(server: appleServer, identityToken: token, nonce: nonce) }
+                    } failed: { error = $0 }
+                    .disabled(busy || appleServer.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .opacity(appleServer.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                } header: {
+                    Text("Schon ein Konto?")
+                } footer: {
+                    Text("Wenn du deine Apple-ID auf einem anderen Gerät in den Einstellungen verknüpft hast, öffnet sie hier dasselbe Konto. Ein neues Konto entsteht so nicht.")
                 }
 
                 Section {
@@ -64,6 +81,7 @@ struct OnboardingView: View {
                 }
             }
             .navigationTitle("Travel Planner")
+            .onAppear { if appleServer.isEmpty, let known = model.serverURL { appleServer = known.absoluteString } }
             .overlay {
                 if busy { ProgressView().controlSize(.large) }
             }

@@ -70,6 +70,36 @@ final class AppModel {
         try signIn(server: url, result: result)
     }
 
+    /// Opens the account this Apple ID is linked to, on the given server.
+    func signInWithApple(server: String, identityToken: String, nonce: String) async throws {
+        var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text), url.host() != nil else {
+            throw APIError(status: 0, code: "bad_url", message: "Die Serveradresse ist ungültig.")
+        }
+        do {
+            let result = try await APIClient(baseURL: url).signInWithApple(identityToken: identityToken, nonce: nonce, deviceName: UIDevice.current.name)
+            try signIn(server: url, result: result)
+        } catch let error as APIError where error.code == "apple_not_linked" {
+            throw APIError(status: error.status, code: error.code,
+                           message: "Diese Apple-ID gehört noch zu keinem Konto. Tritt zuerst mit einer Einladung bei und verknüpfe die Apple-ID dann in den Einstellungen.")
+        }
+    }
+
+    /// Links the Apple ID to the account signed in here, so other devices can open it without an invite.
+    func linkApple(identityToken: String, nonce: String) async throws {
+        guard let client = backend as? APIClient else {
+            throw APIError(status: 0, code: "demo", message: "Mit den Beispieldaten lässt sich keine Apple-ID verknüpfen.")
+        }
+        user = try await client.linkApple(identityToken: identityToken, nonce: nonce)
+    }
+
+    func unlinkApple() async throws {
+        guard let client = backend as? APIClient else { return }
+        try await client.unlinkApple()
+        user = try await client.me()
+    }
+
     private func signIn(server: URL, result: AuthResult) throws {
         guard let token = result.token else {
             throw APIError(status: 0, code: "no_token", message: "Der Server hat keine Anmeldung zurückgegeben.")

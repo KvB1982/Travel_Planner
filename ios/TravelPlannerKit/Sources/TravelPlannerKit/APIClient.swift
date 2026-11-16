@@ -253,6 +253,25 @@ public struct APIClient: TravelBackend {
         return try await send("POST", "/auth/invites/\(token.pathEscaped)/accept", body: Body(name: name, deviceName: deviceName))
     }
 
+    // MARK: Sign in with Apple
+
+    /// Opens the account an Apple ID is linked to. Fails with `apple_not_linked` when there is none: the Apple ID never creates an account.
+    public func signInWithApple(identityToken: String, nonce: String?, deviceName: String?) async throws -> AuthResult {
+        struct Body: Encodable { var identityToken: String; var nonce: String?; var deviceName: String? }
+        return try await send("POST", "/auth/apple", body: Body(identityToken: identityToken, nonce: nonce, deviceName: deviceName))
+    }
+
+    /// Links the Apple ID to the signed-in account.
+    public func linkApple(identityToken: String, nonce: String?) async throws -> User {
+        struct Body: Encodable { var identityToken: String; var nonce: String? }
+        struct Response: Decodable { var user: User }
+        return try await (send("PUT", "/me/apple", body: Body(identityToken: identityToken, nonce: nonce)) as Response).user
+    }
+
+    public func unlinkApple() async throws {
+        _ = try await data("DELETE", "/me/apple")
+    }
+
     // MARK: TravelBackend
 
     public func me() async throws -> User {

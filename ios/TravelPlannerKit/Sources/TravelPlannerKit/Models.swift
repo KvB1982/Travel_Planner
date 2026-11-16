@@ -39,11 +39,14 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var email: String?
+    /// True when an Apple ID opens this account. Nil on servers that do not know the feature.
+    public var apple: Bool?
 
-    public init(id: String, name: String, email: String? = nil) {
+    public init(id: String, name: String, email: String? = nil, apple: Bool? = nil) {
         self.id = id
         self.name = name
         self.email = email
+        self.apple = apple
     }
 }
 
