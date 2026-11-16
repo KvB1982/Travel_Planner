@@ -53,7 +53,7 @@ Liefert `GET /candidates/:id` die Felder `reviewSummary` (`summary`, `positives`
 
 ## Löschen und Aktualisieren
 
-Angebote lassen sich in der Liste per Wischen oder im Menü des Steckbriefs löschen, jeweils mit Rückfrage. Unter „Quellen“ ruft „Aktualisieren“ das Inserat über den Server neu ab, „Auf diesem Gerät aktualisieren“ liest es in der App neu aus. Dabei merkt sich die App alle Fotos, die die Seite lädt, und hängt sie als `tp-captured-images` an das gesendete HTML.
+Angebote lassen sich in der Liste per Wischen oder im Menü des Steckbriefs löschen, jeweils mit Rückfrage. Unter „Quellen“ ruft „Aktualisieren“ das Inserat über den Server neu ab, „Auf diesem Gerät aktualisieren“ liest es in der App neu aus. Beim Übernehmen blättert die App die Bildergalerie des Inserats selbst durch (Galerie-Dialog, Wisch-Karussell oder seitlich scrollende Bildreihe), klappt die Bewertungen auf und hängt alle geladenen Fotos als `tp-captured-images` und die Einzelbewertungen als `tp-captured-reviews` an das gesendete HTML. Findet sie deutlich weniger Fotos, als das Inserat hat, fragt sie vor dem Senden nach. Zum Testen an einem echten Inserat: Debug-Build mit Beispieldaten und `-demoLink <Adresse>` starten.
 
 ## Vergleich und Hinweise
 

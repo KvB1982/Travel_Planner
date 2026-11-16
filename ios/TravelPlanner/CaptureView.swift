@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import TravelPlannerKit
 import WebKit
@@ -21,6 +22,8 @@ struct CaptureView: View {
     @State private var page = WebPage()
     @State private var sending = false
     @State private var confirmFewPictures = false
+    /// A reading that is waiting for the answer to "send it although photos are missing?".
+    @State private var held: WebPage.Captured?
     @State private var error: String?
 
     var body: some View {
@@ -33,8 +36,8 @@ struct CaptureView: View {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
                     } else {
                         Text(sending
-                             ? "Die Seite wird durchgescrollt, die Bewertungen werden aufgeklappt und alle geladen. Das dauert bis zu einer halben Minute."
-                             : "Stelle Zeitraum und Personen ein. Für alle Bilder: Blättere die Bildergalerie des Inserats einmal durch. Die Bewertungen klappt die App beim Übernehmen selbst auf.")
+                             ? (page.progress ?? "Lese die Seite …") + " Das dauert bis zu einer Minute, bitte nichts antippen."
+                             : "Stelle Zeitraum und Personen ein und tippe auf „Übernehmen“. Die App blättert dann selbst durch die Bildergalerie und klappt die Bewertungen auf.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -45,12 +48,7 @@ struct CaptureView: View {
                             .contentTransition(.numericText())
                     }
                     Button {
-                        // Far fewer photos than the advert has: the gallery was not flipped through. Ask before sending.
-                        if let expectedPictures, expectedPictures >= 8, page.pictureCount * 2 < expectedPictures {
-                            confirmFewPictures = true
-                        } else {
-                            capture()
-                        }
+                        capture()
                     } label: {
                         if sending { ProgressView() } else { Text("Übernehmen").frame(maxWidth: .infinity) }
                     }
@@ -73,12 +71,15 @@ struct CaptureView: View {
         .onAppear {
             if let url = URL(string: source.url) { page.load(url) }
         }
-        .confirmationDialog("Nur \(page.pictureCount) von etwa \(expectedPictures ?? 0) Bildern geladen", isPresented: $confirmFewPictures, titleVisibility: .visible) {
+        // The automatic browsing found far fewer photos than the advert has: ask before a poorer set is sent.
+        .confirmationDialog("Nur \(held?.pictures ?? 0) von etwa \(expectedPictures ?? 0) Bildern gefunden", isPresented: $confirmFewPictures, titleVisibility: .visible) {
             // No cancel role: the system would hide that button here, and it is the recommended choice.
-            Button("Erst die Galerie durchblättern") {}
-            Button("Trotzdem übernehmen") { capture() }
+            Button("Selbst durchblättern, dann erneut") { held = nil }
+            Button("Trotzdem übernehmen") {
+                if let held { send(held) }
+            }
         } message: {
-            Text("Übernommen werden nur Bilder, die die Seite geladen hat. Öffne die Bildergalerie des Inserats und blättere einmal bis zum Ende, der Zähler unten zählt mit.")
+            Text("Die App konnte die Bildergalerie dieser Seite nicht vollständig durchblättern. Öffne die Galerie des Inserats selbst, blättere bis zum Ende und tippe noch einmal auf „Übernehmen“. Der Zähler unten zählt mit.")
         }
         .task {
             // Shows the count growing while the gallery is flipped through.
@@ -90,7 +91,6 @@ struct CaptureView: View {
     }
 
     private func capture() {
-        guard let backend = model.backend else { return }
         sending = true
         error = nil
         Task {
@@ -99,6 +99,26 @@ struct CaptureView: View {
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
+                if let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < expectedPictures {
+                    held = captured
+                    sending = false
+                    confirmFewPictures = true
+                    return
+                }
+                send(captured)
+            } catch {
+                self.error = model.message(for: error)
+                sending = false
+            }
+        }
+    }
+
+    private func send(_ captured: WebPage.Captured) {
+        guard let backend = model.backend else { return }
+        sending = true
+        held = nil
+        Task {
+            do {
                 try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID)
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
@@ -114,12 +134,15 @@ struct CaptureView: View {
 @MainActor
 @Observable
 final class WebPage: NSObject, WKNavigationDelegate {
+    private static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Auslesen")
     let webView: WKWebView
     var isLoading = false
     /// Large pictures the page has shown so far, including ones a gallery has since swapped out.
     var pictureCount = 0
     /// Single reviews that can be read off the page as it is right now.
     var reviewCount = 0
+    /// What the automatic reading is doing at the moment, shown while it runs.
+    var progress: String?
 
     /// Remembers every picture of photo size as it loads (phone pages serve small versions, so the bar is low;
     /// icons and tracking pixels stay below it). Galleries keep only a few pictures in the page at a time,
@@ -209,6 +232,189 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return Object.keys(seen).map(function (address) { return { url: address, gallery: seen[address] === true }; });
       };
     })();
+    """
+
+    /// Opens the advert's photo gallery and flips or scrolls through it, so every photo gets loaded once
+    /// and the collector sees it. Stops when no new photo has appeared for a while.
+    private static let browseGallery = """
+    function count() { try { return window.__tpCollect().filter(function (p) { return p.gallery; }).length; } catch (e) { return 0; } }
+    function wait(ms) { return new Promise(function (done) { setTimeout(done, ms); }); }
+    function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !el.disabled; }
+    function staysHere(el) {
+      var link = el.closest('a[href]');
+      if (!link) { return true; }
+      try {
+        var target = new URL(link.getAttribute('href'), location.href);
+        return target.origin === location.origin && target.pathname.indexOf(location.pathname.replace(/\\/$/, '')) === 0;
+      } catch (e) { return false; }
+    }
+    function label(el) { return ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).trim(); }
+
+    // Sliders listen to fingers, not to click(): send what a finger would send, in every dialect.
+    function fire(el, type, x, y) {
+      try {
+        if (type.indexOf('touch') === 0) {
+          if (typeof Touch === 'undefined' || typeof TouchEvent === 'undefined') { return; }
+          var touch = new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x + window.scrollX, pageY: y + window.scrollY, screenX: x, screenY: y });
+          var list = type === 'touchend' ? [] : [touch];
+          el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: list, targetTouches: list, changedTouches: [touch] }));
+        } else if (type.indexOf('pointer') === 0) {
+          el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', isPrimary: true, buttons: type === 'pointerup' ? 0 : 1 }));
+        } else {
+          el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, buttons: type === 'mouseup' || type === 'click' ? 0 : 1 }));
+        }
+      } catch (e) {}
+    }
+    function tap(el) {
+      var r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      ['pointerdown', 'touchstart', 'mousedown', 'pointerup', 'touchend', 'mouseup', 'click'].forEach(function (type) { fire(el, type, x, y); });
+    }
+    async function swipeLeft(el) {
+      var r = el.getBoundingClientRect(), y = r.top + r.height / 2, from = r.left + r.width * 0.85, to = r.left + r.width * 0.1;
+      ['pointerdown', 'touchstart', 'mousedown'].forEach(function (type) { fire(el, type, from, y); });
+      for (var step = 1; step <= 6; step++) {
+        var x = from + (to - from) * step / 6;
+        ['pointermove', 'touchmove', 'mousemove'].forEach(function (type) { fire(el, type, x, y); });
+        await wait(16);
+      }
+      ['pointerup', 'touchend', 'mouseup'].forEach(function (type) { fire(el, type, to, y); });
+    }
+
+    var before = count();
+    // 1. Open the gallery: a control that names the photos, otherwise the first large photo of the advert.
+    var opener = null;
+    var controls = document.querySelectorAll('button, [role="button"], a[href]');
+    for (var i = 0; i < controls.length && !opener; i++) {
+      var text = label(controls[i]);
+      if (text.length === 0 || text.length > 60 || !visible(controls[i]) || !staysHere(controls[i])) { continue; }
+      if (/(fotos|bilder|photos|images|galerie|gallery)/i.test(text) && /(alle|all|anzeigen|ansehen|show|view|mehr|more|\\+\\s?\\d|\\d)/i.test(text)) { opener = controls[i]; }
+    }
+    // Some sites only say "Alle anzeigen" on the button that sits on the first photo. The same words open
+    // other lists further down (amenities), so only a button on or right under that photo counts.
+    var hero = null;
+    for (var h = 0; h < document.images.length && !hero; h++) {
+      var hb = document.images[h].getBoundingClientRect();
+      if (hb.width >= 240 && hb.height >= 160 && !document.images[h].closest('nav, header, footer')) { hero = document.images[h]; }
+    }
+    if (!opener && hero) {
+      var heroBox = hero.getBoundingClientRect();
+      for (var a = 0; a < controls.length && !opener; a++) {
+        var words = label(controls[a]);
+        if (!/^(alle|all|show all|view all)(\\s+(anzeigen|ansehen|zeigen))?$/i.test(words) || !visible(controls[a]) || !staysHere(controls[a])) { continue; }
+        var cb = controls[a].getBoundingClientRect();
+        if (cb.top >= heroBox.top - 20 && cb.top <= heroBox.bottom + 60) { opener = controls[a]; }
+      }
+    }
+    if (!opener) {
+      for (var j = 0; j < document.images.length && !opener; j++) {
+        var img = document.images[j];
+        var box = img.getBoundingClientRect();
+        if (box.width >= 240 && box.height >= 160 && box.top + window.scrollY < 1200 && staysHere(img) && !img.closest('nav, header, footer')) { opener = img; }
+      }
+    }
+    // What the page offers, for the log: this is how a site the search does not fit gets understood.
+    var seen = [];
+    for (var k = 0; k < controls.length && seen.length < 25; k++) {
+      var t = label(controls[k]);
+      if (t.length > 0 && t.length <= 80 && /(foto|bild|galer|photo|image|pictur)/i.test(t)) { seen.push(controls[k].tagName + ':' + t.replace(/\\s+/g, ' ')); }
+    }
+    var how = opener ? (opener.tagName + ':' + label(opener).slice(0, 60)) : 'none';
+    if (!opener) { return JSON.stringify({ opened: false, how: how, seen: seen, before: before, after: before }); }
+    opener.scrollIntoView({ block: 'center' });
+    if (opener.tagName === 'IMG') { tap(opener); } else { opener.click(); }
+    await wait(1800);
+
+    // 2. Flip and scroll until nothing new arrives.
+    var still = 0, last = count();
+    for (var round = 0; round < 200 && still < 8; round++) {
+      // The gallery is the layer over the page with the most pictures: a dialog, or on sites that do not
+      // mark it as one, a box that covers the screen. A cookie banner is such a layer too, but has no pictures.
+      var scope = document, most = 0;
+      var layers = Array.prototype.slice.call(document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog[open]'));
+      if (round % 5 === 0 || !window.__tpLayers) {
+        window.__tpLayers = [];
+        var all = document.querySelectorAll('body *');
+        for (var f = 0; f < all.length; f++) {
+          var position = getComputedStyle(all[f]).position;
+          if (position !== 'fixed' && position !== 'absolute') { continue; }
+          var area = all[f].getBoundingClientRect();
+          if (area.width >= window.innerWidth * 0.9 && area.height >= window.innerHeight * 0.8) { window.__tpLayers.push(all[f]); }
+        }
+      }
+      layers = layers.concat(window.__tpLayers);
+      for (var d = 0; d < layers.length; d++) {
+        var pictures = layers[d].querySelectorAll('img, picture').length;
+        if (pictures > most) { most = pictures; scope = layers[d]; }
+      }
+      var next = null;
+      var buttons = scope.querySelectorAll('button, [role="button"]');
+      for (var b = 0; b < buttons.length && !next; b++) {
+        var name = label(buttons[b]);
+        if (name.length > 30 || !visible(buttons[b]) || /(monat|month|seite|page|woche|week)/i.test(name)) { continue; }
+        // A whole word only: "Weitere Ausstattung anzeigen" is not a next button.
+        var forward = /(^|\\s)(nächste[sr]?|naechste[sr]?|weiter|next|vorwärts|forward)(\\s|$)/i.test(name);
+        var aboutPhotos = /(bild|foto|photo|image|slide)/i.test(name);
+        // Outside a gallery dialog only controls that name the photos are pressed.
+        if (forward && (scope !== document || aboutPhotos)) { next = buttons[b]; }
+      }
+      if (next) { next.click(); }
+      // Galleries that are one long list: move every scrollable box inside on by a screen.
+      var boxes = scope === document ? [document.scrollingElement] : [scope].concat(Array.prototype.slice.call(scope.querySelectorAll('*')));
+      for (var s = 0; s < boxes.length; s++) {
+        var el = boxes[s];
+        if (!el) { continue; }
+        if (el.scrollHeight > el.clientHeight + 100) { el.scrollTop += Math.max(300, el.clientHeight * 0.9); }
+        if (el.scrollWidth > el.clientWidth + 100 && scope !== document) { el.scrollLeft += Math.max(200, el.clientWidth * 0.9); }
+      }
+      await wait(next ? 350 : 500);
+      var now = count();
+      still = now === last ? still + 1 : 0;
+      last = now;
+    }
+
+    // No gallery layer came up and nothing new loaded: the photos sit in a slider on the page itself.
+    // Swipe it along until it stops bringing new photos.
+    var swiped = 0;
+    if (hero && count() === before) {
+      hero.scrollIntoView({ block: 'center' });
+      await wait(300);
+      // Sliders built on plain sideways scrolling: move every such box that holds the first photo, or photos at all.
+      var rows = [];
+      for (var anc = hero.parentElement, depth = 0; anc && depth < 10; anc = anc.parentElement, depth++) {
+        if (anc.scrollWidth > anc.clientWidth + 50) { rows.push(anc); }
+      }
+      var boxesWide = document.querySelectorAll('body *');
+      for (var w = 0; w < boxesWide.length && rows.length < 8; w++) {
+        if (boxesWide[w].scrollWidth > boxesWide[w].clientWidth + 100 && boxesWide[w].querySelectorAll('img').length >= 3 && rows.indexOf(boxesWide[w]) < 0) { rows.push(boxesWide[w]); }
+      }
+      var idle = 0, known = count();
+      for (var pass = 0; rows.length > 0 && pass < 150 && idle < 6; pass++, swiped++) {
+        for (var q = 0; q < rows.length; q++) { rows[q].scrollLeft += Math.max(200, rows[q].clientWidth * 0.9); }
+        await wait(400);
+        var total = count();
+        idle = total === known ? idle + 1 : 0;
+        known = total;
+      }
+      seen.push('ROWS ' + rows.length + ' after ' + count());
+      var quiet = 0, had = count();
+      for (; swiped < 150 && quiet < 6; swiped++) {
+        var top = document.elementFromPoint(window.innerWidth / 2, hero.getBoundingClientRect().top + hero.getBoundingClientRect().height / 2) || hero;
+        await swipeLeft(top);
+        await wait(450);
+        var got = count();
+        quiet = got === had ? quiet + 1 : 0;
+        had = got;
+      }
+    }
+
+    // 3. Close it again where that is a plain button; a gallery on a page of its own is left by going back.
+    var closers = document.querySelectorAll('[role="dialog"] button, [aria-modal="true"] button, dialog[open] button');
+    for (var c = 0; c < closers.length; c++) {
+      if (/(schließen|schliessen|close|zurück|back)/i.test(label(closers[c])) && visible(closers[c])) { closers[c].click(); break; }
+    }
+    await wait(400);
+    return JSON.stringify({ opened: true, how: how, seen: seen, rounds: round, swiped: swiped, before: before, after: count(),
+      dialogs: document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog[open]').length, url: location.href });
     """
 
     /// Opens a collapsed list of reviews, so their text is part of the page that gets sent.
@@ -335,44 +541,63 @@ final class WebPage: NSObject, WKNavigationDelegate {
         try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
     }
 
-    /// The page as rendered, plus every photo seen while it was open and the single reviews.
-    ///
-    /// The advert itself is read first. Only then are the reviews opened, because on some sites that
-    /// leads to a page of its own: the advert and the photos collected so far must not be lost to it.
     struct Captured {
         var html: String
         var pictures: Int
         var reviews: Int
     }
 
+    private func merge(_ more: [Picture], into all: inout [Picture]) {
+        for photo in more {
+            if let index = all.firstIndex(where: { $0.url == photo.url }) {
+                all[index].gallery = all[index].gallery || photo.gallery
+            } else {
+                all.append(photo)
+            }
+        }
+    }
+
+    /// Runs one of the page scripts. If it led to a page of its own (a gallery or a review list with its
+    /// own address), returns to the advert afterwards and reports false.
+    private func run(_ script: String) async -> (stayed: Bool, pictures: [Picture], reviews: [String]) {
+        let mark = UUID().uuidString
+        _ = try? await webView.evaluateJavaScript("window.__tpDocument = '\(mark)'; true")
+        let outcome = try? await webView.callAsyncJavaScript(script, contentWorld: .page)
+        Self.log.info("Auslesen: \(String(describing: outcome ?? "–"), privacy: .public)")
+        await settle()
+        let found = (pictures: await pictures(), reviews: await reviewTexts())
+        let same = ((try? await webView.evaluateJavaScript("window.__tpDocument || ''") as? String) ?? "") == mark
+        if !same, webView.canGoBack {
+            webView.goBack()
+            try? await Task.sleep(for: .milliseconds(800))
+            await settle()
+        }
+        return (same, found.pictures, found.reviews)
+    }
+
+    /// The page as rendered, plus every photo of the gallery and the single reviews.
+    ///
+    /// The advert itself is read first. Gallery and reviews are opened afterwards, because on some sites
+    /// either leads to a page of its own: the advert must not be lost to it.
     func capture() async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()
-        let photos = await pictures()
-        let mark = UUID().uuidString
-        _ = try? await webView.evaluateJavaScript("window.__tpDocument = '\(mark)'; true")
+        var photos = await pictures()
 
-        _ = try? await webView.callAsyncJavaScript(Self.expandReviews, contentWorld: .page)
-        await settle()
-        let reviews = await reviewTexts()
-        let samePage = ((try? await webView.evaluateJavaScript("window.__tpDocument || ''") as? String) ?? "") == mark
+        progress = "Blättere die Bildergalerie durch …"
+        let gallery = await run(Self.browseGallery)
+        merge(gallery.pictures, into: &photos)
 
-        var page = advert
-        var all = photos
-        if samePage {
-            // Reviews opened inside the advert: take the page as it is now, it holds everything.
-            page = (try? await outerHTML()) ?? advert
-            for photo in await pictures() {
-                if let index = all.firstIndex(where: { $0.url == photo.url }) {
-                    all[index].gallery = all[index].gallery || photo.gallery
-                } else {
-                    all.append(photo)
-                }
-            }
-        }
-        return Captured(html: Self.append(reviews: reviews, to: Self.append(pictures: all, to: page)),
-                        pictures: all.filter(\.gallery).count, reviews: reviews.count)
+        progress = "Klappe die Bewertungen auf …"
+        let reviews = await run(Self.expandReviews)
+        merge(reviews.pictures, into: &photos)
+        progress = nil
+
+        // Never left the advert: the page as it is now holds everything, including the opened reviews.
+        let page = gallery.stayed && reviews.stayed ? ((try? await outerHTML()) ?? advert) : advert
+        return Captured(html: Self.append(reviews: reviews.reviews, to: Self.append(pictures: photos, to: page)),
+                        pictures: photos.filter(\.gallery).count, reviews: reviews.reviews.count)
     }
 
     /// Adds the collected pictures as plain image tags, the form the server already reads pictures from.
