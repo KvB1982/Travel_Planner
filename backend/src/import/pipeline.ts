@@ -155,7 +155,9 @@ export async function processImport(
     const stay = await tripStay(db, input.tripId);
     const fromDevice = input.html !== undefined;
     let html = input.html ?? "";
-    let priceBelongsToTrip = fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null;
+    // The device's word only counts where a link can carry the trip's dates; otherwise it opened the undated page.
+    let priceBelongsToTrip =
+      fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null && urlForStay(input.link, stay) !== input.link.canonicalUrl;
 
     if (!fromDevice) {
       // Ask for the trip's dates and party, so the price on the page is the one that matters.
