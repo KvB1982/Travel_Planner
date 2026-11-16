@@ -2,7 +2,11 @@
 # Daily dump of the travel planner database, kept for 14 days.
 # Runs as the normal user (member of the docker group), for example from cron:
 #   15 3 * * * /srv/reisen/app/deploy/backup.sh >> /srv/reisen/backups/backup.log 2>&1
-# The dumps stay inside the VM; copying them elsewhere is a separate step.
+# With /srv/reisen/backups/offsite.conf present the dumps are also copied off the machine, for example to a
+# Hetzner Storage Box. That file is not part of the repository and holds no password, only:
+#   OFFSITE_TARGET="u123456-sub1@u123456-sub1.your-storagebox.de:reisen/"
+#   OFFSITE_PORT=23
+#   OFFSITE_KEY=/home/kristian/.ssh/storagebox_ed25519
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,3 +30,25 @@ fi
 mv "$target.tmp" "$target"
 find "$BACKUP_DIR" -name 'reisen-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
 echo "$(date -Is) backup ok: $(basename "$target") ($(stat -c %s "$target") bytes)"
+
+# A copy off the machine, so that losing the VM or its disk does not lose the data.
+OFFSITE_CONF="${OFFSITE_CONF:-$BACKUP_DIR/offsite.conf}"
+if [[ -f "$OFFSITE_CONF" ]]; then
+  # shellcheck disable=SC1090
+  source "$OFFSITE_CONF"
+  ssh_opts=(-p "${OFFSITE_PORT:-23}" -i "$OFFSITE_KEY" -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new)
+  if command -v rsync >/dev/null 2>&1; then
+    # The remote folder mirrors the local one, so the same 14 days are kept there.
+    if rsync -a --delete --include 'reisen-*.sql.gz' --exclude '*' -e "ssh ${ssh_opts[*]}" "$BACKUP_DIR/" "$OFFSITE_TARGET"; then
+      echo "$(date -Is) offsite ok: mirrored to ${OFFSITE_TARGET%%:*}"
+    else
+      echo "$(date -Is) offsite FAILED (rsync)" >&2
+      exit 2
+    fi
+  elif scp -q -P "${OFFSITE_PORT:-23}" -i "$OFFSITE_KEY" -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "$target" "$OFFSITE_TARGET"; then
+    echo "$(date -Is) offsite ok: $(basename "$target") copied to ${OFFSITE_TARGET%%:*} (no rsync, old copies are not removed there)"
+  else
+    echo "$(date -Is) offsite FAILED (scp)" >&2
+    exit 2
+  fi
+fi
