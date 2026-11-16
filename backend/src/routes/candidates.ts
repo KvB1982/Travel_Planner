@@ -95,7 +95,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post("/candidates/:candidateId/capture", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional() }), req.body);
+    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), url: z.string().max(4000).optional() }), req.body);
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
     if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
@@ -104,7 +104,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
     if (source.id === sources[0]!.id) await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
     ctx.queue.push(() =>
-      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip }),
+      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip, openedUrl: body.url }),
     );
     return reply.code(202).send({ candidateId: candidate.id, sourceId: source.id });
   });

@@ -142,7 +142,7 @@ export async function tripStay(db: Db, tripId: string) {
  */
 export async function processImport(
   deps: ImportDeps,
-  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean },
+  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean; /** The address the device had open, for diagnosis. */ openedUrl?: string },
 ): Promise<void> {
   const { db } = deps;
   const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, input.listingId)).orderBy(asc(listingSources.createdAt));
@@ -178,6 +178,12 @@ export async function processImport(
       html = page.html;
     }
 
+    if (fromDevice && input.forTrip && input.openedUrl && stay.startDate) {
+      // Whether the page was open for the trip's dates; only that, never the address itself.
+      const [y, m, d] = stay.startDate.split("-");
+      const dated = input.openedUrl.includes(stay.startDate) || input.openedUrl.includes(`${d}-${m}-${y}`);
+      console.info(`import ${input.link.platform}/${input.link.externalId}: opened address ${dated ? "carries" : "does not carry"} the trip's arrival date`);
+    }
     if (fromDevice && looksBlocked(200, html)) {
       // The platform showed the device a "bot or human?" check instead of the advert. Nothing of it is the property's.
       console.warn(`import ${input.link.platform}/${input.link.externalId}: device sent a security check page (${html.length} bytes), nothing taken over`);
