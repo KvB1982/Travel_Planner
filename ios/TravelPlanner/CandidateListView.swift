@@ -430,12 +430,19 @@ private struct CandidateRow: View {
                 }
                 HStack {
                     if let price = candidate.price, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
-                        Text(text).font(.subheadline.weight(.semibold))
-                        if !price.forThisTrip {
-                            // Not asked for this trip's dates, so say which dates the price belongs to.
-                            Text(Format.dateRange(price.startDate, price.endDate) ?? "anderer Zeitraum")
-                                .font(.caption).foregroundStyle(.orange).lineLimit(1)
+                        if price.forThisTrip {
+                            // Only a price asked for this trip's dates is shown as the price of the offer.
+                            Text(text).font(.subheadline.weight(.semibold))
+                        } else if !candidate.isUnavailable {
+                            // A price from the shared link belongs to other dates: named as such, small, never as "the" price.
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Preis für euren Zeitraum noch offen").font(.caption).foregroundStyle(.secondary)
+                                Text("im Link: \(text)" + (Format.dateRange(price.startDate, price.endDate).map { " für \($0)" } ?? ""))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
+                    } else if !candidate.isUnavailable && candidate.importStatus == .ready {
+                        Text("Preis für euren Zeitraum noch offen").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     VoteBadges(votes: candidate.votes)

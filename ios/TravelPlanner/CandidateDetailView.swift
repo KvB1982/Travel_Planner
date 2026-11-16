@@ -420,7 +420,13 @@ struct CandidateDetailView: View {
         Section("Preis") {
             if let current, let text = Format.price(totalCents: current.totalCents, rangeMaxCents: current.rangeMaxCents, kind: current.kind) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(text).font(.title3.weight(.semibold))
+                    if current.tripId == tripID {
+                        Text(text).font(.title3.weight(.semibold))
+                    } else {
+                        // Same wording as in the list: a link price is never shown as the price of the trip.
+                        Text("Preis für euren Zeitraum noch offen").font(.headline)
+                        Text("Im geteilten Link stand: \(text)").font(.subheadline)
+                    }
                     // A price for other dates or another party says nothing about this trip's cost per person.
                     if current.tripId == tripID,
                        let perNight = Format.perPersonNight(totalCents: current.totalCents, persons: current.persons, nights: current.nights) {
