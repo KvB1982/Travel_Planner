@@ -51,10 +51,7 @@ public actor DemoBackend: TravelBackend {
 
     public func trip(_ id: String) async throws -> TripDetail {
         guard let trip = trips.first(where: { $0.id == id }) else { throw APIError(status: 404, code: "not_found", message: "Diese Reise gibt es nicht.") }
-        let options = id == "t-1"
-            ? [DateOption(id: "d-1", label: "Pfingsten", startDate: "2027-05-15", endDate: "2027-05-29")]
-            : [DateOption(id: "d-2", label: "Erste Hälfte", startDate: "2027-07-31", endDate: "2027-08-14"),
-               DateOption(id: "d-3", label: "Zweite Hälfte", startDate: "2027-08-14", endDate: "2027-08-28")]
+        let options = periods[id] ?? []
         let members = [Member(id: "u-1", name: "Du", role: trip.role ?? .member), Member(id: "u-2", name: "Anna", role: .member), Member(id: "u-3", name: "Jonas", role: .guest)]
         return TripDetail(trip: trip, role: trip.role ?? .member, members: members, dateOptions: options)
     }
@@ -99,6 +96,44 @@ public actor DemoBackend: TravelBackend {
                 votes: VoteTally(yes: detail.votes.yes, maybe: detail.votes.maybe, no: detail.votes.no, vetoes: detail.votes.vetoes),
                 myVote: detail.votes.entries.first { $0.userId == user.id }.map { Vote(verdict: $0.verdict, veto: $0.veto) })
         }[0]
+    }
+
+    // MARK: Frame of the trip
+
+    private var periods: [String: [DateOption]] = [
+        "t-1": [DateOption(id: "d-1", label: "Pfingsten", startDate: "2027-05-15", endDate: "2027-05-29")],
+        "t-2": [DateOption(id: "d-2", label: "Erste Hälfte", startDate: "2027-07-31", endDate: "2027-08-14"),
+                DateOption(id: "d-3", label: "Zweite Hälfte", startDate: "2027-08-14", endDate: "2027-08-28")]]
+
+    public func updateTrip(tripId: String, changes: TripChanges) async throws -> Trip {
+        let index = try tripIndex(tripId)
+        guard !changes.title.trimmingCharacters(in: .whitespaces).isEmpty, changes.adults >= 1 else {
+            throw APIError(status: 400, code: "invalid_request", message: "Titel und mindestens ein Erwachsener sind nötig.")
+        }
+        trips[index].title = changes.title; trips[index].region = changes.region; trips[index].adults = changes.adults
+        trips[index].children = changes.children; trips[index].pets = changes.pets; trips[index].budgetTotalCents = changes.budgetTotalCents
+        return trips[index]
+    }
+
+    public func addDateOption(tripId: String, label: String?, startDate: String, endDate: String) async throws -> DateOption {
+        _ = try tripIndex(tripId)
+        guard endDate > startDate else { throw APIError(status: 400, code: "invalid_request", message: "Die Abreise muss nach der Anreise liegen.") }
+        let option = DateOption(id: nextID("d"), label: label, startDate: startDate, endDate: endDate)
+        periods[tripId, default: []].append(option)
+        return option
+    }
+
+    public func removeDateOption(tripId: String, optionId: String) async throws {
+        guard periods[tripId]?.contains(where: { $0.id == optionId }) == true else { throw APIError(status: 404, code: "not_found", message: "Diesen Zeitraum gibt es nicht.") }
+        periods[tripId]?.removeAll { $0.id == optionId }
+    }
+
+    public func activity(tripId: String) async throws -> [ActivityEvent] {
+        _ = try tripIndex(tripId)
+        return [ActivityEvent(id: "a-4", type: "expense_added", createdAt: .now.addingTimeInterval(-3_600), userName: "Anna", numbers: ["amountCents": 23_460]),
+                ActivityEvent(id: "a-3", type: "vote", createdAt: .now.addingTimeInterval(-86_400), userName: "Jonas"),
+                ActivityEvent(id: "a-2", type: "candidate_added", createdAt: .now.addingTimeInterval(-172_800), userName: "Du", words: ["platform": "airbnb"]),
+                ActivityEvent(id: "a-1", type: "trip_created", createdAt: .now.addingTimeInterval(-604_800), userName: "Du")]
     }
 
     // MARK: Shared purse

@@ -21,6 +21,12 @@ public protocol TravelBackend: Sendable {
     func trip(_ id: String) async throws -> TripDetail
     func createTrip(_ trip: NewTrip) async throws -> Trip
     func createInvite(tripId: String, role: MemberRole) async throws -> Invite
+    /// Changes the frame of the trip: title, region, party and budget. Organiser only.
+    func updateTrip(tripId: String, changes: TripChanges) async throws -> Trip
+    func addDateOption(tripId: String, label: String?, startDate: String, endDate: String) async throws -> DateOption
+    func removeDateOption(tripId: String, optionId: String) async throws
+    /// The chronicle: the last hundred events of the trip, newest first.
+    func activity(tripId: String) async throws -> [ActivityEvent]
     /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
     func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
     /// Moves the trip to a phase by hand, forwards or back. Nothing is deleted.
@@ -269,6 +275,28 @@ public struct APIClient: TravelBackend {
 
     public func undoDecision(tripId: String) async throws -> Pitch {
         try await send("DELETE", "/trips/\(tripId.pathEscaped)/decision")
+    }
+
+    // MARK: Frame of the trip
+
+    public func updateTrip(tripId: String, changes: TripChanges) async throws -> Trip {
+        struct Answer: Decodable { var trip: Trip }
+        return try await (send("PATCH", "/trips/\(tripId.pathEscaped)", body: changes) as Answer).trip
+    }
+
+    public func addDateOption(tripId: String, label: String?, startDate: String, endDate: String) async throws -> DateOption {
+        struct Body: Encodable { var label: String?; var startDate: String; var endDate: String }
+        struct Answer: Decodable { var dateOption: DateOption }
+        return try await (send("POST", "/trips/\(tripId.pathEscaped)/date-options", body: Body(label: label, startDate: startDate, endDate: endDate)) as Answer).dateOption
+    }
+
+    public func removeDateOption(tripId: String, optionId: String) async throws {
+        _ = try await data("DELETE", "/trips/\(tripId.pathEscaped)/date-options/\(optionId.pathEscaped)")
+    }
+
+    public func activity(tripId: String) async throws -> [ActivityEvent] {
+        struct Answer: Decodable { var events: [ActivityEvent] }
+        return try await (send("GET", "/trips/\(tripId.pathEscaped)/activity") as Answer).events
     }
 
     // MARK: Shared purse

@@ -23,6 +23,8 @@ struct CandidateListView: View {
     @State private var showPresentation = false
     @State private var showCriteria = false
     @State private var showLedger = false
+    @State private var framingSheet: FramingSheet?
+    @State private var removingPeriod: DateOption?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
     @State private var phasePicked = false
@@ -108,6 +110,19 @@ struct CandidateListView: View {
         .textCase(nil)
     }
 
+    /// Everything but the research: each phase brings its own sections.
+    @ViewBuilder private func otherPhase(_ detail: TripDetail) -> some View {
+        switch viewedPhase {
+        case .decision:
+            PitchSections(tripID: tripID, role: detail.role, candidates: candidates, persons: detail.trip.persons, selection: $selection)
+        case .framing:
+            FramingSections(detail: detail, showCriteria: { showCriteria = true }, invite: { createInvite() },
+                            showLedger: { showLedger = true }, sheet: $framingSheet, removing: $removingPeriod)
+        default:
+            PhasePlaceholder(phase: viewedPhase)
+        }
+    }
+
     var body: some View {
         List(selection: $selection) {
             if let detail, !detail.trip.isWatchlist {
@@ -117,11 +132,8 @@ struct CandidateListView: View {
                 }
                 .listSectionSpacing(.compact)
             }
-            if let detail, viewedPhase == .decision, !detail.trip.isWatchlist {
-                PitchSections(tripID: tripID, role: detail.role, candidates: candidates, persons: detail.trip.persons, selection: $selection)
-            } else if let detail, viewedPhase != .research, !detail.trip.isWatchlist {
-                if viewedPhase == .framing { Section { TripHeader(detail: detail) } }
-                PhasePlaceholder(phase: viewedPhase)
+            if let detail, viewedPhase != .research, !detail.trip.isWatchlist {
+                otherPhase(detail)
             } else {
             if let detail {
                 Section {
@@ -286,6 +298,7 @@ struct CandidateListView: View {
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
+        .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, run: frame))
         .sheet(isPresented: $showLedger) { LedgerView(tripID: tripID, role: detail?.role ?? .guest, members: detail?.members ?? []) }
         .fullScreenCover(isPresented: $showPresentation) {
             PresentationView(candidates: presentable, persons: detail?.trip.persons)
@@ -338,7 +351,7 @@ struct CandidateListView: View {
             error = nil
             if !phasePicked, let trip = detail?.trip {
                 // Open the surface the trip is in; phases without a surface yet fall back to the research.
-                viewedPhase = [.research, .decision].contains(trip.activePhase) ? trip.activePhase : .research
+                viewedPhase = [.framing, .research, .decision].contains(trip.activePhase) ? trip.activePhase : .research
             }
         } catch is CancellationError {
         } catch {
@@ -481,6 +494,19 @@ struct CandidateListView: View {
         Task {
             do {
                 try await backend.setPhase(tripId: tripID, phase: phase)
+                model.dataChanged()
+            } catch {
+                notice = model.message(for: error)
+            }
+        }
+    }
+
+    /// Changes to the frame of the trip, then everything is read again.
+    private func frame(_ action: @escaping (any TravelBackend) async throws -> Void) {
+        guard let backend = model.backend else { return }
+        Task {
+            do {
+                try await action(backend)
                 model.dataChanged()
             } catch {
                 notice = model.message(for: error)

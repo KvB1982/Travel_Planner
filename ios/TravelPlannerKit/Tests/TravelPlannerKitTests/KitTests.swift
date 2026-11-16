@@ -783,3 +783,41 @@ final class LedgerTests: XCTestCase {
         XCTAssertFalse(party.contains("localID"))
     }
 }
+
+final class FramingTests: XCTestCase {
+    func testChangesSendClearedFieldsAsNull() throws {
+        let sent = String(decoding: try JSONEncoder().encode(TripChanges(title: "X", region: nil, adults: 2, children: 0, pets: 0, budgetTotalCents: nil)), as: UTF8.self)
+        XCTAssertTrue(sent.contains(#""region":null"#))
+        XCTAssertTrue(sent.contains(#""budgetTotalCents":null"#))
+    }
+
+    func testFrameCanBeChangedInSampleData() async throws {
+        let demo = DemoBackend()
+        var changes = TripChanges(try await demo.trip("t-1").trip)
+        changes.adults = 5; changes.budgetTotalCents = nil
+        let trip = try await demo.updateTrip(tripId: "t-1", changes: changes)
+        XCTAssertEqual(trip.persons, 9)
+        XCTAssertNil(trip.budgetTotalCents)
+        let option = try await demo.addDateOption(tripId: "t-1", label: "Herbst", startDate: "2027-10-16", endDate: "2027-10-23")
+        var detail = try await demo.trip("t-1")
+        XCTAssertEqual(detail.dateOptions.count, 2)
+        try await demo.removeDateOption(tripId: "t-1", optionId: option.id)
+        detail = try await demo.trip("t-1")
+        XCTAssertEqual(detail.dateOptions.map(\.id), ["d-1"])
+    }
+
+    func testActivityDecodesLooselyAndReadsAsSentence() throws {
+        let json = #"[{"id":7,"type":"expense_added","payload":{"expenseId":"x","amountCents":8450},"createdAt":"2026-11-16T10:00:00.000Z","userName":"Anna"},{"id":"b","type":"neu_und_unbekannt","payload":null,"userName":null}]"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { d in
+            let text = try d.singleValueContainer().decode(String.self)
+            guard let date = APIClient.parseDate(text) else { throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: text)) }
+            return date
+        }
+        let events = try decoder.decode([ActivityEvent].self, from: Data(json.utf8))
+        XCTAssertEqual(events[0].id, "7")
+        XCTAssertEqual(events[0].sentence, "hat eine Ausgabe über 84,50\u{a0}€ eingetragen")
+        XCTAssertNotNil(events[0].createdAt)
+        XCTAssertEqual(events[1].sentence, "hat etwas geändert")
+    }
+}
