@@ -739,3 +739,61 @@ describe("shared purse", () => {
     expect(gone.body.ledger.expenses).toHaveLength(1);
   });
 });
+
+describe("bookings, documents and lists", () => {
+  it("records a booking with its instalments, deadlines and papers", async () => {
+    const s = await setup();
+    const id = (await s.call("POST", `/trips/${s.tripId}/imports`, s.owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).body.candidateId as string;
+    await s.ctx.queue.idle();
+    const parties = (await s.call("POST", `/trips/${s.tripId}/parties/suggest`, s.owner)).body.ledger.parties as { id: string }[];
+
+    const made = await s.call("POST", `/trips/${s.tripId}/bookings`, s.owner, { candidateId: id, status: "booked", reference: "NOV-123", startsAt: "2027-08-21T16:00", endsAt: "2027-08-28T10:00", totalCents: 300000, freeCancellationUntil: "2027-06-01" });
+    expect(made.status).toBe(201);
+    expect(made.body.booking.title).toBeTruthy();
+    const booking = made.body.booking.id as string;
+    // The house is booked: the trip moves on to getting ready.
+    expect((await s.call("GET", `/trips/${s.tripId}`, s.owner)).body.trip).toMatchObject({ phase: "preparation", status: "booked" });
+
+    const first = await s.call("POST", `/bookings/${booking}/payments`, s.owner, { label: "Anzahlung", amountCents: 90000, dueOn: "2027-01-15" });
+    await s.call("POST", `/bookings/${booking}/payments`, s.owner, { label: "Restzahlung", amountCents: 210000, dueOn: "2027-07-21" });
+    await s.call("POST", `/bookings/${booking}/payments`, s.owner, { label: "Kaution", amountCents: 40000, dueOn: "2027-08-21", refundable: true });
+    const paid = await s.call("PATCH", `/booking-payments/${first.body.payment.id}`, s.owner, { paidOn: "2027-01-10", paidByParty: parties[0]!.id });
+    expect(paid.body.overview.totals).toMatchObject({ bookedCents: 300000, plannedCents: 300000, paidCents: 90000, openCents: 210000 });
+    expect(paid.body.overview.deadlines.map((d: { type: string; on: string }) => [d.type, d.on])).toEqual([["cancellation", "2027-06-01"], ["payment", "2027-07-21"], ["payment", "2027-08-21"], ["start", "2027-08-21"]]);
+
+    // The instalment that was paid shows up in the shared purse without being typed in again.
+    const ledger = (await s.call("GET", `/trips/${s.tripId}/ledger`, s.owner)).body;
+    expect(ledger.totalCents).toBe(90000);
+    expect(ledger.bookingPayments).toHaveLength(1);
+
+    const upload = await s.app.inject({ method: "POST", url: `/trips/${s.tripId}/documents?title=${encodeURIComponent("Bestätigung Haus")}&bookingId=${booking}`, headers: { authorization: `Bearer ${s.owner}`, "content-type": "application/pdf" }, payload: Buffer.from("%PDF-1.4 test") });
+    expect(upload.statusCode).toBe(201);
+    const doc = upload.json().document as { id: string; storedName?: string };
+    expect(doc.storedName).toBeUndefined();
+    const file = await s.app.inject({ method: "GET", url: `/documents/${doc.id}/file`, headers: { authorization: `Bearer ${s.owner}` } });
+    expect(file.statusCode).toBe(200);
+    expect(file.headers["content-type"]).toBe("application/pdf");
+    expect(file.body).toBe("%PDF-1.4 test");
+    expect((await s.app.inject({ method: "GET", url: `/documents/${doc.id}/file` })).statusCode).toBe(401);
+    const bad = await s.app.inject({ method: "POST", url: `/trips/${s.tripId}/documents?title=x`, headers: { authorization: `Bearer ${s.owner}`, "content-type": "application/zip" }, payload: Buffer.from("PK") });
+    expect(bad.statusCode).toBe(415);
+    expect((await s.call("GET", `/trips/${s.tripId}/bookings`, s.owner)).body.bookings[0].documents).toHaveLength(1);
+    expect((await s.call("DELETE", `/documents/${doc.id}`, s.owner)).body.overview.bookings[0].documents).toHaveLength(0);
+  });
+
+  it("keeps shared and personal lists and fills them from templates", async () => {
+    const s = await setup();
+    const aunt = await s.join("member", "Tante");
+    const filled = await s.call("POST", `/trips/${s.tripId}/checklists/template`, s.owner, { template: "beach" });
+    expect(filled.body.added).toBe(10);
+    expect((await s.call("POST", `/trips/${s.tripId}/checklists/template`, s.owner, { template: "beach" })).body.added).toBe(0);
+    const own = await s.call("POST", `/trips/${s.tripId}/checklist-items`, aunt, { title: "Tagebuch", private: true });
+    expect(own.status).toBe(201);
+    const mine = (await s.call("GET", `/trips/${s.tripId}/checklists`, s.owner)).body.lists.find((l: { list: string }) => l.list === "packing");
+    expect(mine.total).toBe(10);
+    expect((await s.call("PATCH", `/checklist-items/${own.body.item.id}`, s.owner, { done: true })).status).toBe(404);
+    const ticked = await s.call("PATCH", `/checklist-items/${mine.items[0].id}`, aunt, { done: true });
+    expect(ticked.body.item).toMatchObject({ done: true });
+    expect(ticked.body.checklists.lists.find((l: { list: string }) => l.list === "packing")).toMatchObject({ total: 11, done: 1 });
+  });
+});

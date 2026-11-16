@@ -13,6 +13,8 @@ const schema = z.object({
   /** Per person and day: pages read with the language model, and web searches for the same property. */
   DAILY_READINGS: z.coerce.number().int().min(1).default(400),
   DAILY_SEARCHES: z.coerce.number().int().min(1).default(30),
+  /** Where uploaded documents are kept. In the container a volume is mounted here. */
+  FILES_DIR: z.string().default("/data/files"),
 });
 
 export type Config = z.infer<typeof schema>;

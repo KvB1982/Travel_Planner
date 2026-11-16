@@ -377,3 +377,57 @@ Kosten werden zwischen den **Haushalten** der Reise geteilt. Ein Haushalt kann P
 ### Ausgleich abhaken
 
 `POST /trips/:id/payments` mit `{ "fromParty": "…", "toParty": "…", "amountCents": 6000 }` (ab Mitglied), `DELETE /trips/:id/payments/:paymentId`.
+
+## Buchung: Buchungen, Zahlungsplan, Fristen, Dokumente
+
+Die App bucht nicht. Sie hält fest, was gebucht wurde.
+
+### Buchungen
+
+`GET /trips/:id/bookings` liefert die Übersicht:
+
+```json
+{ "bookings": [ { "id": "…", "kind": "accommodation", "title": "…", "provider": "Novasol", "reference": "NOV-123", "candidateId": "…",
+                  "status": "planned | booked | cancelled", "startsAt": "2027-05-15T16:00", "endsAt": "2027-05-29T10:00", "place": "…",
+                  "totalCents": 578200, "depositCents": 40000, "depositReturnedOn": null, "freeCancellationUntil": "2027-03-01",
+                  "bookedByParty": "<partyId>", "notes": null,
+                  "payments": [ { "id": "…", "label": "Anzahlung", "amountCents": 150000, "dueOn": "2027-01-15", "paidOn": null, "paidByParty": null, "refundable": false } ],
+                  "documents": [ { "id": "…", "title": "Bestätigung", "kind": null, "contentType": "application/pdf", "sizeBytes": 81234, "createdAt": "…" } ] } ],
+  "documents": [ "…Unterlagen ohne Buchung, gleiche Form…" ],
+  "deadlines": [ { "type": "payment | cancellation | start", "on": "2027-01-15", "bookingId": "…", "paymentId": "…", "label": "Anzahlung: …", "amountCents": 150000, "overdue": false } ],
+  "totals": { "bookedCents": 578200, "plannedCents": 578200, "paidCents": 0, "openCents": 578200, "depositsOutCents": 0 } }
+```
+
+- `kind`: `accommodation`, `flight`, `car`, `ferry`, `train`, `insurance`, `activity`, `other`.
+- `POST /trips/:id/bookings` (ab Mitglied). Mit `candidateId` übernimmt der Server Titel und Ort aus dem Angebot. `PATCH /bookings/:id`, `DELETE /bookings/:id`.
+- Wird eine Unterkunft mit `status: "booked"` gespeichert, rückt die Reise auf Phase `preparation` und Status `booked`.
+- Zeiten sind Ortszeit wie auf der Bestätigung, als `JJJJ-MM-TT` oder `JJJJ-MM-TTThh:mm`.
+- Zahlungsplan: `POST /bookings/:id/payments` mit `label`, `amountCents`, `dueOn`, optional `paidOn`, `paidByParty`, `refundable` (Kaution: `true`). `PATCH /booking-payments/:id` (bezahlt abhaken: `paidOn` und `paidByParty` setzen), `DELETE /booking-payments/:id`.
+- `deadlines` nennt offene Zahlungen, Stornofristen und Beginn jeder Buchung, früheste zuerst; `overdue` für verpasste Zahlungen und Fristen.
+- Alle schreibenden Aufrufe liefern die Übersicht unter `overview` mit zurück.
+- Verbindung zur Kasse: Bezahlte Raten mit `paidByParty` zählen im Kassenblatt als geteilte Kosten nach der Aufteilung der Reise (`ledger.bookingPayments`), ohne sie ein zweites Mal einzugeben. Kautionen (`refundable`) zählen nicht.
+
+### Dokumente
+
+- Hochladen: `POST /trips/:id/documents?title=…&kind=…&bookingId=…`. Der Körper ist die Datei selbst, der `Content-Type` ihr Typ: `application/pdf`, `image/jpeg`, `image/png`, `image/heic`, `image/heif`, `image/webp`, `text/plain`. Höchstens 20 MB. Sonst 415 `unsupported_file`. Ab Rolle Mitglied.
+- Abrufen: `GET /documents/:id/file` mit Anmeldung (alle Mitglieder der Reise, auch Gäste). Nicht zwischenspeichern außer für die Offline-Ansicht der App.
+- `PATCH /documents/:id` (`title`, `kind`, `bookingId`), `DELETE /documents/:id`.
+- Die Dateien liegen in der VM in einem eigenen Volume, unverschlüsselt, und werden noch nicht außer Haus gesichert. Für Ausweiskopien und Ähnliches bitte erst nutzen, wenn Verschlüsselung und Sicherung geklärt sind.
+
+## Listen: Packen, Einkauf, Aufgaben
+
+`GET /trips/:id/checklists`:
+
+```json
+{ "lists": [ { "list": "packing", "total": 12, "done": 3,
+               "items": [ { "id": "…", "list": "packing", "title": "Badesachen", "quantity": null, "assignedTo": null, "assignedParty": null,
+                            "dueOn": null, "done": false, "doneBy": null, "doneAt": null, "private": false, "position": 0, "createdBy": "…" } ] } ],
+  "templates": [ { "key": "beach", "label": "Strand und Pool", "list": "packing", "count": 10 } ] }
+```
+
+- Die Listen `packing`, `shopping` und `todo` gibt es immer; jeder andere Name unter `list` legt eine eigene Liste an.
+- `POST /trips/:id/checklist-items` (alle, auch Gäste), `PATCH /checklist-items/:id`, `DELETE /checklist-items/:id`. Abhaken ist `{ "done": true }`.
+- `private: true` macht einen Eintrag zur persönlichen Liste: nur wer ihn angelegt hat, sieht ihn.
+- `assignedTo` (Mitglied) oder `assignedParty` (Haushalt) für "wer bringt was mit" und Aufgaben, `dueOn` für Fristen.
+- Vorlagen: `POST /trips/:id/checklists/template` mit `{ "template": "beach", "private": false }`. Vorhandene Einträge gleichen Namens bleiben, die Antwort nennt `added`. Vorlagen: `basics`, `beach`, `ski`, `toddler`, `dog`, `home` (Aufgaben vor der Abreise), `firstDay` (Einkauf für den ersten Tag).
+- Alle schreibenden Aufrufe liefern die Listen unter `checklists` mit zurück.

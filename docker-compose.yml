@@ -30,6 +30,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       EXTRACTION_MODEL: ${EXTRACTION_MODEL:-claude-haiku-5-5}
       SEARCH_MODEL: ${SEARCH_MODEL:-claude-sonnet-5-5}
+    volumes:
+      - files:/data/files
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
@@ -41,3 +43,4 @@ services:
 
 volumes:
   db-data:
+  files:
