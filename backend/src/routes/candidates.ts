@@ -248,7 +248,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
         ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid }));
       }
-      checks.push({ candidateId: candidate.id, platform: source.platform, mode: device ? ("device" as const) : justRead ? ("skipped" as const) : ("server" as const), needsDevice: device, checkUrl: url });
+      // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
+      const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;
+      checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url });
     }
     await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });
     return reply.code(202).send({ startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });
