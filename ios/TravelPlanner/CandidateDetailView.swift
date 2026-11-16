@@ -18,6 +18,7 @@ struct CandidateDetailView: View {
     @State private var showReviews = false
     @State private var showAddSource = false
     @State private var showMove = false
+    @State private var showCorrection = false
     @State private var mapTarget: MapTarget?
     @State private var sentNote: String?
     @State private var sourceLink = ""
@@ -78,6 +79,9 @@ struct CandidateDetailView: View {
         }
         .sheet(item: $mapTarget) { target in
             LocationMapView(title: target.title, hint: target.hint, place: target.place)
+        }
+        .sheet(isPresented: $showCorrection) {
+            if let detail { CorrectionView(detail: detail) }
         }
         .sheet(isPresented: $showMove) {
             MoveOfferView(candidateID: candidateID, title: detail?.listing.title ?? "Angebot",
@@ -330,6 +334,7 @@ struct CandidateDetailView: View {
                             ForEach(CandidateStatus.allCases, id: \.self) { Text($0.label).tag($0) }
                         }
                         Divider()
+                        Button("Von Hand korrigieren …", systemImage: "pencil") { showCorrection = true }
                         Button("In andere Reise oder auf die Merkliste …", systemImage: "arrow.right.doc.on.clipboard") { showMove = true }
                         Button("Angebot löschen", systemImage: "trash", role: .destructive) { confirmDelete = true }
                     } label: {

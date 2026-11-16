@@ -76,6 +76,10 @@ public protocol TravelBackend: Sendable {
     func removeSource(candidateId: String, sourceId: String) async throws
     /// Asks the server to read the advert again. Progress shows in `importStatus`, as after an import.
     func refresh(candidateId: String) async throws
+    /// Corrects the fact sheet by hand. Only the changed fields, by their name in the profile.
+    func correctProfile(candidateId: String, changes: [String: PatchValue]) async throws
+    /// Notes a price by hand. It counts for the trip the offer belongs to.
+    func addPrice(candidateId: String, price: ManualPrice) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
     /// Sets which hints of an offer are hidden for the whole trip, by their exact wording. An empty list shows all again.
     func setHiddenWarnings(candidateId: String, hidden: [String]) async throws
@@ -275,6 +279,14 @@ public struct APIClient: TravelBackend {
 
     public func undoDecision(tripId: String) async throws -> Pitch {
         try await send("DELETE", "/trips/\(tripId.pathEscaped)/decision")
+    }
+
+    public func correctProfile(candidateId: String, changes: [String: PatchValue]) async throws {
+        _ = try await data("PATCH", "/candidates/\(candidateId.pathEscaped)/profile", body: changes)
+    }
+
+    public func addPrice(candidateId: String, price: ManualPrice) async throws {
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/prices", body: price)
     }
 
     // MARK: Frame of the trip

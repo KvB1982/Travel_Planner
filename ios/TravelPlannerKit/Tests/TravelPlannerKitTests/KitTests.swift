@@ -821,3 +821,35 @@ final class FramingTests: XCTestCase {
         XCTAssertEqual(events[1].sentence, "hat etwas geändert")
     }
 }
+
+final class CorrectionTests: XCTestCase {
+    func testOnlyChangedFieldsAreSent() async throws {
+        let demo = DemoBackend()
+        let profile = try await demo.candidate("c-1").listing.profile
+        var typed = Dictionary(uniqueKeysWithValues: Correction.fields.map { ($0.key, Correction.text($0, in: profile)) })
+        XCTAssertEqual(Correction.changes(from: profile, typed: typed), [:])
+        typed["bedrooms"] = "5"; typed["livingAreaSqm"] = "142,5"; typed["region"] = ""
+        let changes = try XCTUnwrap(Correction.changes(from: profile, typed: typed))
+        XCTAssertEqual(changes["bedrooms"], .number(5))
+        XCTAssertEqual(changes["livingAreaSqm"], .number(142.5))
+        XCTAssertEqual(changes.count, profile.region == nil ? 2 : 3)
+        typed["beds"] = "viele"
+        XCTAssertNil(Correction.changes(from: profile, typed: typed))
+        let sent = String(decoding: try JSONEncoder().encode(["a": PatchValue.null, "b": .number(2)]), as: UTF8.self)
+        XCTAssertTrue(sent.contains(#""a":null"#))
+    }
+
+    func testCorrectionAndManualPriceShowInSampleData() async throws {
+        let demo = DemoBackend()
+        try await demo.correctProfile(candidateId: "c-1", changes: ["bedrooms": .number(5), "title": .text("Casa Olivia")])
+        try await demo.addPrice(candidateId: "c-1", price: ManualPrice(totalCents: 499_000, startDate: "2027-05-15", endDate: "2027-05-29", persons: 8))
+        let detail = try await demo.candidate("c-1")
+        XCTAssertEqual(detail.listing.profile.bedrooms, 5)
+        XCTAssertEqual(detail.listing.title, "Casa Olivia")
+        XCTAssertEqual(detail.prices.first?.totalCents, 499_000)
+        XCTAssertEqual(detail.prices.first?.nights, 14)
+        XCTAssertEqual(detail.prices.first?.capture, "manual")
+        let list = try await demo.candidates(tripId: "t-1")
+        XCTAssertEqual(list.first { $0.id == "c-1" }?.price?.totalCents, 499_000)
+    }
+}

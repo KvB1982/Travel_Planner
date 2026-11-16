@@ -98,6 +98,44 @@ public actor DemoBackend: TravelBackend {
         }[0]
     }
 
+    public func correctProfile(candidateId: String, changes: [String: PatchValue]) async throws {
+        var detail = try detail(candidateId)
+        for (key, value) in changes {
+            var number: Double?, text: String?
+            switch value {
+            case .number(let n): number = n
+            case .text(let t): text = t
+            case .null: break
+            }
+            switch key {
+            case "title": detail.listing.profile.title = text; detail.listing.title = text
+            case "place": detail.listing.profile.place = text; detail.listing.place = text
+            case "region": detail.listing.profile.region = text
+            case "country": detail.listing.profile.country = text; detail.listing.country = text
+            case "maxGuests": detail.listing.profile.maxGuests = number
+            case "bedrooms": detail.listing.profile.bedrooms = number
+            case "beds": detail.listing.profile.beds = number
+            case "bathrooms": detail.listing.profile.bathrooms = number
+            case "livingAreaSqm": detail.listing.profile.livingAreaSqm = number
+            case "plotSqm": detail.listing.profile.plotSqm = number
+            default: throw APIError(status: 400, code: "invalid_request", message: "\(key): unbekannt")
+            }
+            detail.listing.profile.uncertain?.removeAll { $0 == key }
+        }
+        details[candidateId] = detail
+    }
+
+    public func addPrice(candidateId: String, price: ManualPrice) async throws {
+        var detail = try detail(candidateId)
+        let nights = price.startDate.flatMap(Format.day).flatMap { start in
+            price.endDate.flatMap(Format.day).flatMap { Calendar.current.dateComponents([.day], from: start, to: $0).day }
+        }
+        detail.prices.insert(PriceSnapshot(id: nextID("pr"), tripId: detail.candidate.tripId, startDate: price.startDate, endDate: price.endDate,
+                                           nights: nights, persons: price.persons, totalCents: price.totalCents, available: price.available,
+                                           capture: "manual"), at: 0)
+        details[candidateId] = detail
+    }
+
     // MARK: Frame of the trip
 
     private var periods: [String: [DateOption]] = [
