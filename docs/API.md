@@ -412,7 +412,7 @@ Die App bucht nicht. Sie hält fest, was gebucht wurde.
 - Hochladen: `POST /trips/:id/documents?title=…&kind=…&bookingId=…`. Der Körper ist die Datei selbst, der `Content-Type` ihr Typ: `application/pdf`, `image/jpeg`, `image/png`, `image/heic`, `image/heif`, `image/webp`, `text/plain`. Höchstens 20 MB. Sonst 415 `unsupported_file`. Ab Rolle Mitglied.
 - Abrufen: `GET /documents/:id/file` mit Anmeldung (alle Mitglieder der Reise, auch Gäste). Nicht zwischenspeichern außer für die Offline-Ansicht der App.
 - `PATCH /documents/:id` (`title`, `kind`, `bookingId`), `DELETE /documents/:id`.
-- Die Dateien liegen in der VM in einem eigenen Volume, unverschlüsselt, und werden noch nicht außer Haus gesichert. Für Ausweiskopien und Ähnliches bitte erst nutzen, wenn Verschlüsselung und Sicherung geklärt sind.
+- Die Dateien liegen in der VM in einem eigenen Volume und werden nachts mit der Datenbank gesichert und auf die Storage Box gespiegelt, jeweils unverschlüsselt. Für Ausweiskopien und Ähnliches bitte erst nutzen, wenn die Verschlüsselung geklärt ist.
 
 ## Listen: Packen, Einkauf, Aufgaben
 
