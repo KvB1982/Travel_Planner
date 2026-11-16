@@ -327,6 +327,17 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       }
       break;
     }
+    case "novasol": {
+      // Arrival as day-month-year plus the number of nights, as the platform's own search writes it.
+      const nights = nightsBetween(stay.startDate, stay.endDate);
+      if (!nights) return info.canonicalUrl;
+      const [y, m, d] = stay.startDate.split("-");
+      p.set("start", `${d}-${m}-${y}`);
+      p.set("nights", String(nights));
+      if (stay.adults !== null) p.set("adult", String(stay.adults));
+      if (stay.children !== null) p.set("child", String(stay.children));
+      break;
+    }
     case "casamundo":
       p.set("dateRange", `${stay.startDate}~${stay.endDate}`);
       if (stay.adults !== null) p.set("adults", String(stay.adults));

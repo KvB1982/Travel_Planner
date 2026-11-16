@@ -86,6 +86,13 @@ describe("urlForStay", () => {
 
   it("leaves the link alone without dates or for platforms without date parameters", () => {
     expect(urlForStay(analyzeLink(AIRBNB), { startDate: null, endDate: null, adults: 4, children: 0 })).toBe("https://www.airbnb.de/rooms/18726447");
-    expect(urlForStay(analyzeLink(NOVASOL), { startDate: "2027-08-21", endDate: "2027-08-28", adults: 4, children: 0 })).toBe(NOVASOL);
+    const other = "https://www.example-ferien.de/haus/123";
+    expect(urlForStay(analyzeLink(other), { startDate: "2027-08-21", endDate: "2027-08-28", adults: 4, children: 0 })).toBe(analyzeLink(other).canonicalUrl);
+  });
+  it("asks Novasol for the trip's arrival, nights and party", () => {
+    const info = analyzeLink("https://www.novasol.de/ferienhaeuser/zadar-sukosan-cld500?adult=2&start=01-07-2027&nights=3");
+    const url = new URL(urlForStay(info, { startDate: "2027-08-14", endDate: "2027-08-21", adults: 4, children: 4 }));
+    expect(url.pathname).toBe("/ferienhaeuser/zadar-sukosan-cld500");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ start: "14-08-2027", nights: "7", adult: "4", child: "4" });
   });
 });
