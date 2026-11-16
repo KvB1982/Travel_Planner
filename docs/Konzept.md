@@ -1,7 +1,7 @@
 # Konzept: Ferienhaus-Planer für Familie und Freunde
 
 **Arbeitstitel:** Travel Planner
-**Stand:** 16.11.2026, Version 0.5 (Ausbau zum Begleiter für die ganze Reise, Kapitel 15)
+**Stand:** 16.11.2026, Version 0.6 (Ausbau zum Begleiter für die ganze Reise, Kapitel 15, mit Entscheidungen des Auftraggebers in 15.9)
 **Status:** Recherche weitgehend umgesetzt (Backend und iOS-App), übrige Phasen in Konzeption
 
 ---
@@ -657,7 +657,7 @@ Zweck: Aus zwanzig Fundstücken werden drei bis fünf, und die Gruppe entscheide
 
 - **Kandidatenliste:** Der Organisator markiert die Finalisten. Alles andere tritt in den Hintergrund.
 - **Pitch-Ansicht:** Jedes Angebot als aufgeräumte Präsentation zum Durchblättern: beste Bilder, Eckdaten, Preis je Haushalt, Stärken und Schwächen aus den Bewertungen, Karte, offene Hinweise. Geeignet, um sie gemeinsam am Fernseher oder iPad durchzugehen, und als Link für Gäste ohne App.
-- **Abstimmung mit Frist:** Stimmen, Rangfolge oder Punkte, Veto mit Begründung, Erinnerung an fehlende Stimmen.
+- **Abstimmung mit Frist:** Jedes Mitglied verteilt Punkte auf die Finalisten, daraus ergibt sich die Rangfolge. Veto mit Begründung, Erinnerung an fehlende Stimmen.
 - **Entscheidungsvorlage:** Ergebnis mit Begründung, also Stimmenbild, Preis, erfüllte Muss-Kriterien und offene Risiken.
 - **Entscheidung festhalten:** Der Organisator erklärt ein Angebot zum Gewinner. Die übrigen wandern ins Archiv der Reise oder auf die Merkliste.
 
@@ -694,12 +694,12 @@ Zweck: Das Wichtige ist mit einem Griff da, auch ohne Netz.
 - **Dokumente:** Buchungsbestätigungen, Tickets, Mietwagenvertrag, Versicherung, offline verfügbar
 - **Kalender:** Aktivitäten planen und durchführen, Zu- und Absagen, Übernahme in den Gerätekalender
 - **Gemeinsame Kasse:** Ausgaben in Sekunden erfassen (Betrag, wer hat bezahlt, für wen), Beleg als Foto, laufender Stand je Haushalt
-- **Fotos:** gemeinsames Album der Reise, Hochladen aus der Fotos-App, Lieblingsbilder markieren
+- **Fotos:** gemeinsames Album der Reise über ein geteiltes Album von Apple (siehe 15.9), Lieblingsbilder markieren
 - **Notizen zum Haus:** was gut war, was fehlte. Grundlage für die Bewertung danach.
 
 #### Phase 6: Rückblick
 
-- **Abrechnung:** Kosten-Split nach Haushalten oder Personen, mit Gewichtung (zum Beispiel Kinder halb), kleinste Zahl an Ausgleichszahlungen, „erledigt“ abhaken
+- **Abrechnung:** Kosten-Split in der Regel nach Haushalten zu gleichen Teilen, wahlweise nach Personen oder mit Gewichtung. Einzelne Ausgaben nur zwischen den Beteiligten. Kleinste Zahl an Ausgleichszahlungen, „erledigt“ abhaken
 - **Kaution:** Rückzahlung nachverfolgen
 - **Fotobuch:** Auswahl der besten Bilder, Reihenfolge, Titel, Ausgabe als PDF oder Übergabe an einen Fotobuch-Dienst
 - **Bewertung:** Haus, Lage, Vermieter aus Sicht der Gruppe. „Würden wir wieder buchen?“ landet im Familien-Gedächtnis (Kapitel 9: ein Haus erscheint in späteren Reisen mit seiner Vorgeschichte).
@@ -744,7 +744,7 @@ Zusätzlich zu Kapitel 9. Alles hängt an der Reise.
 | **HouseInfo** | 5 | Hausmappe | Schlüsselcode, WLAN, Kontakt, Regeln |
 | **Expense** | 5 | Ausgabe aus der gemeinsamen Kasse | Betrag, Währung, bezahlt von, aufgeteilt auf, Kategorie, Beleg |
 | **Settlement** | 6 | Ausgleichszahlung | von, an, Betrag, erledigt |
-| **TripPhoto / Album** | 5 und 6 | Reisefotos | Datei, aufgenommen von, Zeit, Ort, Favorit |
+| **Album** | 5 und 6 | Verweis auf das geteilte Album der Reise | Einladungslink, Favoriten und Fotobuch-Auswahl als Verweise |
 | **TripReview** | 6 | Fazit der Gruppe | Wertungen, Text, wieder buchen |
 
 ### 15.5 Folgen für die Technik
@@ -806,11 +806,26 @@ Für eine runde Recherche fehlt noch:
 | Verteilung über TestFlight | Wartet auf die Freischaltung der Developer-Mitgliedschaft |
 | Teilen-Menü aus Safari im Alltag erproben | Gebaut, aber noch nicht mit echten Inseraten getestet |
 
-### 15.9 Offene Fragen an den Auftraggeber
+### 15.9 Entscheidungen des Auftraggebers
 
-1. **Reihenfolge:** Passt der Stufenplan, oder soll ein Baustein vorgezogen werden, etwa die gemeinsame Kasse für die Pfingstreise?
-2. **Abstimmung im Pitch:** Reicht Ja, Vielleicht, Nein mit Veto wie heute, oder soll es eine Rangfolge oder Punkte geben?
-3. **Abrechnung:** Wird nach Haushalten, nach Personen oder gemischt geteilt, und zählen Kinder voll?
-4. **Fotos:** Wie viele Bilder je Reise sind realistisch? Davon hängt der Speicherbedarf auf dem Server ab.
-5. **Fotobuch:** Genügt eine PDF-Ausgabe, oder soll ein bestimmter Dienst angebunden werden?
-6. **Gäste ohne App:** Sollen sie auch in späteren Phasen mitmachen können, etwa Ausgaben erfassen über einen Web-Link?
+Stand 16.11.2026, Antworten auf die Fragen der Version 0.5.
+
+| Thema | Entscheidung | Folge |
+|---|---|---|
+| **Reihenfolge** | Der Stufenplan passt. | Weiter mit Stufe A, der Recherche. |
+| **Abstimmung im Pitch** | Rangfolge auf Basis von Punkten. | Jedes Mitglied verteilt Punkte auf die Finalisten, die Summe ergibt die Rangfolge. Ja, Vielleicht, Nein bleibt die schnelle Stimme in der Recherche (Liste, Präsentationsmodus). Das Veto bleibt. |
+| **Abrechnung** | Mehrere Arten zur Wahl. Üblich ist die Teilung nach Haushalten zu gleichen Teilen, unabhängig von der Personenzahl. Einzelne Ausgaben werden direkt zwischen Personen verrechnet, etwa ein Ausflug nur eines Teils der Gruppe. | Voreinstellung je Reise: nach Haushalten gleich. Wählbar: nach Personen, mit Gewichtung, frei. Jede Ausgabe kann abweichend nur bestimmte Haushalte oder Personen betreffen. |
+| **Fotos** | Vorerst nicht auf dem eigenen Server, um Speicher zu sparen. Gewünscht ist die Anbindung an ein geteiltes Album von Apple. | Siehe unten. |
+| **Fotobuch** | Zunächst nur als PDF. | Anbindung an einen Dienst später möglich. |
+| **Gäste ohne App** | Sollen auch in späteren Phasen mitmachen können. | Der Web-Zugang für Gäste (Kapitel 1) wird über die Abstimmung hinaus erweitert, zuerst um das Erfassen von Ausgaben. |
+
+**Fotos über ein geteiltes Album von Apple.** Apple bietet Apps nach heutigem Kenntnisstand keine Schnittstelle, um geteilte Alben anzulegen, Personen einzuladen oder Bilder hineinzulegen. Das geht nur in der Fotos-App selbst. Eine App kann aber mit Erlaubnis die Mediathek lesen, einschließlich der geteilten Alben, die auf dem Gerät abonniert sind. Dieser Punkt ist vor dem Bau am Gerät zu prüfen. Daraus ergibt sich dieser Weg:
+
+- Die Gruppe legt das geteilte Album wie gewohnt in der Fotos-App an. Die App führt dorthin und erklärt die Schritte.
+- Die Reise merkt sich das Album: je Gerät die Zuordnung zum Album in der Mediathek, für alle den Einladungslink.
+- Die App zeigt die Bilder des Albums in der Reise an und nutzt sie für die Auswahl zum Fotobuch. Die Bilder bleiben bei Apple, auf dem eigenen Server liegt nichts.
+- Lieblingsbilder und die Fotobuch-Auswahl speichert die App als Verweise, nicht als Kopien.
+
+Grenzen: Wer kein Apple-Gerät hat, sieht die Bilder nur über die öffentliche Web-Ansicht des Albums, falls die Gruppe sie einschaltet. Geteilte Alben speichern Bilder verkleinert, für ein Fotobuch in Druckqualität braucht es die Originale vom jeweiligen Gerät.
+
+Damit entfällt in 15.4 die Entität **TripPhoto** als Dateiablage. An ihre Stelle tritt ein Verweis der Reise auf das Album. Die Dateiablage auf dem Server (15.5) wird nur noch für Dokumente und Belege gebraucht und fällt deutlich kleiner aus.
