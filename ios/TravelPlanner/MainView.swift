@@ -53,11 +53,28 @@ struct TripListView: View {
                 }
             }
             Section {
-                ForEach(trips.filter { $0.status != .archived }) { trip in
+                ForEach(trips.filter { $0.status != .archived && !$0.isWatchlist }) { trip in
                     TripRow(trip: trip).tag(trip.id)
                 }
             }
-            let archived = trips.filter { $0.status == .archived }
+            let watchlists = trips.filter(\.isWatchlist)
+            if !watchlists.isEmpty {
+                Section {
+                    ForEach(watchlists) { trip in
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(trip.title).font(.headline)
+                                Text((trip.candidateCount ?? 0) == 1 ? "1 Angebot" : "\(trip.candidateCount ?? 0) Angebote")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "bookmark")
+                        }
+                        .tag(trip.id)
+                    }
+                }
+            }
+            let archived = trips.filter { $0.status == .archived && !$0.isWatchlist }
             if !archived.isEmpty {
                 Section("Archiv") {
                     ForEach(archived) { trip in TripRow(trip: trip).tag(trip.id) }
@@ -65,7 +82,7 @@ struct TripListView: View {
             }
         }
         .overlay {
-            if loaded && trips.isEmpty && error == nil {
+            if loaded && trips.filter({ !$0.isWatchlist }).isEmpty && error == nil && trips.isEmpty {
                 ContentUnavailableView {
                     Label("Noch keine Reise", systemImage: "suitcase")
                 } description: {

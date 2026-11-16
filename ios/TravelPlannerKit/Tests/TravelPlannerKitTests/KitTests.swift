@@ -510,6 +510,35 @@ final class DemoBackendTests: XCTestCase {
                        "belegt in einem anderen Zeitraum sagt nichts über die Reise")
     }
 
+    func testMoveToWatchlistAndBack() async throws {
+        let demo = DemoBackend()
+        let all = try await demo.trips()
+        let watchlist = try XCTUnwrap(all.first(where: \.isWatchlist))
+        let moved = try await demo.move(candidateId: "c-1", toTrip: watchlist.id)
+        var here = try await demo.candidates(tripId: "t-1")
+        XCTAssertFalse(here.contains { $0.id == "c-1" })
+        let there = try await demo.candidates(tripId: watchlist.id)
+        XCTAssertEqual(there.map(\.id), [moved])
+        XCTAssertEqual(there.first?.status, .new, "Favorit war es in der alten Reise")
+        XCTAssertEqual(there.first?.votes.total, 0, "Stimmen bleiben in der alten Reise")
+        XCTAssertEqual(there.first?.price?.forThisTrip, false, "der Preis galt für die alte Reise")
+        let detail = try await demo.candidate(moved)
+        XCTAssertEqual(detail.comments.count, 1, "Kommentare ziehen mit")
+        _ = try await demo.move(candidateId: moved, toTrip: "t-2")
+        here = try await demo.candidates(tripId: "t-2")
+        XCTAssertTrue(here.contains { $0.id == moved })
+        do {
+            _ = try await demo.move(candidateId: moved, toTrip: "gibt-es-nicht")
+            XCTFail("Unbekannte Reise")
+        } catch let error as APIError { XCTAssertEqual(error.status, 404) }
+    }
+
+    func testTripKindDecodes() throws {
+        let json = #"{"id":"w","title":"Merkliste","region":null,"adults":2,"children":0,"pets":0,"budgetTotalCents":null,"status":"planning","voteDeadline":null,"createdAt":"2026-11-16T00:00:00.000Z","role":"organizer","candidateCount":1,"favoriteCount":0,"kind":"watchlist"}"#
+        XCTAssertTrue(try APIClient.decoder.decode(Trip.self, from: Data(json.utf8)).isWatchlist)
+        XCTAssertFalse(try APIClient.decoder.decode(Trip.self, from: Data(json.replacingOccurrences(of: #","kind":"watchlist""#, with: "").utf8)).isWatchlist)
+    }
+
     func testDeleteRemovesOfferAndUpdatesCounts() async throws {
         let demo = DemoBackend()
         try await demo.delete(candidateId: "c-1")

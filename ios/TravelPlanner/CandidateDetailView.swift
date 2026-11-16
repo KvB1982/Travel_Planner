@@ -17,6 +17,7 @@ struct CandidateDetailView: View {
     @State private var confirmDelete = false
     @State private var showReviews = false
     @State private var showAddSource = false
+    @State private var showMove = false
     @State private var mapTarget: MapTarget?
     @State private var sentNote: String?
     @State private var sourceLink = ""
@@ -77,6 +78,10 @@ struct CandidateDetailView: View {
         }
         .sheet(item: $mapTarget) { target in
             LocationMapView(title: target.title, hint: target.hint, place: target.place)
+        }
+        .sheet(isPresented: $showMove) {
+            MoveOfferView(candidateID: candidateID, title: detail?.listing.title ?? "Angebot",
+                          currentTripID: detail?.candidate.tripId ?? "") { _ in onDeleted() }
         }
         .sheet(isPresented: $showReviews) {
             ReviewList(items: detail?.reviews?.items ?? [], fallbackScale: detail?.listing.profile.rating?.scale)
@@ -319,6 +324,7 @@ struct CandidateDetailView: View {
                             ForEach(CandidateStatus.allCases, id: \.self) { Text($0.label).tag($0) }
                         }
                         Divider()
+                        Button("In andere Reise oder auf die Merkliste …", systemImage: "arrow.right.doc.on.clipboard") { showMove = true }
                         Button("Angebot löschen", systemImage: "trash", role: .destructive) { confirmDelete = true }
                     } label: {
                         Label(detail.candidate.status.label, systemImage: detail.candidate.status == .favorite ? "star.fill" : "star")

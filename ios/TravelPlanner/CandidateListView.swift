@@ -18,6 +18,7 @@ struct CandidateListView: View {
     @State private var invite: Invite?
     @State private var notice: String?
     @State private var pendingDelete: CandidateSummary?
+    @State private var moving: CandidateSummary?
     @State private var showCompare = false
     @State private var showMap = false
     /// "2 von 5" while all offers are being checked; nil otherwise.
@@ -46,6 +47,7 @@ struct CandidateListView: View {
                 if detail?.role.canEdit ?? false {
                     // Not `role: .destructive`: the row must stay until the question is answered.
                     Button("Löschen", systemImage: "trash") { pendingDelete = candidate }.tint(.red)
+                    Button("Verschieben", systemImage: "arrow.right.doc.on.clipboard") { moving = candidate }.tint(.indigo)
                 }
             }
     }
@@ -76,7 +78,7 @@ struct CandidateListView: View {
             if let detail {
                 Section {
                     TripHeader(detail: detail)
-                    if detail.role.canEdit && !candidates.isEmpty {
+                    if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
                         Button {
                             checkAll()
                         } label: {
@@ -89,7 +91,7 @@ struct CandidateListView: View {
                         .disabled(checking != nil)
                     }
                 } footer: {
-                    if detail.role.canEdit && !candidates.isEmpty {
+                    if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
                         Text("Fragt alle Angebote für den Zeitraum und die Gäste dieser Reise neu ab. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst.")
                     }
                 }
@@ -194,6 +196,11 @@ struct CandidateListView: View {
             CaptureView(source: ListingSource(id: check.candidateId, platform: check.platform ?? "other", url: url, canonicalUrl: url),
                         candidateID: check.candidateId, forTrip: true, automatic: true,
                         progressLabel: "\(deviceTotal - deviceQueue.count) von \(deviceTotal)") { _, _ in deviceDone += 1 }
+        }
+        .sheet(item: $moving) { candidate in
+            MoveOfferView(candidateID: candidate.id, title: candidate.listing.title ?? "Angebot", currentTripID: tripID) { _ in
+                if selection == candidate.id { selection = nil }
+            }
         }
         .sheet(item: $invite) { invite in
             InviteSheet(invite: invite)
@@ -358,7 +365,11 @@ private struct TripHeader: View {
                     Label(option.label.map { "\($0): \(range)" } ?? range, systemImage: "calendar")
                 }
             }
-            Label(people, systemImage: "person.2")
+            if detail.trip.isWatchlist {
+                Text("Angebote für später, die zu keiner Reise gehören. Wische eines nach links, um es in eine Reise zu verschieben.")
+            } else {
+                Label(people, systemImage: "person.2")
+            }
             if let budget = detail.trip.budgetTotalCents {
                 Label("Budget \(Format.euro(cents: budget))", systemImage: "eurosign.circle")
             }

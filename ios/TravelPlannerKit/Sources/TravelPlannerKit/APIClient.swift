@@ -43,6 +43,9 @@ public protocol TravelBackend: Sendable {
     func setStatus(candidateId: String, status: CandidateStatus) async throws
     /// Sets which hints of an offer are hidden for the whole trip, by their exact wording. An empty list shows all again.
     func setHiddenWarnings(candidateId: String, hidden: [String]) async throws
+    /// Moves the offer to another trip or to the watchlist. Votes and prices for the old trip stay behind.
+    /// Returns the offer's id in its new place.
+    func move(candidateId: String, toTrip tripId: String) async throws -> String
     /// Removes the offer from its trip, with its votes and comments. Cannot be undone.
     func delete(candidateId: String) async throws
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
@@ -257,6 +260,13 @@ public struct APIClient: TravelBackend {
     public func setHiddenWarnings(candidateId: String, hidden: [String]) async throws {
         struct Body: Encodable { var hiddenWarnings: [String] }
         _ = try await data("PATCH", "/candidates/\(candidateId.pathEscaped)", body: Body(hiddenWarnings: hidden))
+    }
+
+    public func move(candidateId: String, toTrip tripId: String) async throws -> String {
+        struct Body: Encodable { var tripId: String }
+        struct Response: Decodable { var candidateId: String? }
+        let response: Response = try await send("POST", "/candidates/\(candidateId.pathEscaped)/move", body: Body(tripId: tripId))
+        return response.candidateId ?? candidateId
     }
 
     public func delete(candidateId: String) async throws {

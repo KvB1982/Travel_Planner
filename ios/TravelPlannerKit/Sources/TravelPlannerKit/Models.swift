@@ -62,8 +62,11 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     public var role: MemberRole?
     public var candidateCount: Int?
     public var favoriteCount: Int?
+    /// "trip" or "watchlist". The watchlist is a personal place for offers that belong to no trip (yet).
+    public var kind: String?
 
     public var persons: Int { adults + children }
+    public var isWatchlist: Bool { kind == "watchlist" }
 
     public init(id: String, title: String, region: String? = nil, adults: Int = 2, children: Int = 0, pets: Int = 0,
                 budgetTotalCents: Int? = nil, status: TripStatus = .planning, voteDeadline: Date? = nil, createdAt: Date = .now,

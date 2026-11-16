@@ -12,7 +12,9 @@ public actor DemoBackend: TravelBackend {
     public init() {
         let trip1 = Trip(id: "t-1", title: "Pfingstferien 2027", region: "Toskana", adults: 4, children: 4, pets: 0, budgetTotalCents: 600_000, role: .organizer)
         let trip2 = Trip(id: "t-2", title: "Sommerurlaub 2027", region: "Dänemark, Nordsee", adults: 6, children: 5, pets: 1, role: .member)
-        trips = [trip1, trip2]
+        var watchlist = Trip(id: "t-w", title: "Merkliste", adults: 2, role: .organizer)
+        watchlist.kind = "watchlist"
+        trips = [trip1, trip2, watchlist]
         let samples = DemoBackend.samples()
         details = Dictionary(uniqueKeysWithValues: samples.map { ($0.candidate.id, $0) })
         order = samples.map(\.candidate.id)
@@ -196,6 +198,22 @@ public actor DemoBackend: TravelBackend {
         var detail = try detail(candidateId)
         detail.warnings = (detail.listing.profile.warnings ?? []).map { Hint(text: $0, hidden: hidden.contains($0)) }
         details[candidateId] = detail
+    }
+
+    public func move(candidateId: String, toTrip tripId: String) async throws -> String {
+        var detail = try detail(candidateId)
+        guard trips.contains(where: { $0.id == tripId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Reise gibt es nicht.") }
+        let url = detail.sources.first?.url
+        if details.values.contains(where: { $0.candidate.tripId == tripId && $0.candidate.id != candidateId && $0.sources.first?.url == url }) {
+            throw APIError(status: 409, code: "already_in_trip", message: "Dieses Angebot ist in der Zielreise schon vorhanden.")
+        }
+        detail.candidate.tripId = tripId
+        detail.candidate.status = .new
+        detail.votes = VoteOverview()
+        // Prices asked for the old trip say nothing about the new one.
+        detail.prices = detail.prices.map { var price = $0; price.tripId = nil; price.available = nil; return price }
+        details[candidateId] = detail
+        return candidateId
     }
 
     public func delete(candidateId: String) async throws {
