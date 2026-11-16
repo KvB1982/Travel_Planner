@@ -488,3 +488,41 @@ describe("the same property on other platforms", () => {
     expect((await s.call("POST", `/candidates/${id}/sources`, s.owner, { url: AIRBNB })).status).toBe(409);
   });
 });
+
+describe("checking a whole trip", () => {
+  it("reads every open candidate for the trip's dates and reports what is no longer to be had", async () => {
+    let soldOut = false;
+    const extractor: Extractor = async ({ baseline, link }) => ({
+      profile: { ...baseline, title: `Haus bei ${link.platform}`, price: { ...baseline.price, totalEur: 3000, kind: "total", available: link.platform === "airbnb" && soldOut ? false : true } },
+      note: null,
+    });
+    const s = await setup({ extractor, fetcher: async (url) => (url.includes("casamundo") ? page(fixture("blocked.html"), { status: 403, blocked: true }) : page(fixture("novasol.html"))) });
+    const a = (await s.importLink(AIRBNB)).body.candidateId as string;
+    const b = (await s.importLink(CASAMUNDO)).body.candidateId as string;
+
+    let list = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates as { id: string; availability: string; needsDevice: boolean; checkUrl: string; price: { available: boolean | null; totalCents: number } | null }[];
+    expect(list.find((c) => c.id === a)).toMatchObject({ availability: "available", needsDevice: false, price: { available: true, totalCents: 300000 } });
+    expect(list.find((c) => c.id === b)).toMatchObject({ availability: "unknown", needsDevice: true });
+    expect(list.find((c) => c.id === b)!.checkUrl).toContain("2027-08-21");
+
+    soldOut = true;
+    await s.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
+    const check = await s.call("POST", `/trips/${s.tripId}/refresh`, s.owner);
+    expect(check.status).toBe(202);
+    expect(check.body.checks.map((c: { candidateId: string; mode: string }) => [c.candidateId, c.mode]).sort()).toEqual([[a, "server"], [b, "device"]].sort());
+    await s.ctx.queue.idle();
+
+    list = (await s.call("GET", `/trips/${s.tripId}/candidates`, s.owner)).body.candidates;
+    const gone = list.find((c) => c.id === a)!;
+    // The last known price stays visible next to the news that the dates are gone.
+    expect(gone).toMatchObject({ availability: "unavailable", price: { available: false, totalCents: 300000 } });
+    expect((await s.call("GET", `/candidates/${a}`, s.owner)).body.listing.profile.price).toMatchObject({ available: false, totalEur: null });
+
+    // Rejected candidates are left alone, and a guest may not trigger the check.
+    await s.call("PATCH", `/candidates/${a}`, s.owner, { status: "rejected" });
+    await s.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
+    expect((await s.call("POST", `/trips/${s.tripId}/check`, s.owner)).body.checks).toHaveLength(1);
+    const guest = await s.join("guest", "Oma");
+    expect((await s.call("POST", `/trips/${s.tripId}/check`, guest)).status).toBe(403);
+  });
+});

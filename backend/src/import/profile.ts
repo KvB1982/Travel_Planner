@@ -137,6 +137,8 @@ export const profileSchema = z.object({
         )
         .default([]),
       depositEur: nnum,
+      /** Whether the page offered the stay for these dates and this party: true, false, or null when it did not say. */
+      available: nbool,
     })
     .prefault({}),
 

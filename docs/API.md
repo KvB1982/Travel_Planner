@@ -211,3 +211,26 @@ Beim Auslesen auf dem Gerät kann die Seite einen versteckten Block `<div id="tp
 ## Ungefähre Lage
 
 Stehen `"lat"` und `"lon"` in `profile.uncertain`, ist die Position nur ungefähr: entweder hat die KI sie aus dem Text abgeleitet, oder die Plattform zeigt bewusst nur die Umgebung (Airbnb, Vrbo). Die App zeichnet dann besser einen Kreis als eine Nadel. Eine von Hand korrigierte Position gilt wieder als genau. Die Liste `GET /trips/:tripId/candidates` liefert dasselbe als `listing.locationApproximate` (boolean).
+
+## Verfügbarkeit und Preise für die ganze Reise prüfen
+
+`POST /trips/:tripId/refresh` (gleichbedeutend `POST /trips/:tripId/check`), ab Rolle Mitglied. Prüft alle nicht abgelehnten Angebote für den ersten Zeitraum und die Personenzahl der Reise. `409 no_dates`, wenn die Reise keinen Zeitraum hat. Antwort `202`:
+
+```json
+{ "startDate": "2027-05-15", "endDate": "2027-05-29", "adults": 4, "children": 4,
+  "checks": [ { "candidateId": "…", "platform": "airbnb", "mode": "server | device | skipped", "needsDevice": false, "checkUrl": "https://…" } ] }
+```
+
+- `mode: "server"`: Der Server liest die Seite im Hintergrund für die Reisedaten. Das Angebot steht solange auf `importStatus: "pending"`; fertig ist es, wenn die Liste wieder `ready`, `partial` oder `failed` zeigt.
+- `mode: "device"` (`needsDevice: true`): Die Plattform gibt dem Server nichts oder zu wenig. Die App öffnet `checkUrl` und schickt die Seite an `POST /candidates/:id/capture` mit `{ "html": "…", "forTrip": true }`. `forTrip: true` sagt dem Server, dass die Seite für Zeitraum und Personen der Reise geöffnet war; nur dann gelten Preis und Verfügbarkeit für die Reise.
+- `mode: "skipped"`: in der letzten Minute schon gelesen.
+- `POST /candidates/:id/refresh` ruft ebenfalls mit Zeitraum und Personen der Reise ab, wo die Plattform das über den Link erlaubt (Airbnb, FeWo-direkt/Vrbo, Booking, Casamundo). Bei Novasol und Check24 kennt der Server die Linkform dafür noch nicht; dort bleibt die Verfügbarkeit `unknown`.
+
+In `GET /trips/:tripId/candidates` steht je Angebot:
+
+- `availability`: `"available"`, `"unavailable"` oder `"unknown"`, bezogen auf Zeitraum und Personen der Reise. `unknown`, solange kein Auslesen für die Reisedaten etwas dazu gesagt hat.
+- `availabilityCheckedAt`: wann das zuletzt festgestellt wurde, sonst `null`.
+- `price.available`: dasselbe als `true`, `false` oder `null` am Preis. Bei `unavailable` bleibt der letzte bekannte Preis in `price` stehen, damit er ausgegraut gezeigt werden kann; im Steckbrief ist `profile.price.totalEur` dann `null`.
+- `needsDevice` und `checkUrl`: ob nur das Gerät prüfen kann, und die Seite mit den Reisedaten.
+
+Grenzen: Ob ein Zeitraum frei ist, steht bei den meisten Plattformen nur in der gerenderten Seite. Der Server-Abruf sieht bei Airbnb und FeWo-direkt wenig Text und oft keinen Gesamtpreis; verlässlich ist dort das Auslesen auf dem Gerät. Bleibt nach dem Server-Lauf `availability` auf `unknown`, lohnt der Gerätelauf über `checkUrl`.

@@ -312,6 +312,11 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       if (stay.adults !== null) p.set("group_adults", String(stay.adults));
       if (stay.children !== null) p.set("group_children", String(stay.children));
       break;
+    case "casamundo":
+      p.set("dateRange", `${stay.startDate}~${stay.endDate}`);
+      if (stay.adults !== null) p.set("adults", String(stay.adults));
+      if (stay.children) p.set("children", String(stay.children));
+      break;
     default:
       return info.canonicalUrl;
   }
