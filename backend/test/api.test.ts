@@ -522,6 +522,14 @@ describe("checking a whole trip", () => {
     expect(gone).toMatchObject({ availability: "unavailable", price: { available: false, totalCents: 300000 } });
     expect((await s.call("GET", `/candidates/${a}`, s.owner)).body.listing.profile.price).toMatchObject({ available: false, totalEur: null });
 
+    // A security check the platform showed the device instead of the advert leaves everything as it was.
+    const titleBefore = (await s.call("GET", `/candidates/${a}`, s.owner)).body.listing.profile.title;
+    await s.call("POST", `/candidates/${a}/capture`, s.owner, { html: `<html><head><title>Bot oder Mensch?</title></head><body>${"<p>Bitte bestätige, dass du ein Mensch bist.</p>".repeat(20)}</body></html>`, forTrip: true });
+    await s.ctx.queue.idle();
+    const after = (await s.call("GET", `/candidates/${a}`, s.owner)).body.listing.profile;
+    expect(after.title).toBe(titleBefore);
+    expect(after.title).not.toMatch(/Bot oder Mensch/);
+
     // Rejected candidates are left alone, and a guest may not trigger the check.
     await s.call("PATCH", `/candidates/${a}`, s.owner, { status: "rejected" });
     await s.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });

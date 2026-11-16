@@ -156,7 +156,10 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const ownPrices = prices.filter((p) => own.some((s) => s.id === p.listingSourceId));
       // A price captured for this trip's dates beats one that came with the shared link.
       const priced = ownPrices.filter((x) => x.totalCents !== null);
-      const price = priced.find(forThisTrip) ?? priced[0] ?? null;
+      // The last look for the trip that found nothing at all leaves older trip prices without a say.
+      const newestForTrip = ownPrices.find(forThisTrip);
+      const blank = newestForTrip !== undefined && newestForTrip.totalCents === null && newestForTrip.available === null;
+      const price = (blank ? priced.find((x) => !forThisTrip(x)) : (priced.find(forThisTrip) ?? priced[0])) ?? null;
       // The latest word on whether the trip's dates can be booked, from whichever source said so last.
       const said = ownPrices.find((x) => forThisTrip(x) && x.available !== null);
       const lastForTrip = ownPrices.find(forThisTrip);
