@@ -306,6 +306,106 @@ public actor DemoBackend: TravelBackend {
         for key in booked.keys { for index in (booked[key] ?? []).indices { booked[key]?[index].documents.removeAll { $0.id == documentId } } }
     }
 
+    // MARK: Preparation
+
+    private var plans: [String: TripPlan] = ["t-1": TripPlan(
+        legs: [TravelLeg(id: "l-1", partyId: "p-1", direction: "outbound", mode: "car", fromPlace: "München", toPlace: "Castellina in Chianti",
+                         departAt: "2027-05-15T06:00", stops: [TravelLeg.Stop(place: "Gardasee", note: "Mittagspause")]),
+               TravelLeg(id: "l-2", partyId: "p-3", direction: "outbound", mode: "flight", fromPlace: "Hamburg", toPlace: "Florenz",
+                         departAt: "2027-05-15T09:40", arriveAt: "2027-05-15T11:35")],
+        rooms: [Room(id: "r-1", name: "Schlafzimmer 1", beds: "1 Doppelbett", partyId: "p-1", occupants: ["Du", "Lena"]),
+                Room(id: "r-2", name: "Schlafzimmer 2", beds: "2 Einzelbetten", occupants: [])],
+        activities: [Activity(id: "x-1", title: "Weinprobe in Radda", place: "Radda in Chianti", status: "planned", startsAt: "2027-05-18T16:00",
+                              costCents: 2_500, costNote: "pro Person"),
+                     Activity(id: "x-2", title: "Tagesausflug nach Siena", status: "idea")])]
+    private var answers: [String: [String: String]] = ["x-1": ["u-2": "yes", "u-3": "maybe"]]
+
+    private func preparation(_ tripId: String) throws -> TripPlan {
+        _ = try tripIndex(tripId)
+        var plan = plans[tripId] ?? TripPlan()
+        let names = ["u-1": "Du", "u-2": "Anna", "u-3": "Jonas"]
+        plan.activities = plan.activities.map { activity in
+            var activity = activity
+            let given = answers[activity.id] ?? [:]
+            activity.responses = given.sorted { $0.key < $1.key }.map { Activity.Response(userId: $0.key, name: names[$0.key], answer: $0.value) }
+            activity.tally = Activity.Tally(yes: given.values.filter { $0 == "yes" }.count, maybe: given.values.filter { $0 == "maybe" }.count,
+                                            no: given.values.filter { $0 == "no" }.count)
+            activity.myAnswer = given[user.id]
+            return activity
+        }
+        // With a date they stand in the order of the calendar, ideas without one after them.
+        plan.activities.sort { ($0.startsAt ?? "9999") < ($1.startsAt ?? "9999") }
+        return plan
+    }
+
+    private func tripOfPlan(_ has: (TripPlan) -> Bool, _ what: String) throws -> String {
+        guard let key = plans.first(where: { has($0.value) })?.key else { throw APIError(status: 404, code: "not_found", message: "\(what) nicht gefunden.") }
+        return key
+    }
+
+    public func plan(tripId: String) async throws -> TripPlan { try preparation(tripId) }
+
+    public func saveLeg(tripId: String, legId: String?, leg draft: LegDraft) async throws -> TripPlan {
+        let key = try legId.map { id in try tripOfPlan({ $0.legs.contains { $0.id == id } }, "Strecke") } ?? tripId
+        let leg = TravelLeg(id: legId ?? nextID("l"), partyId: draft.partyId, direction: draft.direction, mode: draft.mode, fromPlace: draft.fromPlace,
+                            toPlace: draft.toPlace, departAt: draft.departAt, arriveAt: draft.arriveAt, stops: draft.stops, notes: draft.notes)
+        if let index = plans[key]?.legs.firstIndex(where: { $0.id == leg.id }) { plans[key]?.legs[index] = leg } else { plans[key, default: TripPlan()].legs.append(leg) }
+        return try preparation(key)
+    }
+
+    public func deleteLeg(legId: String) async throws -> TripPlan {
+        let key = try tripOfPlan({ $0.legs.contains { $0.id == legId } }, "Strecke")
+        plans[key]?.legs.removeAll { $0.id == legId }
+        return try preparation(key)
+    }
+
+    public func saveRoom(tripId: String, roomId: String?, room draft: RoomDraft) async throws -> TripPlan {
+        let key = try roomId.map { id in try tripOfPlan({ $0.rooms.contains { $0.id == id } }, "Zimmer") } ?? tripId
+        guard !draft.name.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Das Zimmer braucht einen Namen.") }
+        let room = Room(id: roomId ?? nextID("r"), name: draft.name, beds: draft.beds, partyId: draft.partyId, occupants: draft.occupants, notes: draft.notes)
+        if let index = plans[key]?.rooms.firstIndex(where: { $0.id == room.id }) { plans[key]?.rooms[index] = room } else { plans[key, default: TripPlan()].rooms.append(room) }
+        return try preparation(key)
+    }
+
+    public func deleteRoom(roomId: String) async throws -> TripPlan {
+        let key = try tripOfPlan({ $0.rooms.contains { $0.id == roomId } }, "Zimmer")
+        plans[key]?.rooms.removeAll { $0.id == roomId }
+        return try preparation(key)
+    }
+
+    public func suggestRooms(tripId: String) async throws -> TripPlan {
+        guard (plans[tripId]?.rooms ?? []).isEmpty else { throw APIError(status: 409, code: "already_set_up", message: "Es gibt schon Zimmer.") }
+        guard let chosen = decided[tripId] else { throw APIError(status: 409, code: "no_decision", message: "Die Reise hat noch kein entschiedenes Angebot.") }
+        let profile = try detail(chosen).listing.profile
+        let count = Int(profile.bedrooms ?? 0)
+        guard count > 0 else { throw APIError(status: 409, code: "nothing_known", message: "Der Steckbrief nennt keine Zimmer.") }
+        plans[tripId, default: TripPlan()].rooms = (1...count).map { Room(id: nextID("r"), name: "Schlafzimmer \($0)") }
+        return try preparation(tripId)
+    }
+
+    public func saveActivity(tripId: String, activityId: String?, activity draft: ActivityDraft) async throws -> TripPlan {
+        let key = try activityId.map { id in try tripOfPlan({ $0.activities.contains { $0.id == id } }, "Aktivität") } ?? tripId
+        guard !draft.title.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Die Aktivität braucht einen Namen.") }
+        let activity = Activity(id: activityId ?? nextID("x"), title: draft.title, place: draft.place, url: draft.url, status: draft.status, startsAt: draft.startsAt,
+                                endsAt: draft.endsAt, costCents: draft.costCents, costNote: draft.costNote, notes: draft.notes)
+        if let index = plans[key]?.activities.firstIndex(where: { $0.id == activity.id }) { plans[key]?.activities[index] = activity }
+        else { plans[key, default: TripPlan()].activities.append(activity) }
+        return try preparation(key)
+    }
+
+    public func deleteActivity(activityId: String) async throws -> TripPlan {
+        let key = try tripOfPlan({ $0.activities.contains { $0.id == activityId } }, "Aktivität")
+        plans[key]?.activities.removeAll { $0.id == activityId }
+        answers[activityId] = nil
+        return try preparation(key)
+    }
+
+    public func respond(activityId: String, answer: String?) async throws -> TripPlan {
+        let key = try tripOfPlan({ $0.activities.contains { $0.id == activityId } }, "Aktivität")
+        answers[activityId, default: [:]][user.id] = answer
+        return try preparation(key)
+    }
+
     // MARK: Frame of the trip
 
     private var periods: [String: [DateOption]] = [

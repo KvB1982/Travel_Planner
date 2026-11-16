@@ -47,6 +47,19 @@ public protocol TravelBackend: Sendable {
     func uploadDocument(tripId: String, title: String, bookingId: String?, contentType: String, data: Data) async throws
     func documentFile(documentId: String) async throws -> Data
     func deleteDocument(documentId: String) async throws
+    /// The preparation: how everyone gets there, who sleeps where, and what the group wants to do.
+    func plan(tripId: String) async throws -> TripPlan
+    /// Adds a leg, or changes the one with this id.
+    func saveLeg(tripId: String, legId: String?, leg: LegDraft) async throws -> TripPlan
+    func deleteLeg(legId: String) async throws -> TripPlan
+    func saveRoom(tripId: String, roomId: String?, room: RoomDraft) async throws -> TripPlan
+    func deleteRoom(roomId: String) async throws -> TripPlan
+    /// Sets the rooms up as the fact sheet of the decided offer names them.
+    func suggestRooms(tripId: String) async throws -> TripPlan
+    func saveActivity(tripId: String, activityId: String?, activity: ActivityDraft) async throws -> TripPlan
+    func deleteActivity(activityId: String) async throws -> TripPlan
+    /// "yes", "maybe" or "no"; nil takes the answer back.
+    func respond(activityId: String, answer: String?) async throws -> TripPlan
     /// `dateOptionId` picks the period that price and availability refer to; nil means the earliest.
     func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary]
     /// Moves the trip to a phase by hand, forwards or back. Nothing is deleted.
@@ -398,6 +411,59 @@ public struct APIClient: TravelBackend {
 
     public func deleteDocument(documentId: String) async throws {
         _ = try await data("DELETE", "/documents/\(documentId.pathEscaped)")
+    }
+
+    // MARK: Preparation
+
+    private struct PlanAnswer: Decodable { var plan: TripPlan }
+
+    public func plan(tripId: String) async throws -> TripPlan {
+        try await send("GET", "/trips/\(tripId.pathEscaped)/plan")
+    }
+
+    private func savePlanEntry(_ kind: String, tripId: String, id: String?, body: any Encodable) async throws -> TripPlan {
+        if let id { return try await (send("PATCH", "/\(kind)/\(id.pathEscaped)", body: body) as PlanAnswer).plan }
+        return try await (send("POST", "/trips/\(tripId.pathEscaped)/\(kind)", body: body) as PlanAnswer).plan
+    }
+
+    public func saveLeg(tripId: String, legId: String?, leg: LegDraft) async throws -> TripPlan {
+        try await savePlanEntry("legs", tripId: tripId, id: legId, body: leg)
+    }
+
+    public func deleteLeg(legId: String) async throws -> TripPlan {
+        try await (send("DELETE", "/legs/\(legId.pathEscaped)") as PlanAnswer).plan
+    }
+
+    public func saveRoom(tripId: String, roomId: String?, room: RoomDraft) async throws -> TripPlan {
+        try await savePlanEntry("rooms", tripId: tripId, id: roomId, body: room)
+    }
+
+    public func deleteRoom(roomId: String) async throws -> TripPlan {
+        try await (send("DELETE", "/rooms/\(roomId.pathEscaped)") as PlanAnswer).plan
+    }
+
+    public func suggestRooms(tripId: String) async throws -> TripPlan {
+        try await (send("POST", "/trips/\(tripId.pathEscaped)/rooms/suggest") as PlanAnswer).plan
+    }
+
+    public func saveActivity(tripId: String, activityId: String?, activity: ActivityDraft) async throws -> TripPlan {
+        try await savePlanEntry("activities", tripId: tripId, id: activityId, body: activity)
+    }
+
+    public func deleteActivity(activityId: String) async throws -> TripPlan {
+        try await (send("DELETE", "/activities/\(activityId.pathEscaped)") as PlanAnswer).plan
+    }
+
+    public func respond(activityId: String, answer: String?) async throws -> TripPlan {
+        struct Body: Encodable {
+            var answer: String?
+            func encode(to encoder: any Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(answer, forKey: .answer)
+            }
+            enum CodingKeys: String, CodingKey { case answer }
+        }
+        return try await (send("PUT", "/activities/\(activityId.pathEscaped)/response", body: Body(answer: answer)) as PlanAnswer).plan
     }
 
     // MARK: Frame of the trip

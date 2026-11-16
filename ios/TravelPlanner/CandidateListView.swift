@@ -25,6 +25,7 @@ struct CandidateListView: View {
     @State private var showLedger = false
     @State private var framingSheet: FramingSheet?
     @State private var bookingRequests = BookingRequests()
+    @State private var planSheet: PlanSheet?
     @State private var removingPeriod: DateOption?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
@@ -122,7 +123,7 @@ struct CandidateListView: View {
         case .booking:
             BookingSections(detail: detail, candidates: candidates, requests: $bookingRequests)
         case .preparation:
-            ChecklistSections(tripID: tripID, role: detail.role)
+            PreparationSections(detail: detail, sheet: $planSheet)
         default:
             PhasePlaceholder(phase: viewedPhase)
         }
@@ -303,6 +304,7 @@ struct CandidateListView: View {
             TripMapView(title: detail?.trip.title ?? "Karte", candidates: visible) { selection = $0 }
         }
         .sheet(isPresented: $showCriteria) { CriteriaEditor(tripID: tripID) }
+        .modifier(PlanPresenter(tripID: tripID, sheet: $planSheet, run: frame))
         .modifier(BookingPresenter(tripID: tripID, requests: $bookingRequests, run: frame))
         .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, run: frame))
         .sheet(isPresented: $showLedger) { LedgerView(tripID: tripID, role: detail?.role ?? .guest, members: detail?.members ?? []) }

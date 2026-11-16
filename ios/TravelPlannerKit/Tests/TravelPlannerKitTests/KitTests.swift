@@ -925,3 +925,53 @@ final class PreparationTests: XCTestCase {
         XCTAssertNil(TripDocument.contentType(forExtension: "docx"))
     }
 }
+
+final class PlanTests: XCTestCase {
+    func testPlanDecodesServerShape() throws {
+        let json = #"{"legs":[{"id":"l","partyId":"p","direction":"outbound","mode":"car","fromPlace":"München","toPlace":"Zadar","departAt":"2027-08-20T06:00","arriveAt":null,"stops":[{"place":"Ljubljana","note":"Übernachtung"}],"bookingId":null,"notes":null,"position":0}],"rooms":[{"id":"r","name":"Schlafzimmer 1","beds":"1 Doppelbett","partyId":null,"occupants":["Oma","Opa"],"notes":null,"position":0}],"activities":[{"id":"a","title":"Bootstour","place":null,"url":null,"status":"idea","startsAt":null,"endsAt":null,"costCents":4500,"costNote":"pro Person","bookingId":null,"notes":null,"createdBy":"u","responses":[{"userId":"u","name":"Tante","answer":"maybe"}],"tally":{"yes":1,"maybe":1,"no":0},"myAnswer":"yes"}]}"#
+        let plan = try JSONDecoder().decode(TripPlan.self, from: Data(json.utf8))
+        XCTAssertEqual(plan.legs.first?.stops.first?.place, "Ljubljana")
+        XCTAssertEqual(plan.legs.first?.modeLabel, "Auto")
+        XCTAssertEqual(plan.rooms.first?.occupants, ["Oma", "Opa"])
+        XCTAssertEqual(plan.activities.first?.tally.maybe, 1)
+        XCTAssertEqual(plan.activities.first?.myAnswer, "yes")
+    }
+
+    func testDraftsSendClearedFieldsAsNull() throws {
+        let leg = String(decoding: try JSONEncoder().encode(LegDraft()), as: UTF8.self)
+        XCTAssertTrue(leg.contains(#""arriveAt":null"#))
+        XCTAssertFalse(leg.contains("bookingId"))
+        let activity = String(decoding: try JSONEncoder().encode(ActivityDraft(title: "X")), as: UTF8.self)
+        XCTAssertTrue(activity.contains(#""costCents":null"#))
+        XCTAssertEqual(RoomDraft.names(from: "Oma, Opa und Lina"), ["Oma", "Opa", "Lina"])
+        XCTAssertEqual(RoomDraft.names(from: "  "), [])
+    }
+
+    func testPlanInSampleData() async throws {
+        let demo = DemoBackend()
+        var plan = try await demo.plan(tripId: "t-1")
+        XCTAssertEqual(plan.activities.map(\.id), ["x-1", "x-2"])
+        XCTAssertEqual(plan.activities[0].tally.yes, 1)
+        plan = try await demo.respond(activityId: "x-1", answer: "yes")
+        XCTAssertEqual(plan.activities[0].tally.yes, 2)
+        XCTAssertEqual(plan.activities[0].myAnswer, "yes")
+        plan = try await demo.respond(activityId: "x-1", answer: nil)
+        XCTAssertNil(plan.activities[0].myAnswer)
+        plan = try await demo.saveRoom(tripId: "t-1", roomId: "r-2", room: RoomDraft(name: "Kinderzimmer", beds: "Etagenbett", occupants: ["Mia", "Ben"]))
+        XCTAssertEqual(plan.rooms.last?.name, "Kinderzimmer")
+        plan = try await demo.saveLeg(tripId: "t-1", legId: nil, leg: LegDraft(direction: "return", mode: "car", fromPlace: "Castellina", toPlace: "München"))
+        XCTAssertEqual(plan.legs.count, 3)
+        plan = try await demo.deleteLeg(legId: "l-2")
+        XCTAssertEqual(plan.legs.count, 2)
+        plan = try await demo.saveActivity(tripId: "t-1", activityId: nil, activity: ActivityDraft(title: "Markt in Greve", startsAt: "2027-05-16"))
+        XCTAssertEqual(plan.activities.first?.title, "Markt in Greve")
+        do {
+            _ = try await demo.suggestRooms(tripId: "t-1")
+            XCTFail("Zimmer gibt es schon")
+        } catch let error as APIError { XCTAssertEqual(error.code, "already_set_up") }
+        do {
+            _ = try await demo.suggestRooms(tripId: "t-2")
+            XCTFail("Ohne Entscheidung keine Zimmer")
+        } catch let error as APIError { XCTAssertEqual(error.code, "no_decision") }
+    }
+}
