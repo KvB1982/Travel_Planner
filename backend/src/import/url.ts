@@ -312,6 +312,21 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       if (stay.adults !== null) p.set("group_adults", String(stay.adults));
       if (stay.children !== null) p.set("group_children", String(stay.children));
       break;
+    case "check24": {
+      // A fixed stay instead of a search window: outward and return date, and the days between them.
+      const nights = nightsBetween(stay.startDate, stay.endDate);
+      p.set("departureDate", stay.startDate);
+      p.set("returnDate", stay.endDate);
+      if (nights) p.set("days", String(nights));
+      if (stay.adults !== null) {
+        // The link wants every child's age. Those of the shared link serve where the number fits; otherwise a school child.
+        const known = (p.get("roomAllocation") ?? "").split(/[-,]/).filter((x) => /^\d+$/.test(x));
+        const children = stay.children ?? 0;
+        const ages = Array.from({ length: children }, (_, i) => (known.length === children ? known[i]! : "10"));
+        p.set("roomAllocation", [...Array.from({ length: stay.adults }, () => "A"), ...ages].join("-"));
+      }
+      break;
+    }
     case "casamundo":
       p.set("dateRange", `${stay.startDate}~${stay.endDate}`);
       if (stay.adults !== null) p.set("adults", String(stay.adults));

@@ -76,6 +76,14 @@ describe("urlForStay", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({ check_in: "2027-08-21", check_out: "2027-08-28", adults: "4", children: "4" });
   });
 
+  it("turns a Check24 search window into the trip's fixed stay", () => {
+    const link = analyzeLink(CHECK24);
+    const url = new URL(urlForStay(link, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 4, children: 2 }));
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ hotelId: "12912", departureDate: "2027-05-15", returnDate: "2027-05-29", days: "14", roomAllocation: "A-A-A-A-7-11", pageArea: "package" });
+    // Another number of children than in the shared link: their ages are not known.
+    expect(new URL(urlForStay(link, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 2, children: 3 })).searchParams.get("roomAllocation")).toBe("A-A-10-10-10");
+  });
+
   it("leaves the link alone without dates or for platforms without date parameters", () => {
     expect(urlForStay(analyzeLink(AIRBNB), { startDate: null, endDate: null, adults: 4, children: 0 })).toBe("https://www.airbnb.de/rooms/18726447");
     expect(urlForStay(analyzeLink(NOVASOL), { startDate: "2027-08-21", endDate: "2027-08-28", adults: 4, children: 0 })).toBe(NOVASOL);

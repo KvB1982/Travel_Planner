@@ -212,7 +212,7 @@ export async function processImport(
       price.nights = nightsBetween(stay.startDate, stay.endDate);
       if (stay.adults !== null) price.persons = stay.adults + (stay.children ?? 0);
     }
-    if (input.link.searchWindow && !fromDevice) {
+    if (input.link.searchWindow && !fromDevice && !priceBelongsToTrip) {
       // Whatever was read, a window of possible dates is not a stay.
       price.startDate = null;
       price.endDate = null;
