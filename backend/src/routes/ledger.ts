@@ -89,7 +89,7 @@ export function ledgerRoutes(app: FastifyInstance, ctx: AppContext): void {
       }
     });
     await logActivity(ctx, tripId, uid, "parties_changed", { count: body.parties.length });
-    return ledger(tripId, uid);
+    return { ledger: await ledger(tripId, uid) };
   });
 
   /** Suggest households from the members: one each, named after the person. A starting point to edit. */
@@ -100,7 +100,7 @@ export function ledgerRoutes(app: FastifyInstance, ctx: AppContext): void {
     if ((await partiesOf(tripId)).length) throw new HttpError(409, "already_set_up", "Die Haushalte sind schon eingerichtet.");
     const members = await db.select({ id: users.id, name: users.name }).from(tripMembers).innerJoin(users, eq(users.id, tripMembers.userId)).where(eq(tripMembers.tripId, tripId)).orderBy(asc(tripMembers.joinedAt));
     await db.insert(tripParties).values(members.map((m, position) => ({ tripId, name: m.name, adults: 1, children: 0, memberIds: [m.id], position })));
-    return ledger(tripId, uid);
+    return { ledger: await ledger(tripId, uid) };
   });
 
   const checkExpense = async (tripId: string, e: { paidBy?: string | undefined; among?: string[] | undefined; weights?: Record<string, number> | undefined }) => {

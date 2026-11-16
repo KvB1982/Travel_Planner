@@ -707,16 +707,16 @@ describe("shared purse", () => {
     expect((await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, { title: "Einkauf", amountCents: 9000, paidBy: "00000000-0000-4000-8000-000000000000" })).status).toBe(409);
 
     const suggested = await s.call("POST", `/trips/${s.tripId}/parties/suggest`, s.owner);
-    expect(suggested.body.parties).toHaveLength(2);
+    expect(suggested.body.ledger.parties).toHaveLength(2);
     const set = await s.call("PUT", `/trips/${s.tripId}/parties`, s.owner, {
       parties: [
-        { id: suggested.body.parties[0].id, name: "Familie A", adults: 2, children: 2, memberIds: suggested.body.parties[0].memberIds },
-        { id: suggested.body.parties[1].id, name: "Familie B", adults: 2, children: 0, memberIds: suggested.body.parties[1].memberIds },
+        { id: suggested.body.ledger.parties[0].id, name: "Familie A", adults: 2, children: 2, memberIds: suggested.body.ledger.parties[0].memberIds },
+        { id: suggested.body.ledger.parties[1].id, name: "Familie B", adults: 2, children: 0, memberIds: suggested.body.ledger.parties[1].memberIds },
         { name: "Oma", adults: 1, children: 0 },
       ],
     });
-    const [a, b, c] = set.body.parties.map((p: { id: string }) => p.id) as [string, string, string];
-    expect(set.body.myPartyId).toBe(a);
+    const [a, b, c] = set.body.ledger.parties.map((p: { id: string }) => p.id) as [string, string, string];
+    expect(set.body.ledger.myPartyId).toBe(a);
 
     await s.call("POST", `/trips/${s.tripId}/expenses`, s.owner, { title: "Haus", amountCents: 30000, paidBy: a });
     const second = await s.call("POST", `/trips/${s.tripId}/expenses`, aunt, { title: "Bootstour", amountCents: 8000, paidBy: b, mode: "custom", weights: { [a]: 1, [b]: 1 } });
