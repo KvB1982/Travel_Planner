@@ -725,7 +725,7 @@ Zweck: Das Wichtige ist mit einem Griff da, auch ohne Netz.
 - **Ein Schritt zurück bleibt erlaubt.** Fällt ein gebuchtes Haus aus, lässt sich die Reise zur Recherche zurückstellen. Nichts wird gelöscht.
 - **Rollen.** Der Organisator löst die Übertritte aus. Mitglieder arbeiten in allen Phasen mit, Gäste sehen, stimmen ab und kommentieren.
 
-Der vorhandene Reisestatus (`planning`, `decided`, `booked`, `archived`) wird zur Phase verfeinert: `framing`, `research`, `decision`, `booking`, `preparation`, `travelling`, `review`, `archived`.
+Der vorhandene Reisestatus (`planning`, `decided`, `booked`, `archived`) bleibt bestehen. Die Phase kommt als eigenes Feld daneben, damit alles Bisherige weiterläuft: `framing`, `research`, `decision`, `booking`, `preparation`, `travelling`, `review`, `archived`.
 
 ### 15.4 Erweiterung des Datenmodells
 
@@ -734,8 +734,8 @@ Zusätzlich zu Kapitel 9. Alles hängt an der Reise.
 | Entität | Phase | Zweck | Wichtige Felder |
 |---|---|---|---|
 | **AvailabilityPoll** | 0 | Terminfindung | Zeitraum, Antwort je Haushalt |
-| **Booking** (vorhanden, erweitert) | 3 | Jede feste Buchung der Reise | Art (Unterkunft, Flug, Mietwagen, Fähre, Versicherung, Aktivität), Anbieter, Buchungsnummer, Zeiten, Betrag, gebucht von |
-| **Payment** (vorhanden) | 3 | Zahlungsplan | Betrag, fällig am, bezahlt am, bezahlt von |
+| **Booking** (in Kapitel 9 geplant, noch nicht gebaut) | 3 | Jede feste Buchung der Reise | Art (Unterkunft, Flug, Mietwagen, Fähre, Versicherung, Aktivität), Anbieter, Buchungsnummer, Zeiten, Betrag, gebucht von |
+| **Payment** (in Kapitel 9 geplant, noch nicht gebaut) | 3 | Zahlungsplan | Betrag, fällig am, bezahlt am, bezahlt von |
 | **Document** | 3 bis 5 | Belege und Unterlagen | Datei, Art, gehört zu Buchung oder Person, offline vorhalten |
 | **TravelLeg** | 4 | Anreise und Etappen | Haushalt, Verkehrsmittel, von, nach, Zeiten, Zwischenstopps |
 | **RoomAssignment** | 4 | Zimmerverteilung | Zimmer, Personen |
