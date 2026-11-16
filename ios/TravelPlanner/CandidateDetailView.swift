@@ -21,7 +21,7 @@ struct CandidateDetailView: View {
     @State private var mapTarget: MapTarget?
     @State private var sentNote: String?
     @State private var sourceLink = ""
-    @AppStorage("showWarnings") private var showWarnings = false
+    @AppStorage(Settings.showWarnings) private var showWarnings = false
 
     var body: some View {
         Group {

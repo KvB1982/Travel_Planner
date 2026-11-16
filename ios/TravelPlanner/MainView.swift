@@ -36,7 +36,7 @@ struct TripListView: View {
     @State private var loaded = false
     @State private var error: String?
     @State private var showNewTrip = false
-    @State private var confirmSignOut = false
+    @State private var showSettings = false
 
     var body: some View {
         List(selection: $selection) {
@@ -98,22 +98,10 @@ struct TripListView: View {
                 Button("Reise anlegen", systemImage: "plus") { showNewTrip = true }
             }
             ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    if let user = model.user { Text("Angemeldet als \(user.name)") }
-                    if let host = model.serverURL?.host(), !model.isDemo { Text(host) }
-                    Button(model.isDemo ? "Beispieldaten verlassen" : "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        confirmSignOut = true
-                    }
-                } label: {
-                    Label("Konto", systemImage: "person.crop.circle")
-                }
+                Button("Einstellungen", systemImage: "gearshape") { showSettings = true }
             }
         }
-        .confirmationDialog(model.isDemo ? "Beispieldaten verlassen?" : "Wirklich abmelden?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button(model.isDemo ? "Verlassen" : "Abmelden", role: .destructive) {
-                Task { await model.signOut() }
-            }
-        }
+        .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showNewTrip) {
             NewTripView { trip in
                 model.dataChanged()

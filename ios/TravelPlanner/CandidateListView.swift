@@ -24,12 +24,17 @@ struct CandidateListView: View {
     /// "2 von 5" while all offers are being checked; nil otherwise.
     @State private var checking: String?
     @State private var confirmCheck = false
+    @AppStorage(Settings.showCheckRun) private var showCheckRun = false
+    /// The web page used to read adverts out of sight during a check.
+    @State private var hiddenPage = WebPage()
     /// Adverts still to be read on this device during a check of the whole trip.
     @State private var deviceQueue: [TripCheck.Check] = []
     @State private var deviceTotal = 0
     /// How many of them were actually read and sent; the rest were cancelled.
     @State private var deviceDone = 0
     @State private var deviceCheck: TripCheck.Check?
+    /// Adverts the hidden run could not read because the site wants a person; shown once the summary is closed.
+    @State private var pendingVisible: [TripCheck.Check] = []
 
     private var visible: [CandidateSummary] {
         candidates.filter { candidate in
@@ -137,6 +142,14 @@ struct CandidateListView: View {
                 }
             }
         }
+        // The hidden page has to be part of the screen to load like a real one; it sits behind the list, unseen.
+        .background {
+            WebViewContainer(webView: hiddenPage.webView)
+                .frame(width: 390, height: 800)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .navigationTitle(detail?.trip.title ?? "Angebote")
         .toolbar {
             if detail?.role.canEdit ?? false {
@@ -172,7 +185,16 @@ struct CandidateListView: View {
             Text("Adresse eines Inserats, zum Beispiel von Airbnb, FeWo-direkt, Novasol, Check24 oder Casamundo.")
         }
         .alert("Hinweis", isPresented: .init(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") {}
+            Button("OK") {
+                guard !pendingVisible.isEmpty else { return }
+                deviceTotal = pendingVisible.count
+                deviceQueue = pendingVisible
+                pendingVisible = []
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    deviceCheck = deviceQueue.removeFirst()
+                }
+            }
         } message: {
             Text(notice ?? "")
         }
@@ -194,7 +216,9 @@ struct CandidateListView: View {
             Button("Abbrechen", role: .cancel) {}
             Button("Jetzt prüfen") { checkAll() }
         } message: {
-            Text("Alle Angebote werden für den Zeitraum und die Gäste dieser Reise neu abgefragt. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst. Das dauert etwa eine Viertelminute je Angebot.")
+            Text(showCheckRun
+                 ? "Alle Angebote werden für den Zeitraum und die Gäste dieser Reise neu abgefragt. Inserate, die der Server nicht lesen kann, öffnet die App danach kurz nacheinander selbst. Das dauert etwa eine Viertelminute je Angebot."
+                 : "Alle Angebote werden für den Zeitraum und die Gäste dieser Reise neu abgefragt, im Hintergrund. Du kannst währenddessen weiterarbeiten, die App muss nur geöffnet bleiben. Das dauert etwa eine Viertelminute je Angebot.")
         }
         .sheet(item: $deviceCheck, onDismiss: nextDeviceCheck) { check in
             let url = check.checkUrl ?? ""
@@ -287,14 +311,60 @@ struct CandidateListView: View {
                     var parts = [server == 1 ? "1 Angebot wird vom Server neu abgefragt" : "\(server) Angebote werden vom Server neu abgefragt"]
                     if skipped > 0 { parts.append(skipped == 1 ? "1 wurde eben erst geprüft" : "\(skipped) wurden eben erst geprüft") }
                     notice = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server fertig ist."
-                } else {
+                } else if showCheckRun {
                     deviceCheck = deviceQueue.removeFirst()
+                } else {
+                    deviceQueue = []
+                    await readOutOfSight(onDevice, backend: backend)
                 }
             } catch {
                 notice = model.message(for: error)
             }
             checking = nil
         }
+    }
+
+    /// Reads the adverts one after the other in a web page nobody sees, while the app stays usable.
+    /// A page that asks "bot or human?" cannot be answered out of sight: those adverts are shown afterwards.
+    private func readOutOfSight(_ checks: [TripCheck.Check], backend: any TravelBackend) async {
+        var done = 0, withoutDates = 0, failed = 0
+        var needsPerson: [TripCheck.Check] = []
+        for (index, check) in checks.enumerated() {
+            checking = "\(index + 1) von \(checks.count)"
+            guard let address = check.checkUrl, let url = URL(string: address) else { failed += 1; continue }
+            hiddenPage.load(url)
+            for _ in 0..<40 {
+                try? await Task.sleep(for: .milliseconds(500))
+                if !hiddenPage.isLoading { break }
+            }
+            try? await Task.sleep(for: .seconds(2))
+            if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
+            await hiddenPage.waitForPrice()
+            if await hiddenPage.lacksDates() { withoutDates += 1; continue }
+            do {
+                let captured = try await hiddenPage.capture(quick: true)
+                if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
+                guard captured.html.count >= 500 else { failed += 1; continue }
+                try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,
+                                          url: hiddenPage.advertURL ?? address)
+                done += 1
+                model.dataChanged()
+            } catch {
+                failed += 1
+                if (error as? APIError)?.isUnauthorized == true { notice = model.message(for: error); return }
+            }
+        }
+        hiddenPage.load(URL(string: "about:blank")!)
+        var parts = [done == 1 ? "1 Angebot wurde für euren Zeitraum gelesen" : "\(done) Angebote wurden für euren Zeitraum gelesen"]
+        if withoutDates > 0 { parts.append(withoutDates == 1 ? "bei 1 hat die Seite den Zeitraum nicht übernommen" : "bei \(withoutDates) hat die Seite den Zeitraum nicht übernommen") }
+        if failed > 0 { parts.append(failed == 1 ? "1 ließ sich nicht lesen" : "\(failed) ließen sich nicht lesen") }
+        var text = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server sie ausgewertet hat."
+        if !needsPerson.isEmpty {
+            text += needsPerson.count == 1 ? " 1 Inserat zeigt eine Sicherheitsabfrage und wird dir jetzt angezeigt."
+                                           : " \(needsPerson.count) Inserate zeigen eine Sicherheitsabfrage und werden dir jetzt angezeigt."
+            pendingVisible = needsPerson
+        }
+        notice = text
     }
 
     /// After one advert was read on the device (or skipped): the next one, or the summary.
