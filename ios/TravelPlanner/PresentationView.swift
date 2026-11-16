@@ -296,6 +296,32 @@ struct PresentationView: View {
                 if let summary = reviews.summary, !summary.isEmpty { Text(summary) }
                 points("Gelobt", reviews.positives, color: .green)
                 points("Kritisiert", reviews.negatives, color: .orange)
+                // A few voices in their own words; all of them are in the profile.
+                let voices = Array((reviews.items ?? []).prefix(4))
+                if !voices.isEmpty {
+                    Text("Stimmen im Wortlaut").font(.headline).padding(.top, 6)
+                    ForEach(voices) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                if let rating = item.rating {
+                                    Image(systemName: "star.fill").foregroundStyle(.yellow)
+                                    Text(Format.number(rating)).fontWeight(.semibold)
+                                }
+                                Text([item.author, item.date.flatMap { Format.day($0) == nil ? $0 : String($0.prefix(4)) }]
+                                    .compactMap { $0 }.joined(separator: " · "))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.subheadline)
+                            Text(item.translatedText ?? item.text).lineLimit(6)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    if (reviews.items?.count ?? 0) > voices.count {
+                        Text("Alle \(reviews.items?.count ?? 0) Bewertungen stehen im Steckbrief.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 110)
