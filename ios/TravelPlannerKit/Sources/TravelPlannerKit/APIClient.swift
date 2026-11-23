@@ -216,7 +216,8 @@ public struct APIClient: TravelBackend {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 30
+        // Reading answers quickly or not at all. Writing may make the server fetch a page first, so it gets longer.
+        request.timeoutInterval = method == "GET" ? 15 : 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
@@ -244,7 +245,8 @@ public struct APIClient: TravelBackend {
         guard let failure else { return false }
         switch failure {
         case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed: return true
-        case .networkConnectionLost, .timedOut: return repeatable
+        case .networkConnectionLost: return repeatable
+        // No answer within the time limit is told at once: more tries would only keep the person waiting for minutes.
         default: return false
         }
     }
@@ -277,7 +279,7 @@ public struct APIClient: TravelBackend {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
             if error.code == .cancelled { throw CancellationError() }
-            throw Failure(status: nil, code: error.code, shown: APIError(status: 0, code: "offline", message: "Der Server ist nicht erreichbar. (\(error.localizedDescription))"))
+            throw Failure(status: nil, code: error.code, shown: APIError(status: 0, code: "offline", message: "Der Server ist nicht erreichbar. Bitte prüfe die Verbindung. Falls Tailscale eingeschaltet ist, trenne es dort oder verbinde es neu. (\(error.localizedDescription))"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
@@ -313,7 +315,7 @@ public struct APIClient: TravelBackend {
         }
         guard let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", let host = url.host() else { return nil }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 30
+        request.timeoutInterval = 15
         let sameServer = host.lowercased() == baseURL.host()?.lowercased() && url.port == baseURL.port && scheme == baseURL.scheme?.lowercased()
         if sameServer, let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request

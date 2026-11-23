@@ -1136,6 +1136,7 @@ final class RetryTests: XCTestCase {
         // A request that may have arrived is not sent twice, unless it only reads.
         XCTAssertFalse(APIClient.worthRetrying(status: nil, failure: .networkConnectionLost, method: "POST"))
         XCTAssertTrue(APIClient.worthRetrying(status: nil, failure: .networkConnectionLost, method: "GET"))
+        XCTAssertFalse(APIClient.worthRetrying(status: nil, failure: .timedOut, method: "GET"))
         XCTAssertFalse(APIClient.worthRetrying(status: nil, failure: .notConnectedToInternet, method: "GET"))
         XCTAssertGreaterThanOrEqual(APIClient.retryPauses.reduce(0, +), 15)
     }

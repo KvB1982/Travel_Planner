@@ -166,6 +166,13 @@ struct TripListView: View {
             if let error {
                 Section {
                     Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.red)
+                    Button("Erneut versuchen", systemImage: "arrow.clockwise") {
+                        Task {
+                            await load()
+                            // The other screens load again too once the server answers.
+                            if error == nil { model.dataChanged() }
+                        }
+                    }
                 }
             }
             let shelf = TripShelf(trips: trips, groups: groups)
