@@ -555,3 +555,5 @@ Jede Gruppe hat genau eine gemeinsame Merkliste: eine Reise mit `kind: "watchlis
 - Entfernen: `DELETE /groups/:id/members/:userId`. Rolle ändern: `PATCH /groups/:id/members/:userId` mit `{ "role" }`. Gruppe umbenennen: `PATCH /groups/:id`.
 - Den eigenen Anzeigenamen ändert jede Person selbst: `PATCH /me` mit `{ "name" }`, Antwort `{ user }`. Namen anderer ändert niemand.
 - Hinzufügen, Entfernen, Rollen und Links sind der Verwaltung (`admin`) vorbehalten; verlassen kann jede Person die Gruppe selbst.
+
+`PATCH /trips/:id` mit `groupId: null` (oder einer anderen Gruppe) nimmt die Mitglieder der bisherigen Gruppe aus der Reise. Es bleiben, wer die Reise organisiert, und wer den Aufruf macht. Wer zusätzlich einzeln eingeladen war und zur alten Gruppe gehört, verliert den Zugriff ebenfalls und braucht eine neue Einladung.

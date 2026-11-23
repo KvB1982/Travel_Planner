@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
@@ -172,10 +172,15 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     await requireMember(db, tripId, uid, "organizer");
     await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
     const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases), splitMode: z.enum(["equal", "heads"]), childWeight: z.number().min(0).max(1), groupId: z.string().uuid().nullable() }).partial(), req.body);
-    // Into a group: everyone in it joins the trip. Out of it: whoever is in the trip stays.
-    if (body.groupId) {
-      await requireGroupMember(db, body.groupId, uid);
-      await openTripToGroup(db, tripId, body.groupId);
+    if ("groupId" in body) {
+      const [now] = await db.select({ groupId: trips.groupId }).from(trips).where(eq(trips.id, tripId)).limit(1);
+      if (body.groupId) await requireGroupMember(db, body.groupId, uid);
+      // Out of a group: those who were in the trip through it leave it. Whoever organises the trip stays, and so does the one asking.
+      if (now?.groupId && now.groupId !== body.groupId) {
+        await db.delete(tripMembers).where(and(eq(tripMembers.tripId, tripId), ne(tripMembers.role, "organizer"), ne(tripMembers.userId, uid), sql`${tripMembers.userId} in (select ${groupMembers.userId} from ${groupMembers} where ${groupMembers.groupId} = ${now.groupId})`));
+      }
+      // Into a group: everyone in it joins the trip.
+      if (body.groupId) await openTripToGroup(db, tripId, body.groupId);
     }
     if (["flexStart", "flexEnd", "nightsMin", "nightsMax"].some((k) => k in body)) {
       const [now] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);

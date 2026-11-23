@@ -967,6 +967,12 @@ describe("groups", () => {
     expect(await titles(owner)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
     expect(await titles(anna.token)).toEqual(["Pfingsten", "Vor der Gruppe"]);
 
+    // Made private after all, the trip closes to those who were in it through the group, and opens again when it returns.
+    await t.call("PATCH", `/trips/${first.id}`, owner, { groupId: null });
+    expect(await titles(anna.token)).toEqual(["Pfingsten"]);
+    await t.call("PATCH", `/trips/${first.id}`, owner, { groupId: group.id });
+    expect(await titles(anna.token)).toEqual(["Pfingsten", "Vor der Gruppe"]);
+
     // A link to a single trip, pasted by someone who is signed in already.
     const solo = (await t.call("GET", "/trips", owner)).body.trips.find((x: { title: string }) => x.title === "Nur ich");
     const tripLink = (await t.call("POST", `/trips/${solo.id}/invites`, owner, {})).body;
