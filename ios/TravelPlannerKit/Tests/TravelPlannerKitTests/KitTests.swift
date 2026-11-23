@@ -1193,3 +1193,13 @@ final class TripInviteTests: XCTestCase {
         XCTAssertTrue(open.isEmpty)
     }
 }
+
+final class FlagTests: XCTestCase {
+    func testFlagsForCountryNames() {
+        XCTAssertEqual(Format.flag(forCountry: "Italien"), "🇮🇹")
+        XCTAssertEqual(Format.flag(forCountry: " kroatien "), "🇭🇷")
+        XCTAssertEqual(Format.flag(forCountry: "Denmark"), "🇩🇰")
+        XCTAssertNil(Format.flag(forCountry: "Atlantis"))
+        XCTAssertNil(Format.flag(forCountry: nil))
+    }
+}

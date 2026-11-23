@@ -65,3 +65,25 @@ public enum OfferGrouping {
         return result
     }
 }
+
+public extension Format {
+    /// The flag for a country as adverts name it in German or English; nil when the name is not known.
+    static func flag(forCountry name: String?) -> String? {
+        guard let key = name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !key.isEmpty else { return nil }
+        let codes: [String: String] = [
+            "deutschland": "DE", "germany": "DE", "österreich": "AT", "austria": "AT", "schweiz": "CH", "switzerland": "CH",
+            "italien": "IT", "italy": "IT", "italia": "IT", "frankreich": "FR", "france": "FR", "spanien": "ES", "spain": "ES", "españa": "ES",
+            "portugal": "PT", "kroatien": "HR", "croatia": "HR", "hrvatska": "HR", "slowenien": "SI", "slovenia": "SI",
+            "griechenland": "GR", "greece": "GR", "türkei": "TR", "turkey": "TR", "dänemark": "DK", "denmark": "DK", "danmark": "DK",
+            "schweden": "SE", "sweden": "SE", "norwegen": "NO", "norway": "NO", "finnland": "FI", "finland": "FI",
+            "niederlande": "NL", "netherlands": "NL", "holland": "NL", "belgien": "BE", "belgium": "BE", "luxemburg": "LU",
+            "polen": "PL", "poland": "PL", "tschechien": "CZ", "czechia": "CZ", "ungarn": "HU", "hungary": "HU",
+            "großbritannien": "GB", "vereinigtes königreich": "GB", "united kingdom": "GB", "england": "GB", "irland": "IE", "ireland": "IE",
+            "island": "IS", "iceland": "IS", "malta": "MT", "zypern": "CY", "cyprus": "CY", "montenegro": "ME", "albanien": "AL",
+            "bulgarien": "BG", "rumänien": "RO", "usa": "US", "vereinigte staaten": "US", "united states": "US", "kanada": "CA", "canada": "CA",
+            "marokko": "MA", "ägypten": "EG", "thailand": "TH", "mexiko": "MX",
+        ]
+        guard let code = codes[key] else { return nil }
+        return String(String.UnicodeScalarView(code.unicodeScalars.compactMap { UnicodeScalar(127_397 + $0.value) }))
+    }
+}

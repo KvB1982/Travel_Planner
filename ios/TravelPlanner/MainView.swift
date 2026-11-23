@@ -40,6 +40,8 @@ struct TripListView: View {
     @State private var showSettings = false
     @State private var showRedeem = false
     @State private var showGroups = false
+    /// The one group whose members and invites are open.
+    @State private var managedGroup: ManagedGroup?
     @State private var groups: [TravelGroup] = []
     /// The group a new trip was asked for from its section; nil when asked for from the plus.
     @State private var newTripGroup: String?
@@ -65,7 +67,7 @@ struct TripListView: View {
         Section {
             GroupHeader(section: section, color: color, collapsed: collapsed.contains(section.id),
                         toggle: { toggle(section.id) },
-                        manage: section.id == "private" ? nil : { showGroups = true },
+                        manage: section.id == "private" ? nil : { managedGroup = ManagedGroup(id: section.id) },
                         newTrip: { newTripGroup = section.id; showNewTrip = true })
                 .listRowSeparator(.hidden)
             if !collapsed.contains(section.id) {
@@ -181,7 +183,7 @@ struct TripListView: View {
                 Menu {
                     Button("Reise anlegen", systemImage: "suitcase") { newTripGroup = nil; showNewTrip = true }
                     Button("Einladung einlösen", systemImage: "envelope.open") { showRedeem = true }
-                    Button("Gruppen", systemImage: "person.3") { showGroups = true }
+                    Button("Alle Gruppen", systemImage: "person.3") { showGroups = true }
                 } label: {
                     Label("Hinzufügen", systemImage: "plus")
                 }
@@ -192,6 +194,7 @@ struct TripListView: View {
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showGroups) { GroupsView() }
+        .sheet(item: $managedGroup) { GroupsView(only: $0.id) }
         .alert("Einladung einlösen", isPresented: $showRedeem) {
             TextField("https://…/einladung/…", text: $inviteText)
                 .textInputAutocapitalization(.never)
@@ -304,7 +307,7 @@ private struct GroupHeader: View {
             .accessibilityLabel("\(section.title), \(summary), \(collapsed ? "zugeklappt" : "aufgeklappt")")
             if manage != nil || newTrip != nil {
                 Menu {
-                    if let manage { Button("Mitglieder und Einladungen", systemImage: "person.2", action: manage) }
+                    if let manage { Button("Gruppe verwalten", systemImage: "person.2.badge.gearshape", action: manage) }
                     if let newTrip { Button(section.id == "private" ? "Neue private Reise" : "Neue Reise in dieser Gruppe", systemImage: "suitcase", action: newTrip) }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.title3).accessibilityLabel("\(section.title) verwalten")
@@ -357,4 +360,9 @@ private struct TripRow: View {
         parts.append("\(trip.persons) Personen")
         return parts.joined(separator: " · ")
     }
+}
+
+/// Names the group to manage, for the sheet.
+struct ManagedGroup: Identifiable {
+    var id: String
 }

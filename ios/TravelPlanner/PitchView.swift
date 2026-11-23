@@ -51,6 +51,52 @@ struct PhaseBar: View {
     }
 }
 
+/// The phase of a trip as one prominent pill with a menu: it says where you are, opens every other phase, and lets
+/// those who organise move the trip on. Takes a fraction of the room the bar of all phases needed.
+struct PhaseMenu: View {
+    let trip: Trip
+    @Binding var viewed: TripPhase
+    /// Set for organizers: moves the trip itself to a phase.
+    var setPhase: ((TripPhase) -> Void)?
+
+    private var position: Int { (TripPhase.shown.firstIndex(of: viewed) ?? 0) + 1 }
+
+    var body: some View {
+        Menu {
+            Section("Ansicht wechseln") {
+                Picker("Phase", selection: $viewed) {
+                    ForEach(Array(TripPhase.shown.enumerated()), id: \.element) { index, phase in
+                        Label("\(index + 1)  \(phase.label)\(phase == trip.activePhase ? " (aktuell)" : "")", systemImage: phase.symbol).tag(phase)
+                    }
+                }
+            }
+            if let setPhase, viewed != trip.activePhase {
+                Section {
+                    Button("Reise auf „\(viewed.label)“ stellen", systemImage: "arrow.right.circle") { setPhase(viewed) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: viewed.symbol)
+                Text(viewed.label)
+                Text("\(position)/\(TripPhase.shown.count)").font(.caption.weight(.medium)).opacity(0.8)
+                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .foregroundStyle(.white)
+            .background(Color.accentColor, in: Capsule())
+            .overlay(alignment: .topTrailing) {
+                // Looking at another phase than the trip is in: a small mark says so.
+                if viewed != trip.activePhase {
+                    Circle().fill(.orange).frame(width: 9, height: 9).overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5)).offset(x: 2, y: -2)
+                }
+            }
+        }
+        .accessibilityLabel("Phase \(viewed.label), \(position) von \(TripPhase.shown.count)\(viewed == trip.activePhase ? "" : ", die Reise steht in \(trip.activePhase.label)")")
+    }
+}
+
 /// What a phase is for, where its surface does not exist yet.
 struct PhasePlaceholder: View {
     let phase: TripPhase

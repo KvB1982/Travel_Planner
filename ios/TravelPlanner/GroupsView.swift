@@ -5,6 +5,8 @@ import TravelPlannerKit
 struct GroupsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    /// Shows this one group only, when it was opened from the group's own menu.
+    var only: String?
 
     @State private var groups: [TravelGroup]?
     @State private var invite: Invite?
@@ -29,17 +31,19 @@ struct GroupsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    ForEach(groups) { group in section(group) }
+                    ForEach(groups.filter { only == nil || $0.id == only }) { group in section(group) }
+                    if only == nil {
                     Section {
                         Button("Neue Gruppe anlegen", systemImage: "plus") { naming = true }
                     } footer: {
                         Text("Wer einer Gruppe beitritt, wird Mitglied aller ihrer Reisen. Eine neue Reise landet von selbst in deiner Gruppe, wenn du in genau einer bist.")
                     }
+                    }
                 } else if error == nil {
                     Section { HStack { ProgressView(); Text("Lade die Gruppen …").foregroundStyle(.secondary) } }
                 }
             }
-            .navigationTitle("Gruppen")
+            .navigationTitle(only.flatMap { id in groups?.first { $0.id == id }?.name } ?? "Gruppen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
             .task { run { try await $0.groups() } }
@@ -72,6 +76,7 @@ struct GroupsView: View {
                     guard let me = model.user?.id else { return }
                     run { try await $0.removeGroupMember(groupId: group.id, userId: me) }
                     model.dataChanged()
+                    if only != nil { dismiss() }
                 }
                 Button("Abbrechen", role: .cancel) {}
             } message: { group in
@@ -82,6 +87,9 @@ struct GroupsView: View {
 
     private func section(_ group: TravelGroup) -> some View {
         Section {
+            if group.isAdmin {
+                Button("Gruppe umbenennen", systemImage: "pencil") { renameText = group.name; renaming = group }
+            }
             ForEach(group.members) { member in
                 let me = member.id == model.user?.id
                 if group.isAdmin, !me {
@@ -112,7 +120,6 @@ struct GroupsView: View {
             }
             if group.isAdmin {
                 Button("Mitglied hinzufügen", systemImage: "person.badge.plus") { makeInvite(group) }
-                Button("Gruppe umbenennen", systemImage: "pencil") { renameText = group.name; renaming = group }
                 ForEach(invites[group.id] ?? []) { open in
                     HStack {
                         Image(systemName: "envelope").foregroundStyle(.secondary)
@@ -130,7 +137,7 @@ struct GroupsView: View {
             }
             Button("Gruppe verlassen", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) { leaving = group }
         } header: {
-            Text(group.name)
+            Text(only == nil ? group.name : "Mitglieder")
         } footer: {
             if group.isAdmin {
                 Text("„Mitglied hinzufügen“ erzeugt einen Einladungslink für eine Person. Tippe ein Mitglied an, um es mitverwalten zu lassen oder zu entfernen.")

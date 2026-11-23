@@ -86,36 +86,93 @@ struct CandidateListView: View {
             }
     }
 
-    /// Status and country, side by side above the offers. The country menu only appears when there is a choice.
-    private var filters: some View {
-        HStack(spacing: 16) {
-            Picker("Status", selection: $filter) {
-                Text("Alle offenen").tag(CandidateStatus?.none)
-                ForEach(CandidateStatus.allCases, id: \.self) { status in
-                    Text(status.label).tag(CandidateStatus?.some(status))
+    /// Everything that steers the list in one line of small chips: status, country, period, sorting, and the check.
+    /// It scrolls sideways when it does not fit, so it never takes more than one line from the offers.
+    private var controlBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    Picker("Status", selection: $filter) {
+                        Text("Alle offenen").tag(CandidateStatus?.none)
+                        ForEach(CandidateStatus.allCases, id: \.self) { status in
+                            Text(status.label).tag(CandidateStatus?.some(status))
+                        }
+                    }
+                } label: {
+                    Chip(text: filter?.label ?? "Alle offenen", symbol: "line.3.horizontal.decrease", active: filter != nil)
+                }
+                if countries.count > 1 {
+                    Menu {
+                        Picker("Land", selection: $country) {
+                            Text("Alle Länder").tag(String?.none)
+                            ForEach(countries, id: \.self) { Text("\(Format.flag(forCountry: $0).map { $0 + " " } ?? "")\($0)").tag(String?.some($0)) }
+                        }
+                    } label: {
+                        Chip(text: country ?? "Alle Länder", symbol: "globe.europe.africa", active: country != nil)
+                    }
+                }
+                if let detail, detail.dateOptions.count > 1 {
+                    // Prices, availability and the check refer to the period chosen here.
+                    Menu {
+                        Picker("Zeitraum", selection: $periodID) {
+                            ForEach(Array(detail.dateOptions.enumerated()), id: \.element.id) { index, option in
+                                Text(option.label ?? Format.dateRange(option.startDate, option.endDate) ?? "Zeitraum \(index + 1)")
+                                    .tag(index == 0 ? String?.none : String?.some(option.id))
+                            }
+                        }
+                    } label: {
+                        Chip(text: periodLabel(detail), symbol: "calendar", active: periodID != nil)
+                    }
+                }
+                Menu {
+                    Picker("Sortieren", selection: $sortRaw) {
+                        ForEach(OfferSort.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    Toggle("Nur verfügbare zeigen", isOn: $onlyAvailable)
+                } label: {
+                    Chip(text: sort == .added ? "Sortieren" : sort.label, symbol: "arrow.up.arrow.down", active: sort != .added || onlyAvailable)
+                }
+                if let detail, detail.role.canEdit, !candidates.isEmpty, !detail.trip.isWatchlist {
+                    Button { confirmCheck = true } label: {
+                        if let checking {
+                            Chip(text: "Prüfe \(checking)", symbol: nil, active: true, busy: true)
+                        } else {
+                            Chip(text: "Preise prüfen", symbol: "arrow.triangle.2.circlepath", active: false)
+                        }
+                    }
+                    .disabled(checking != nil)
+                    .accessibilityLabel("Verfügbarkeit und Preise prüfen")
                 }
             }
-            .fixedSize()
-            if countries.count > 1 {
-                Picker("Land", selection: $country) {
-                    Text("Alle Länder").tag(String?.none)
-                    ForEach(countries, id: \.self) { Text($0).tag(String?.some($0)) }
-                }
-                .fixedSize()
-            }
-            Spacer()
-            Menu {
-                Picker("Sortieren", selection: $sortRaw) {
-                    ForEach(OfferSort.allCases) { Text($0.label).tag($0.rawValue) }
-                }
-                Toggle("Nur verfügbare zeigen", isOn: $onlyAvailable)
-            } label: {
-                Label("Sortieren und filtern", systemImage: sort == .added && !onlyAvailable ? "arrow.up.arrow.down" : "arrow.up.arrow.down.circle.fill")
-                    .labelStyle(.iconOnly)
-            }
+            .padding(.horizontal, 16)
         }
-        .pickerStyle(.menu)
-        .textCase(nil)
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
+    private func periodLabel(_ detail: TripDetail) -> String {
+        let option = detail.dateOptions.first { $0.id == periodID } ?? detail.dateOptions.first
+        return option?.label ?? option.flatMap { Format.dateRange($0.startDate, $0.endDate) } ?? "Zeitraum"
+    }
+
+    /// The head of one country in the list: flag, name in large type, region and number of offers.
+    private func countryHeader(_ group: OfferGroup) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let flag = Format.flag(forCountry: group.country) { Text(flag).font(.title2) }
+            Text(group.country ?? "Land unbekannt").font(.title3.weight(.bold)).foregroundStyle(.primary)
+            if let region = group.region { Text(region).font(.subheadline).foregroundStyle(.secondary) }
+            Spacer()
+            Text(group.offers.count == 1 ? "1 Angebot" : "\(group.offers.count) Angebote")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.accentColor.opacity(0.15), in: Capsule())
+                .foregroundStyle(.tint)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
     /// Everything but the research: each phase brings its own sections.
@@ -141,71 +198,47 @@ struct CandidateListView: View {
         List(selection: $selection) {
             if let detail, !detail.trip.isWatchlist {
                 Section {
-                    PhaseBar(trip: detail.trip, viewed: Binding(get: { viewedPhase }, set: { viewedPhase = $0; phasePicked = true }),
-                             setPhase: detail.role == .organizer ? { phase in setPhase(phase) } : nil)
+                    // Phase and frame of the trip in one line, right under its name.
+                    HStack(spacing: 10) {
+                        PhaseMenu(trip: detail.trip, viewed: Binding(get: { viewedPhase }, set: { viewedPhase = $0; phasePicked = true }),
+                                  setPhase: detail.role == .organizer ? { phase in setPhase(phase) } : nil)
+                        CompactTripHeader(detail: detail) { viewedPhase = .framing; phasePicked = true }
+                    }
+                    .listRowSeparator(.hidden)
+                    if viewedPhase == .research, !candidates.isEmpty { controlBar }
                 }
                 .listSectionSpacing(.compact)
             }
             if let detail, viewedPhase != .research, !detail.trip.isWatchlist {
                 otherPhase(detail)
             } else {
-            if let detail {
+            if let detail, detail.trip.isWatchlist {
                 Section {
-                    TripHeader(detail: detail)
-                    if detail.dateOptions.count > 1 {
-                        // Prices, availability and the check refer to the period chosen here.
-                        Picker("Zeitraum", selection: $periodID) {
-                            ForEach(Array(detail.dateOptions.enumerated()), id: \.element.id) { index, option in
-                                Text(option.label ?? Format.dateRange(option.startDate, option.endDate) ?? "Zeitraum \(index + 1)")
-                                    .tag(index == 0 ? String?.none : String?.some(option.id))
-                            }
-                        }
-                    }
-                    if detail.role.canEdit && !candidates.isEmpty && !detail.trip.isWatchlist {
-                        Button {
-                            confirmCheck = true
-                        } label: {
-                            if let checking {
-                                HStack(spacing: 10) { ProgressView(); Text("Prüfe \(checking) …") }
-                            } else {
-                                Label("Verfügbarkeit und Preise prüfen", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                        }
-                        .disabled(checking != nil)
-                    }
+                    CompactTripHeader(detail: detail) {}
+                    if !candidates.isEmpty { controlBar }
                 }
+                .listSectionSpacing(.compact)
             }
             if let error {
                 Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.red)
             }
             let groups = OfferGrouping.groups(visible)
-            if groups.count > 1 {
-                // Searching in several countries or regions at once: one section each.
-                if !candidates.isEmpty {
-                    Section { EmptyView() } header: { filters }
-                }
-                ForEach(groups) { group in
-                    Section {
-                        ForEach(group.offers) { row($0) }
-                    } header: {
-                        HStack {
-                            Text(group.title)
-                            Spacer()
-                            Text("\(group.offers.count)").foregroundStyle(.secondary)
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .textCase(nil)
-                    }
-                }
-            } else {
+            // One section per country and region, each under a head that cannot be overlooked.
+            ForEach(groups) { group in
                 Section {
-                    ForEach(visible) { row($0) }
-                    if visible.isEmpty && !candidates.isEmpty {
-                        Text("Kein Angebot passt zu dieser Auswahl.").foregroundStyle(.secondary)
+                    // A row of its own, not a section header: headers are forced small and grey by the system.
+                    if groups.count > 1 || group.country != nil {
+                        countryHeader(group)
+                            .listRowBackground(Color.accentColor.opacity(0.10))
+                            .listRowSeparator(.hidden)
+                            .selectionDisabled()
                     }
-                } header: {
-                    if !candidates.isEmpty { filters }
+                    ForEach(group.offers) { row($0) }
                 }
+                .listSectionSpacing(14)
+            }
+            if visible.isEmpty && !candidates.isEmpty {
+                Section { Text("Kein Angebot passt zu dieser Auswahl.").foregroundStyle(.secondary) }
             }
             if let detail, detail.role == .organizer, !detail.trip.isWatchlist, candidates.count >= 2 {
                 Section {
@@ -597,6 +630,64 @@ struct InviteSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
         }
         .presentationDetents([.medium])
+    }
+}
+
+/// One small pill of the control bar above the offers.
+private struct Chip: View {
+    let text: String
+    let symbol: String?
+    /// Set when it filters, sorts or works: then it stands out.
+    let active: Bool
+    var busy = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if busy { ProgressView().controlSize(.mini) }
+            if let symbol { Image(systemName: symbol).font(.caption.weight(.semibold)) }
+            Text(text).font(.subheadline.weight(active ? .semibold : .regular)).lineLimit(1)
+        }
+        .padding(.horizontal, 11).padding(.vertical, 6)
+        .foregroundStyle(active ? Color.accentColor : Color.primary)
+        .background(active ? Color.accentColor.opacity(0.16) : Color(.secondarySystemFill), in: Capsule())
+        .contentShape(Capsule())
+    }
+}
+
+/// The frame of the trip in one line, so the offers start right below. The details live under "Rahmen".
+private struct CompactTripHeader: View {
+    let detail: TripDetail
+    let openFrame: () -> Void
+
+    var body: some View {
+        if detail.trip.isWatchlist {
+            Text(detail.trip.groupId == nil ? "Angebote für später. Wische eines nach links, um es in eine Reise zu verschieben."
+                                            : "Merkliste von „\(detail.trip.groupName ?? "der Gruppe")“, für alle Mitglieder. Wische ein Angebot nach links, um es in eine Reise zu verschieben.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } else {
+            Button(action: openFrame) {
+                HStack(spacing: 6) {
+                    Text(summary).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Rahmen der Reise: \(summary)")
+        }
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if let window = detail.trip.flexWindow, detail.dateOptions.isEmpty { parts.append(window.summary) }
+        else if let first = detail.dateOptions.first, let range = Format.dateRange(first.startDate, first.endDate) {
+            parts.append(detail.dateOptions.count > 1 ? "\(range) und \(detail.dateOptions.count - 1) weitere" : range)
+        }
+        parts.append(detail.trip.persons == 1 ? "1 Person" : "\(detail.trip.persons) Personen")
+        if let budget = detail.trip.budgetTotalCents { parts.append("Budget \(Format.euro(cents: budget))") }
+        if let group = detail.trip.groupName, !group.isEmpty { parts.append(group) }
+        return parts.joined(separator: " · ")
     }
 }
 
