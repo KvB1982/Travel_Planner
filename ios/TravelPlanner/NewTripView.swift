@@ -8,6 +8,8 @@ struct NewTripView: View {
     var groups: [TravelGroup] = []
     /// A group's id, or "private"; empty lets the form decide.
     var preselected = ""
+    /// The trips there are already, so no second one gets the same name.
+    var existing: [Trip] = []
     var onCreated: (Trip) -> Void
 
     @State private var title = ""
@@ -20,6 +22,11 @@ struct NewTripView: View {
     @State private var nights = 14
     @State private var budget = ""
     @State private var home = ""
+
+    /// Names are unique within a group, and among the private trips.
+    private var nameTaken: Bool {
+        Trip.nameTaken(title, inGroup: groups.isEmpty || home == "private" ? nil : home, among: existing)
+    }
     @State private var busy = false
     @State private var error: String?
 
@@ -29,6 +36,10 @@ struct NewTripView: View {
                 Section {
                     TextField("Titel, zum Beispiel „Sommerurlaub 2027“", text: $title)
                     TextField("Region (optional)", text: $region)
+                    if nameTaken {
+                        Label(home == "private" || groups.isEmpty ? "Eine private Reise mit diesem Namen gibt es schon. Bitte wähle einen anderen." : "In dieser Gruppe gibt es schon eine Reise mit diesem Namen. Bitte wähle einen anderen.", systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(.red)
+                    }
                 }
                 if !groups.isEmpty {
                     Section {
@@ -72,7 +83,7 @@ struct NewTripView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Anlegen") { create() }
-                        .disabled(busy || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(busy || title.trimmingCharacters(in: .whitespaces).isEmpty || nameTaken)
                 }
             }
         }

@@ -534,6 +534,29 @@ public actor DemoBackend: TravelBackend {
         }
     }
 
+    public func archiveTrip(tripId: String, archived: Bool) async throws {
+        let index = try tripIndex(tripId)
+        trips[index].status = archived ? .archived : .planning
+    }
+
+    public func deleteTrip(tripId: String, moveCandidatesTo: String?) async throws {
+        let index = try tripIndex(tripId)
+        guard !trips[index].isWatchlist else { throw APIError(status: 409, code: "watchlist", message: "Eine Merkliste lässt sich nicht löschen.") }
+        if let target = moveCandidatesTo { _ = try tripIndex(target) }
+        for (id, detail) in details where detail.candidate.tripId == tripId {
+            if let target = moveCandidatesTo {
+                // They arrive as new ones: votes and status stay behind.
+                details[id]?.candidate.tripId = target
+                details[id]?.candidate.status = .new
+                details[id]?.votes = VoteOverview()
+            } else {
+                details[id] = nil; order.removeAll { $0 == id }
+            }
+        }
+        for circle in circles.indices { circles[circle].trips.removeAll { $0.id == tripId } }
+        trips.remove(at: index)
+    }
+
     public func pendingReadings() async throws -> [PendingReading] { [] }
 
     public func checkStay(tripId: String, candidateId: String, startDate: String, endDate: String) async throws -> TripCheck {

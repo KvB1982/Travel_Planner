@@ -1140,3 +1140,42 @@ final class RetryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(APIClient.retryPauses.reduce(0, +), 15)
     }
 }
+
+final class TripUpkeepTests: XCTestCase {
+    func testNamesAreUniqueWithinAGroup() async throws {
+        let trips = try await DemoBackend().trips()
+        XCTAssertTrue(Trip.nameTaken("  pfingstferien 2027 ", inGroup: "g-1", among: trips))
+        XCTAssertFalse(Trip.nameTaken("Pfingstferien 2028", inGroup: "g-1", among: trips))
+        // The same name is free among the private trips and in another group.
+        XCTAssertFalse(Trip.nameTaken("Pfingstferien 2027", inGroup: nil, among: trips))
+        XCTAssertFalse(Trip.nameTaken("Pfingstferien 2027", inGroup: "g-2", among: trips))
+        XCTAssertFalse(Trip.nameTaken("Pfingstferien 2027", inGroup: "g-1", among: trips, except: "t-1"))
+        // Watchlists all carry the same name and do not count.
+        XCTAssertFalse(Trip.nameTaken("Merkliste", inGroup: "g-1", among: trips))
+    }
+
+    func testArchiveAndDelete() async throws {
+        let demo = DemoBackend()
+        try await demo.archiveTrip(tripId: "t-2", archived: true)
+        var shelf = TripShelf(trips: try await demo.trips(), groups: try await demo.groups())
+        XCTAssertEqual(shelf.archived.map(\.id), ["t-2"])
+        XCTAssertEqual(shelf.sections[0].trips.map(\.id), ["t-1"])
+        // An archived trip still holds its name.
+        let withArchived = try await demo.trips()
+        XCTAssertTrue(Trip.nameTaken("Sommerurlaub 2027", inGroup: "g-1", among: withArchived))
+        try await demo.archiveTrip(tripId: "t-2", archived: false)
+        try await demo.deleteTrip(tripId: "t-1", moveCandidatesTo: "t-gw")
+        shelf = TripShelf(trips: try await demo.trips(), groups: try await demo.groups())
+        XCTAssertEqual(shelf.sections[0].trips.map(\.id), ["t-2"])
+        let kept = try await demo.candidates(tripId: "t-gw")
+        XCTAssertEqual(kept.count, 4)
+        XCTAssertTrue(kept.allSatisfy { $0.status == .new && $0.votes.yes == 0 })
+        try await demo.deleteTrip(tripId: "t-2", moveCandidatesTo: nil)
+        let gone = try await demo.candidates(tripId: "t-2")
+        XCTAssertTrue(gone.isEmpty)
+        do {
+            try await demo.deleteTrip(tripId: "t-w", moveCandidatesTo: nil)
+            XCTFail("Merklisten bleiben")
+        } catch let error as APIError { XCTAssertEqual(error.code, "watchlist") }
+    }
+}

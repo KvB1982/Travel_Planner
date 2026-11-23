@@ -46,6 +46,102 @@ struct TripListView: View {
     /// The group of the trip opened last, as the likely home of the next new trip.
     @AppStorage("lastGroup") private var lastGroup = ""
     @State private var inviteText = ""
+    /// Sections folded shut, as a comma-separated list of their ids, remembered across launches.
+    @AppStorage("collapsedGroups") private var collapsedRaw = ""
+    @State private var archiveOpen = false
+    @State private var deleting: Trip?
+
+    /// One colour per group, so its header and its trips read as one block.
+    private static let palette: [Color] = [.teal, .indigo, .orange, .pink, .green, .brown]
+    private var collapsed: Set<String> { Set(collapsedRaw.split(separator: ",").map(String.init)) }
+
+    private func toggle(_ id: String) {
+        var set = collapsed
+        if set.contains(id) { set.remove(id) } else { set.insert(id) }
+        withAnimation { collapsedRaw = set.sorted().joined(separator: ",") }
+    }
+
+    @ViewBuilder private func groupSection(_ section: TripShelf.Section, color: Color) -> some View {
+        Section {
+            GroupHeader(section: section, color: color, collapsed: collapsed.contains(section.id),
+                        toggle: { toggle(section.id) },
+                        manage: section.id == "private" ? nil : { showGroups = true },
+                        newTrip: { newTripGroup = section.id; showNewTrip = true })
+                .listRowSeparator(.hidden)
+            if !collapsed.contains(section.id) {
+                ForEach(section.trips) { trip in
+                    TripRow(trip: trip, color: color).tag(trip.id)
+                        .swipeActions { tripActions(trip) }
+                        .contextMenu { tripActions(trip) }
+                }
+                if let list = section.watchlist {
+                    HStack(spacing: 10) {
+                        Capsule().fill(color.opacity(0.5)).frame(width: 4)
+                        Image(systemName: "bookmark").foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(section.id == "private" ? "Meine Merkliste" : "Merkliste der Gruppe").font(.headline)
+                            Text((list.candidateCount ?? 0) == 1 ? "1 Angebot" : "\(list.candidateCount ?? 0) Angebote")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    .tag(list.id)
+                }
+                if section.trips.isEmpty && section.watchlist == nil {
+                    Text("Noch keine Reise.").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .listSectionSpacing(18)
+    }
+
+    @ViewBuilder private func archiveSection(_ archived: [Trip]) -> some View {
+        Section {
+            GroupHeader(section: .init(id: "archive", title: "Archiv", group: nil, trips: archived, watchlist: nil), color: .gray,
+                        symbol: "archivebox", collapsed: !archiveOpen, toggle: { archiveOpen.toggle() }, manage: nil, newTrip: nil)
+                .listRowSeparator(.hidden)
+            if archiveOpen {
+                ForEach(archived) { trip in
+                    TripRow(trip: trip, color: .gray).tag(trip.id)
+                        .swipeActions { tripActions(trip) }
+                        .contextMenu { tripActions(trip) }
+                }
+            }
+        }
+    }
+
+    /// Archive, bring back and delete, for those who organise the trip.
+    @ViewBuilder private func tripActions(_ trip: Trip) -> some View {
+        if trip.role == .organizer, !trip.isWatchlist {
+            Button("Löschen", systemImage: "trash", role: .destructive) { deleting = trip }
+            if trip.status == .archived {
+                Button("Zurückholen", systemImage: "tray.and.arrow.up") { upkeep { try await $0.archiveTrip(tripId: trip.id, archived: false) } }.tint(.teal)
+            } else {
+                Button("Archivieren", systemImage: "archivebox") { upkeep { try await $0.archiveTrip(tripId: trip.id, archived: true) } }.tint(.indigo)
+            }
+        }
+    }
+
+    /// Where the adverts of a trip can be kept when it is deleted: its group's watchlist, or the own one.
+    private func watchlist(for trip: Trip) -> Trip? {
+        trips.first { $0.isWatchlist && $0.groupId == trip.groupId }
+    }
+
+    private func remove(_ trip: Trip, movingTo target: String?) {
+        if trip.id == selection { selection = nil }
+        upkeep { try await $0.deleteTrip(tripId: trip.id, moveCandidatesTo: target) }
+    }
+
+    private func upkeep(_ action: @escaping (any TravelBackend) async throws -> Void) {
+        guard let backend = model.backend else { return }
+        Task {
+            do {
+                try await action(backend)
+                model.dataChanged()
+            } catch {
+                redeemNote = model.message(for: error)
+            }
+        }
+    }
     @State private var redeemNote: String?
 
     var body: some View {
@@ -63,47 +159,10 @@ struct TripListView: View {
                 }
             }
             let shelf = TripShelf(trips: trips, groups: groups)
-            ForEach(shelf.sections) { section in
-                Section {
-                    ForEach(section.trips) { trip in TripRow(trip: trip).tag(trip.id) }
-                    if let list = section.watchlist {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(section.group == nil && section.id == "private" ? "Meine Merkliste" : "Merkliste der Gruppe").font(.headline)
-                                Text((list.candidateCount ?? 0) == 1 ? "1 Angebot" : "\(list.candidateCount ?? 0) Angebote")
-                                    .font(.footnote).foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "bookmark")
-                        }
-                        .tag(list.id)
-                    }
-                    if section.trips.isEmpty && section.watchlist == nil {
-                        Text("Noch keine Reise.").font(.footnote).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    HStack {
-                        Label(section.title, systemImage: section.id == "private" ? "person" : "person.3")
-                        Spacer()
-                        if section.id != "private" {
-                            Menu {
-                                Button("Mitglieder und Einladungen", systemImage: "person.2") { showGroups = true }
-                                Button("Neue Reise in dieser Gruppe", systemImage: "suitcase") { newTripGroup = section.id; showNewTrip = true }
-                            } label: {
-                                Image(systemName: "ellipsis.circle").accessibilityLabel("\(section.title) verwalten")
-                            }
-                        }
-                    }
-                    .textCase(nil)
-                }
+            ForEach(Array(shelf.sections.enumerated()), id: \.element.id) { index, section in
+                groupSection(section, color: Self.palette[index % Self.palette.count])
             }
-            if !shelf.archived.isEmpty {
-                Section("Archiv") {
-                    DisclosureGroup(shelf.archived.count == 1 ? "1 abgeschlossene Reise" : "\(shelf.archived.count) abgeschlossene Reisen") {
-                        ForEach(shelf.archived) { trip in TripRow(trip: trip).tag(trip.id) }
-                    }
-                }
-            }
+            if !shelf.archived.isEmpty { archiveSection(shelf.archived) }
         }
         .overlay {
             if loaded && trips.filter({ !$0.isWatchlist }).isEmpty && error == nil && trips.isEmpty {
@@ -143,13 +202,31 @@ struct TripListView: View {
         } message: {
             Text("Füge den Einladungslink ein, den du für eine weitere Reise bekommen hast. Du bleibst mit deinem Konto angemeldet.")
         }
-        .alert("Einladung", isPresented: Binding(get: { redeemNote != nil }, set: { if !$0 { redeemNote = nil } })) {
+        .confirmationDialog("„\(deleting?.title ?? "Reise")“ löschen?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { trip in
+            let count = trip.candidateCount ?? 0
+            if count > 0, let list = watchlist(for: trip) {
+                Button(trip.groupId == nil ? "Löschen, Angebote auf meine Merkliste" : "Löschen, Angebote in die Merkliste der Gruppe", role: .destructive) {
+                    remove(trip, movingTo: list.id)
+                }
+            }
+            Button(count > 0 ? "Alles löschen, auch \(count == 1 ? "das Angebot" : "die \(count) Angebote")" : "Endgültig löschen", role: .destructive) {
+                remove(trip, movingTo: nil)
+            }
+            if trip.status != .archived {
+                Button("Stattdessen archivieren") { upkeep { try await $0.archiveTrip(tripId: trip.id, archived: true) } }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { trip in
+            Text("Stimmen, Kommentare, Kasse, Buchungen, Listen und Dokumente der Reise werden für alle Mitglieder gelöscht. Das lässt sich nicht rückgängig machen. Auf die Merkliste verschobene Angebote kommen dort als neue an, ohne Stimmen. Im Archiv bliebe alles erhalten.")
+        }
+        .alert("Hinweis", isPresented: Binding(get: { redeemNote != nil }, set: { if !$0 { redeemNote = nil } })) {
             Button("OK") {}
         } message: {
             Text(redeemNote ?? "")
         }
         .sheet(isPresented: $showNewTrip) {
-            NewTripView(groups: groups, preselected: newTripGroup ?? lastGroup) { trip in
+            NewTripView(groups: groups, preselected: newTripGroup ?? lastGroup, existing: trips) { trip in
                 model.dataChanged()
                 selection = trip.id
             }
@@ -191,10 +268,74 @@ struct TripListView: View {
     }
 }
 
-private struct TripRow: View {
-    let trip: Trip
+/// The head of one group in the sidebar: clearly a heading, with what the group holds, and folding on a tap.
+private struct GroupHeader: View {
+    let section: TripShelf.Section
+    let color: Color
+    var symbol: String?
+    let collapsed: Bool
+    let toggle: () -> Void
+    /// Opens members and invites; nil where there is nothing to manage.
+    let manage: (() -> Void)?
+    let newTrip: (() -> Void)?
 
     var body: some View {
+        HStack(spacing: 10) {
+            Button(action: toggle) {
+                HStack(spacing: 10) {
+                    Image(systemName: symbol ?? (section.id == "private" ? "person.fill" : "person.3.fill"))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(color.gradient, in: RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(section.title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                        Text(summary).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(section.title), \(summary), \(collapsed ? "zugeklappt" : "aufgeklappt")")
+            if manage != nil || newTrip != nil {
+                Menu {
+                    if let manage { Button("Mitglieder und Einladungen", systemImage: "person.2", action: manage) }
+                    if let newTrip { Button(section.id == "private" ? "Neue private Reise" : "Neue Reise in dieser Gruppe", systemImage: "suitcase", action: newTrip) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.title3).accessibilityLabel("\(section.title) verwalten")
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .listRowBackground(color.opacity(0.12))
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if let members = section.group?.members.count { parts.append(members == 1 ? "1 Mitglied" : "\(members) Mitglieder") }
+        parts.append(section.trips.count == 1 ? "1 Reise" : "\(section.trips.count) Reisen")
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct TripRow: View {
+    let trip: Trip
+    var color: Color = .clear
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // The group's colour runs down its trips, so they read as belonging to the heading above.
+            Capsule().fill(color.opacity(0.5)).frame(width: 4)
+            rowText
+        }
+    }
+
+    private var rowText: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(trip.title).font(.headline)
             if let region = trip.region, !region.isEmpty {

@@ -37,6 +37,11 @@ public protocol TravelBackend: Sendable {
     func setGroupRole(groupId: String, userId: String, admin: Bool) async throws -> [TravelGroup]
     /// Puts a trip into a group, or makes it private with nil.
     func setTripGroup(tripId: String, groupId: String?) async throws
+    /// Puts a trip into the archive, or brings it back.
+    func archiveTrip(tripId: String, archived: Bool) async throws
+    /// Deletes a trip with everything in it. Organisers only; cannot be undone.
+    /// With `moveCandidatesTo` the adverts move to that trip or watchlist first: as new ones, without votes.
+    func deleteTrip(tripId: String, moveCandidatesTo: String?) async throws
     /// Adverts on any of the own trips that still wait for a device to read them.
     func pendingReadings() async throws -> [PendingReading]
     /// Asks for one stay of one advert: tells where its page is, or that the server reads it itself.
@@ -629,6 +634,16 @@ public struct APIClient: TravelBackend {
             enum CodingKeys: String, CodingKey { case groupId }
         }
         _ = try await data("PATCH", "/trips/\(tripId.pathEscaped)", body: Body(groupId: groupId))
+    }
+
+    public func archiveTrip(tripId: String, archived: Bool) async throws {
+        struct Body: Encodable { var status: String }
+        _ = try await data("PATCH", "/trips/\(tripId.pathEscaped)", body: Body(status: archived ? "archived" : "planning"))
+    }
+
+    public func deleteTrip(tripId: String, moveCandidatesTo: String?) async throws {
+        let query = moveCandidatesTo.map { "?moveCandidatesTo=\($0.pathEscaped)" } ?? ""
+        _ = try await data("DELETE", "/trips/\(tripId.pathEscaped)\(query)")
     }
 
     /// Redeems an invite link while signed in: the whole link or only its last part.

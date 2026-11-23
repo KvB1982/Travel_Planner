@@ -63,6 +63,9 @@ public struct TripShelf: Hashable, Sendable {
         public var group: TravelGroup?
         public var trips: [Trip]
         public var watchlist: Trip?
+        public init(id: String, title: String, group: TravelGroup?, trips: [Trip], watchlist: Trip?) {
+            self.id = id; self.title = title; self.group = group; self.trips = trips; self.watchlist = watchlist
+        }
     }
     public var sections: [Section]
     public var archived: [Trip]
@@ -156,5 +159,17 @@ public struct FlexWindow: Hashable, Sendable {
         let range = Format.dateRange(start, end) ?? "\(start) – \(end)"
         let nights = nightsMin == nightsMax ? (nightsMin == 1 ? "1 Nacht" : "\(nightsMin) Nächte") : "\(nightsMin) bis \(nightsMax) Nächte"
         return "\(nights) zwischen \(range)"
+    }
+}
+
+public extension Trip {
+    /// Whether another trip in the same place already carries this name. Names are unique within a group, and among
+    /// a person's private trips; case and surrounding spaces do not count, archived trips do.
+    static func nameTaken(_ name: String, inGroup groupId: String?, among trips: [Trip], except id: String? = nil) -> Bool {
+        let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !wanted.isEmpty else { return false }
+        return trips.contains {
+            $0.id != id && !$0.isWatchlist && $0.groupId == groupId && $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == wanted
+        }
     }
 }
