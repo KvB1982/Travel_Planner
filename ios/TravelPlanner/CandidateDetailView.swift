@@ -125,7 +125,7 @@ struct CandidateDetailView: View {
             detail = try await backend.candidate(candidateID)
             error = nil
         } catch is CancellationError {
-        } catch let gone as APIError where gone.status == 404 {
+        } catch let missing as APIError where missing.status == 404 {
             // Deleted or moved elsewhere, perhaps by someone else: it quietly leaves the screen and the list.
             guard !gone else { return }
             gone = true
