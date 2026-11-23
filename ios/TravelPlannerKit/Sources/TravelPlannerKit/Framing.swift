@@ -8,6 +8,9 @@ public struct TripChanges: Encodable, Hashable, Sendable {
     public var children: Int
     public var pets: Int
     public var budgetTotalCents: Int?
+    /// nil switches the flexible window off. Only sent when `sendsFlex` is set, so older callers leave it alone.
+    public var flex: FlexWindow?
+    public var sendsFlex = false
 
     public init(title: String, region: String?, adults: Int, children: Int, pets: Int, budgetTotalCents: Int?) {
         self.title = title; self.region = region; self.adults = adults; self.children = children; self.pets = pets
@@ -16,14 +19,20 @@ public struct TripChanges: Encodable, Hashable, Sendable {
 
     public init(_ trip: Trip) {
         self.init(title: trip.title, region: trip.region, adults: trip.adults, children: trip.children, pets: trip.pets, budgetTotalCents: trip.budgetTotalCents)
+        flex = trip.flexWindow
     }
 
-    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents }
+    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, flexStart, flexEnd, nightsMin, nightsMax }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(title, forKey: .title); try c.encode(region, forKey: .region); try c.encode(adults, forKey: .adults)
         try c.encode(children, forKey: .children); try c.encode(pets, forKey: .pets); try c.encode(budgetTotalCents, forKey: .budgetTotalCents)
+        if sendsFlex {
+            // Both days go together; both null switches the window off.
+            try c.encode(flex?.start, forKey: .flexStart); try c.encode(flex?.end, forKey: .flexEnd)
+            try c.encode(flex?.nightsMin, forKey: .nightsMin); try c.encode(flex?.nightsMax, forKey: .nightsMax)
+        }
     }
 }
 

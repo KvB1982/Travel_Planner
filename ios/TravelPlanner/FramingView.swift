@@ -25,6 +25,9 @@ struct FramingSections: View {
                 LabeledContent("Region", value: trip.region ?? "noch offen")
                 LabeledContent("Wer fährt mit", value: party)
                 LabeledContent("Budget gesamt", value: trip.budgetTotalCents.map { Format.euro(cents: $0) } ?? "nicht festgelegt")
+                if let window = trip.flexWindow {
+                    LabeledContent("Flexibel", value: window.summary)
+                }
                 if detail.role == .organizer {
                     Button("Rahmen bearbeiten", systemImage: "pencil") { sheet = .edit }
                 }
@@ -126,7 +129,16 @@ struct TripEditor: View {
     @State private var children = 0
     @State private var pets = 0
     @State private var budget = ""
+    @State private var flexible = false
+    @State private var flexStart = Calendar.current.date(byAdding: .month, value: 6, to: .now) ?? .now
+    @State private var flexEnd = Calendar.current.date(byAdding: .day, value: 196, to: .now) ?? .now
+    @State private var nightsMin = 7
+    @State private var nightsMax = 14
     @State private var filled = false
+
+    private var window: FlexWindow {
+        FlexWindow(start: Format.isoDay(flexStart), end: Format.isoDay(flexEnd), nightsMin: nightsMin, nightsMax: max(nightsMin, nightsMax))
+    }
 
     var body: some View {
         NavigationStack {
@@ -147,6 +159,20 @@ struct TripEditor: View {
                 Section("Budget gesamt (freiwillig)") {
                     TextField("Euro", text: $budget).keyboardType(.numberPad)
                 }
+                Section {
+                    Toggle("Flexibler Zeitraum", isOn: $flexible)
+                    if flexible {
+                        DatePicker("Frühestens anreisen", selection: $flexStart, displayedComponents: .date)
+                        DatePicker("Spätestens abreisen", selection: $flexEnd, in: flexStart..., displayedComponents: .date)
+                        Stepper("Mindestens \(nightsMin) \(nightsMin == 1 ? "Nacht" : "Nächte")", value: $nightsMin, in: 1...60)
+                        Stepper("Höchstens \(nightsMax) \(nightsMax == 1 ? "Nacht" : "Nächte")", value: $nightsMax, in: nightsMin...60)
+                    }
+                } footer: {
+                    Text(!flexible ? "Für Reisen, deren genaue Daten vom Angebot abhängen: Statt eines festen Zeitraums gibst du ein Fenster und eine Dauer an."
+                         : window.isValid ? "Jeder Aufenthalt in diesem Fenster zählt als Preis der Reise, auch die Daten aus einem geteilten Link. Verglichen wird der Preis je Nacht."
+                         : "Das Fenster ist kürzer als der kürzeste Aufenthalt.")
+                        .foregroundStyle(flexible && !window.isValid ? Color.red : Color.secondary)
+                }
             }
             .navigationTitle("Rahmen")
             .navigationBarTitleDisplayMode(.inline)
@@ -155,11 +181,15 @@ struct TripEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Sichern") {
                         let place = region.trimmingCharacters(in: .whitespaces)
-                        save(TripChanges(title: title.trimmingCharacters(in: .whitespaces), region: place.isEmpty ? nil : place, adults: adults,
-                                         children: children, pets: pets, budgetTotalCents: Int(budget.filter(\.isNumber)).map { $0 * 100 }))
+                        var changes = TripChanges(title: title.trimmingCharacters(in: .whitespaces), region: place.isEmpty ? nil : place, adults: adults,
+                                                  children: children, pets: pets, budgetTotalCents: Int(budget.filter(\.isNumber)).map { $0 * 100 })
+                        // The window is only touched when it changed, so servers and trips without one stay as they are.
+                        let wanted = flexible ? window : nil
+                        if wanted != trip.flexWindow { changes.flex = wanted; changes.sendsFlex = true }
+                        save(changes)
                         dismiss()
                     }
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || (flexible && !window.isValid))
                 }
             }
             .onAppear {
@@ -167,7 +197,13 @@ struct TripEditor: View {
                 filled = true
                 title = trip.title; region = trip.region ?? ""; adults = max(1, trip.adults); children = trip.children; pets = trip.pets
                 budget = trip.budgetTotalCents.map { String($0 / 100) } ?? ""
+                if let known = trip.flexWindow {
+                    flexible = true
+                    flexStart = Format.day(known.start) ?? flexStart; flexEnd = Format.day(known.end) ?? flexEnd
+                    nightsMin = known.nightsMin; nightsMax = known.nightsMax
+                }
             }
+            .onChange(of: nightsMin) { if nightsMax < nightsMin { nightsMax = nightsMin } }
         }
     }
 }

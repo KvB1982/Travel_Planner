@@ -19,6 +19,9 @@ struct CandidateDetailView: View {
     @State private var showAddSource = false
     @State private var showMove = false
     @State private var showCorrection = false
+    @State private var showStays = false
+    /// The advert's page to open for one stay, after the stay sheet has closed.
+    @State private var stayCheck: StayCheck?
     @State private var mapTarget: MapTarget?
     @State private var sentNote: String?
     @State private var sourceLink = ""
@@ -79,6 +82,19 @@ struct CandidateDetailView: View {
         }
         .sheet(item: $mapTarget) { target in
             LocationMapView(title: target.title, hint: target.hint, place: target.place)
+        }
+        .sheet(isPresented: $showStays) {
+            StaySheet(candidateID: candidateID, tripID: detail?.candidate.tripId ?? "") { url, start, end in
+                // The sheet has to be gone before the next one can come up.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(700))
+                    stayCheck = StayCheck(url: url, start: start, end: end)
+                }
+            }
+        }
+        .sheet(item: $stayCheck) { check in
+            CaptureView(source: ListingSource(id: candidateID, platform: detail?.sources.first?.platform ?? "other", url: check.url, canonicalUrl: check.url),
+                        candidateID: candidateID, forTrip: true, automatic: true, stay: (check.start, check.end))
         }
         .sheet(isPresented: $showCorrection) {
             if let detail { CorrectionView(detail: detail) }
@@ -335,6 +351,7 @@ struct CandidateDetailView: View {
                             ForEach(CandidateStatus.allCases, id: \.self) { Text($0.label).tag($0) }
                         }
                         Divider()
+                        Button("Zeiträume und Preise …", systemImage: "calendar") { showStays = true }
                         Button("Von Hand korrigieren …", systemImage: "pencil") { showCorrection = true }
                         Button("In andere Reise oder auf die Merkliste …", systemImage: "arrow.right.doc.on.clipboard") { showMove = true }
                         Button("Angebot löschen", systemImage: "trash", role: .destructive) { confirmDelete = true }
@@ -523,4 +540,12 @@ struct UncertainMark: View {
             .font(.footnote)
             .accessibilityLabel("unsicher, bitte prüfen")
     }
+}
+
+/// One stay to read on the device.
+struct StayCheck: Identifiable {
+    var url: String
+    var start: String
+    var end: String
+    var id: String { "\(start)|\(end)" }
 }

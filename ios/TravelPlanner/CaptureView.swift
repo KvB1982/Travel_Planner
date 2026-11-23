@@ -25,6 +25,8 @@ struct CaptureView: View {
     /// How many photos the advert is known to have, to warn before a reading that would bring far fewer.
     /// Nil where the server gets the photos from the page itself and the count seen here does not matter.
     var expectedPictures: Int?
+    /// The page was opened for one stay inside the trip's flexible window: first and last day.
+    var stay: (start: String, end: String)?
     /// How many photos of this offer the server already holds. With enough of them the gallery is not read again.
     var knownPictures = 0
     /// Reports how many photos and single reviews went to the server, so the result can be checked against it.
@@ -177,8 +179,13 @@ struct CaptureView: View {
         held = nil
         Task {
             do {
-                try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip,
-                                          url: page.advertURL ?? source.url, dateOptionId: dateOptionID)
+                if let stay {
+                    try await backend.captureStay(candidateId: candidateID, html: captured.html, url: page.advertURL ?? source.url,
+                                                  startDate: stay.start, endDate: stay.end)
+                } else {
+                    try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip,
+                                              url: page.advertURL ?? source.url, dateOptionId: dateOptionID)
+                }
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
                 dismiss()

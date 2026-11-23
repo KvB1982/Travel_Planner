@@ -454,6 +454,66 @@ public actor DemoBackend: TravelBackend {
                        ideas: plan.activities.filter { $0.startsAt == nil && $0.status == "idea" }.count)
     }
 
+    // MARK: Groups, pending readings, stays
+
+    private var circles: [TravelGroup] = [TravelGroup(id: "g-1", name: "Unsere Gruppe", role: "admin",
+        members: [.init(id: "u-1", name: "Du", role: "admin"), .init(id: "u-2", name: "Anna"), .init(id: "u-3", name: "Jonas")],
+        trips: [.init(id: "t-1", title: "Pfingstferien 2027"), .init(id: "t-2", title: "Sommerurlaub 2027")])]
+
+    public func groups() async throws -> [TravelGroup] { circles }
+
+    public func createGroup(name: String) async throws -> [TravelGroup] {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Die Gruppe braucht einen Namen.") }
+        circles.append(TravelGroup(id: nextID("g"), name: name, role: "admin", members: [.init(id: user.id, name: user.name, role: "admin")]))
+        return circles
+    }
+
+    public func createGroupInvite(groupId: String) async throws -> Invite {
+        guard circles.contains(where: { $0.id == groupId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Gruppe gibt es nicht.") }
+        let token = nextID("gi")
+        return Invite(token: token, url: "https://beispiel.invalid/einladung/\(token)", role: .member, maxUses: 1)
+    }
+
+    public func removeGroupMember(groupId: String, userId: String) async throws -> [TravelGroup] {
+        guard let index = circles.firstIndex(where: { $0.id == groupId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Gruppe gibt es nicht.") }
+        let rest = circles[index].members.filter { $0.id != userId }
+        guard rest.contains(where: \.isAdmin) else { throw APIError(status: 409, code: "last_admin", message: "Die Gruppe braucht jemanden, der sie verwaltet.") }
+        if userId == user.id { circles.remove(at: index) } else { circles[index].members = rest }
+        return circles
+    }
+
+    public func setGroupRole(groupId: String, userId: String, admin: Bool) async throws -> [TravelGroup] {
+        guard let index = circles.firstIndex(where: { $0.id == groupId }), let member = circles[index].members.firstIndex(where: { $0.id == userId }) else {
+            throw APIError(status: 404, code: "not_found", message: "Nicht gefunden.")
+        }
+        circles[index].members[member].role = admin ? "admin" : "member"
+        return circles
+    }
+
+    public func setTripGroup(tripId: String, groupId: String?) async throws {
+        let index = try tripIndex(tripId)
+        trips[index].groupId = groupId
+        for circle in circles.indices {
+            circles[circle].trips.removeAll { $0.id == tripId }
+            if circles[circle].id == groupId { circles[circle].trips.append(.init(id: tripId, title: trips[index].title)) }
+        }
+    }
+
+    public func pendingReadings() async throws -> [PendingReading] { [] }
+
+    public func checkStay(tripId: String, candidateId: String, startDate: String, endDate: String) async throws -> TripCheck {
+        let index = try tripIndex(tripId)
+        if let window = trips[index].flexWindow, !window.holds(start: startDate, end: endDate) {
+            throw APIError(status: 400, code: "outside_window", message: "Dieser Aufenthalt liegt nicht im Zeitfenster der Reise.")
+        }
+        _ = try detail(candidateId)
+        return TripCheck(checks: [.init(candidateId: candidateId, mode: "server")])
+    }
+
+    public func captureStay(candidateId: String, html: String, url: String?, startDate: String, endDate: String) async throws {
+        _ = try detail(candidateId)
+    }
+
     // MARK: Frame of the trip
 
     private var periods: [String: [DateOption]] = [
@@ -468,6 +528,11 @@ public actor DemoBackend: TravelBackend {
         }
         trips[index].title = changes.title; trips[index].region = changes.region; trips[index].adults = changes.adults
         trips[index].children = changes.children; trips[index].pets = changes.pets; trips[index].budgetTotalCents = changes.budgetTotalCents
+        if changes.sendsFlex {
+            if let flex = changes.flex, !flex.isValid { throw APIError(status: 400, code: "invalid_request", message: "Das Zeitfenster ist kürzer als der kürzeste Aufenthalt.") }
+            trips[index].flexStart = changes.flex?.start; trips[index].flexEnd = changes.flex?.end
+            trips[index].nightsMin = changes.flex?.nightsMin; trips[index].nightsMax = changes.flex?.nightsMax
+        }
         return trips[index]
     }
 

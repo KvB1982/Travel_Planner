@@ -25,6 +25,7 @@ struct MainView: View {
             }
         }
         .onChange(of: tripID) { candidateID = nil }
+        .modifier(BackgroundReader())
     }
 }
 
@@ -38,6 +39,7 @@ struct TripListView: View {
     @State private var showNewTrip = false
     @State private var showSettings = false
     @State private var showRedeem = false
+    @State private var showGroups = false
     @State private var inviteText = ""
     @State private var redeemNote: String?
 
@@ -101,6 +103,7 @@ struct TripListView: View {
                 Menu {
                     Button("Reise anlegen", systemImage: "suitcase") { showNewTrip = true }
                     Button("Einladung einlösen", systemImage: "envelope.open") { showRedeem = true }
+                    Button("Gruppen", systemImage: "person.3") { showGroups = true }
                 } label: {
                     Label("Hinzufügen", systemImage: "plus")
                 }
@@ -110,6 +113,7 @@ struct TripListView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showGroups) { GroupsView() }
         .alert("Einladung einlösen", isPresented: $showRedeem) {
             TextField("https://…/einladung/…", text: $inviteText)
                 .textInputAutocapitalization(.never)
@@ -140,9 +144,10 @@ struct TripListView: View {
         inviteText = ""
         Task {
             do {
-                let trip = try await model.redeem(inviteText: text)
+                let result = try await model.redeem(inviteText: text)
                 await load()
-                if let trip { selection = trip } else { redeemNote = "Die Einladung ist eingelöst. Die Reise steht jetzt in deiner Liste." }
+                if let trip = result.tripID { selection = trip }
+                else { redeemNote = result.joinedGroup ? "Du bist der Gruppe beigetreten. Ihre Reisen stehen jetzt in deiner Liste." : "Die Einladung ist eingelöst." }
             } catch {
                 redeemNote = model.message(for: error)
             }
@@ -171,6 +176,9 @@ private struct TripRow: View {
             if let region = trip.region, !region.isEmpty {
                 Text(region).font(.subheadline).foregroundStyle(.secondary)
             }
+            if let window = trip.flexWindow {
+                Text(window.summary).font(.footnote).foregroundStyle(.secondary)
+            }
             Text(progress).font(.footnote).foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
@@ -182,6 +190,7 @@ private struct TripRow: View {
         var parts = [count == 1 ? "1 Angebot" : "\(count) Angebote"]
         if favorites > 0 { parts.append(favorites == 1 ? "1 Favorit" : "\(favorites) Favoriten") }
         parts.append("\(trip.persons) Personen")
+        if let group = trip.groupName, !group.isEmpty { parts.append(group) }
         return parts.joined(separator: " · ")
     }
 }

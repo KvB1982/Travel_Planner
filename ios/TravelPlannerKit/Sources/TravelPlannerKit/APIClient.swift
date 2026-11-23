@@ -21,6 +21,22 @@ public protocol TravelBackend: Sendable {
     func trip(_ id: String) async throws -> TripDetail
     func createTrip(_ trip: NewTrip) async throws -> Trip
     func createInvite(tripId: String, role: MemberRole) async throws -> Invite
+    /// The own groups with their members and trips.
+    func groups() async throws -> [TravelGroup]
+    func createGroup(name: String) async throws -> [TravelGroup]
+    /// A link that leads into the group. Admins only; shown once.
+    func createGroupInvite(groupId: String) async throws -> Invite
+    /// Removes someone, or leaves the group when it is the own id.
+    func removeGroupMember(groupId: String, userId: String) async throws -> [TravelGroup]
+    func setGroupRole(groupId: String, userId: String, admin: Bool) async throws -> [TravelGroup]
+    /// Puts a trip into a group, or makes it private with nil.
+    func setTripGroup(tripId: String, groupId: String?) async throws
+    /// Adverts on any of the own trips that still wait for a device to read them.
+    func pendingReadings() async throws -> [PendingReading]
+    /// Asks for one stay of one advert: tells where its page is, or that the server reads it itself.
+    func checkStay(tripId: String, candidateId: String, startDate: String, endDate: String) async throws -> TripCheck
+    /// Hands over a page read for one stay inside the trip's flexible window.
+    func captureStay(candidateId: String, html: String, url: String?, startDate: String, endDate: String) async throws
     /// Changes the frame of the trip: title, region, party and budget. Organiser only.
     func updateTrip(tripId: String, changes: TripChanges) async throws -> Trip
     func addDateOption(tripId: String, label: String?, startDate: String, endDate: String) async throws -> DateOption
@@ -503,6 +519,71 @@ public struct APIClient: TravelBackend {
 
     public func today(tripId: String, date: String) async throws -> TripDay {
         try await send("GET", "/trips/\(tripId.pathEscaped)/today?date=\(date.pathEscaped)")
+    }
+
+    // MARK: Groups, invites, pending readings, stays
+
+    private struct GroupsAnswer: Decodable { var groups: [TravelGroup] }
+
+    public func groups() async throws -> [TravelGroup] {
+        try await (send("GET", "/groups") as GroupsAnswer).groups
+    }
+
+    public func createGroup(name: String) async throws -> [TravelGroup] {
+        struct Body: Encodable { var name: String }
+        return try await (send("POST", "/groups", body: Body(name: name)) as GroupsAnswer).groups
+    }
+
+    public func createGroupInvite(groupId: String) async throws -> Invite {
+        struct Body: Encodable { var maxUses: Int; var expiresInDays: Int }
+        struct Answer: Decodable { var token: String; var url: String; var expiresAt: Date?; var maxUses: Int? }
+        let answer: Answer = try await send("POST", "/groups/\(groupId.pathEscaped)/invites", body: Body(maxUses: 1, expiresInDays: 14))
+        return Invite(token: answer.token, url: answer.url, role: .member, expiresAt: answer.expiresAt, maxUses: answer.maxUses)
+    }
+
+    public func removeGroupMember(groupId: String, userId: String) async throws -> [TravelGroup] {
+        try await (send("DELETE", "/groups/\(groupId.pathEscaped)/members/\(userId.pathEscaped)") as GroupsAnswer).groups
+    }
+
+    public func setGroupRole(groupId: String, userId: String, admin: Bool) async throws -> [TravelGroup] {
+        struct Body: Encodable { var role: String }
+        return try await (send("PATCH", "/groups/\(groupId.pathEscaped)/members/\(userId.pathEscaped)", body: Body(role: admin ? "admin" : "member")) as GroupsAnswer).groups
+    }
+
+    public func setTripGroup(tripId: String, groupId: String?) async throws {
+        struct Body: Encodable {
+            var groupId: String?
+            func encode(to encoder: any Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(groupId, forKey: .groupId)
+            }
+            enum CodingKeys: String, CodingKey { case groupId }
+        }
+        _ = try await data("PATCH", "/trips/\(tripId.pathEscaped)", body: Body(groupId: groupId))
+    }
+
+    /// Redeems an invite link while signed in: the whole link or only its last part.
+    public func redeemInvite(link: String) async throws -> AuthResult {
+        struct Body: Encodable { var link: String }
+        return try await send("POST", "/invites/redeem", body: Body(link: link))
+    }
+
+    public func pendingReadings() async throws -> [PendingReading] {
+        struct Answer: Decodable { var pending: [PendingReading] }
+        return try await (send("GET", "/me/pending-readings") as Answer).pending
+    }
+
+    public func checkStay(tripId: String, candidateId: String, startDate: String, endDate: String) async throws -> TripCheck {
+        struct Body: Encodable { var startDate: String; var endDate: String; var candidateId: String }
+        return try await send("POST", "/trips/\(tripId.pathEscaped)/check", body: Body(startDate: startDate, endDate: endDate, candidateId: candidateId))
+    }
+
+    public func captureStay(candidateId: String, html: String, url: String?, startDate: String, endDate: String) async throws {
+        struct Body: Encodable { var html: String; var forTrip: Bool; var url: String?; var startDate: String; var endDate: String }
+        guard html.utf8.count <= Self.maxPageBytes else {
+            throw APIError(status: 0, code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen.")
+        }
+        _ = try await data("POST", "/candidates/\(candidateId.pathEscaped)/capture", body: Body(html: html, forTrip: true, url: url, startDate: startDate, endDate: endDate))
     }
 
     // MARK: Frame of the trip

@@ -72,6 +72,21 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     /// The phase as stored, set by a decision or by hand.
     public var phase: String?
     public var decidedCandidateId: String?
+    /// The group the trip belongs to; nil for a private one.
+    public var groupId: String?
+    public var groupName: String?
+    /// Up to three stays worth asking for inside the flexible window. Only with the single trip, not in the list.
+    public var stayVariants: [Stay]?
+    /// The flexible window: earliest day of arrival, latest day of departure, and how long the stay may be.
+    public var flexStart: String?
+    public var flexEnd: String?
+    public var nightsMin: Int?
+    public var nightsMax: Int?
+
+    public var flexWindow: FlexWindow? {
+        guard let flexStart, let flexEnd else { return nil }
+        return FlexWindow(start: String(flexStart.prefix(10)), end: String(flexEnd.prefix(10)), nightsMin: nightsMin ?? 1, nightsMax: nightsMax ?? max(nightsMin ?? 1, 28))
+    }
 
     /// The phase to open: today's, falling back to research on servers that know no phases.
     public var activePhase: TripPhase { TripPhase(rawValue: currentPhase ?? phase ?? "") ?? .research }
@@ -260,6 +275,10 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var emptyCheckAt: Date?
     /// False when the house holds fewer guests than the trip has travellers; nil when unknown.
     public var fitsParty: Bool?
+    /// Every stay something is known about, for trips with a flexible window. `price` shows the best of them.
+    public var stays: [Stay]?
+    /// False while the advert still waits for a device to read it.
+    public var deviceRead: Bool?
 
     /// The offer cannot be booked for the trip's dates, as far as the last check knows.
     public var isUnavailable: Bool {
@@ -847,6 +866,10 @@ public struct Invite: Codable, Hashable, Sendable, Identifiable {
     public var role: MemberRole
     public var expiresAt: Date?
     public var maxUses: Int?
+
+    public init(token: String, url: String, role: MemberRole, expiresAt: Date? = nil, maxUses: Int? = nil) {
+        self.token = token; self.url = url; self.role = role; self.expiresAt = expiresAt; self.maxUses = maxUses
+    }
 }
 
 public struct InviteInfo: Codable, Hashable, Sendable {
@@ -863,4 +886,6 @@ public struct AuthResult: Codable, Hashable, Sendable {
     public var token: String?
     public var user: User
     public var tripId: String?
+    /// Set when the invite led into a group instead of a single trip.
+    public var groupId: String?
 }

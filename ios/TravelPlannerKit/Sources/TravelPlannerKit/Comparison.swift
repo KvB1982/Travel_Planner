@@ -79,7 +79,14 @@ public struct Comparison: Sendable, Equatable {
         }
         let dates = offers.indices.map { index -> String? in
             let price = prices[index] ?? otherPrices[index]
-            return Format.dateRange(price?.startDate, price?.endDate)
+            let range = Format.dateRange(price?.startDate, price?.endDate)
+            guard let range, let nights = price?.nights, nights > 0 else { return range }
+            return "\(range) · \(nights == 1 ? "1 Nacht" : "\(nights) Nächte")"
+        }
+        // With a flexible window the stays differ in length, so the price per night is what compares.
+        let perNight: [Double?] = prices.map { price in
+            guard let price, let total = price.totalCents, let nights = price.nights, nights > 0 else { return nil }
+            return (Double(total) / Double(nights)).rounded()
         }
         let ratings: [Double?] = profiles.map { profile in
             guard let value = profile.rating?.value else { return nil }
@@ -100,6 +107,8 @@ public struct Comparison: Sendable, Equatable {
         var sections: [Section] = []
         sections.append(Section(id: "price", title: "Preis", rows: [
             priceRow,
+            // Shown, but not counted as a win of its own: total and price per person and night already are.
+            number("perNight", "Pro Nacht", perNight, nil) { Format.euro(cents: Int($0)) },
             number("perHead", "Pro Person und Nacht", perHead, .lower) { Format.euro(cents: Int($0)) },
             text("dates", "Zeitraum des Preises", dates),
             number("deposit", "Kaution", profiles.map { $0.price?.depositEur }, nil) { Format.euro($0) },

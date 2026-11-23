@@ -59,20 +59,29 @@ final class AppModel {
         try signIn(server: link.serverURL, result: result)
     }
 
-    /// Redeems an invite to a further trip while signed in. Returns the trip it leads to, when the server names it.
-    func redeem(inviteText: String) async throws -> String? {
-        guard let link = InviteLink(inviteText) else {
-            throw APIError(status: 0, code: "bad_invite", message: "Das ist kein Einladungslink. Er sieht so aus: https://…/einladung/…")
+    /// Redeems an invite to a trip or a group while signed in: the whole link or only its last part.
+    /// Tells where it led: a trip to open, or a group joined.
+    func redeem(inviteText: String) async throws -> (tripID: String?, joinedGroup: Bool) {
+        let text = inviteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw APIError(status: 0, code: "bad_invite", message: "Füge den Einladungslink ein, den du bekommen hast.")
         }
         guard let client = backend as? APIClient else {
             throw APIError(status: 0, code: "demo", message: "Mit den Beispieldaten lässt sich keine Einladung einlösen.")
         }
-        guard link.serverURL.host() == client.baseURL.host() else {
+        if let link = InviteLink(text), link.serverURL.host() != client.baseURL.host() {
             throw APIError(status: 0, code: "other_server", message: "Diese Einladung gehört zu einem anderen Server (\(link.serverURL.host() ?? "?")). Du bist bei \(client.baseURL.host() ?? "?") angemeldet.")
         }
-        let result = try await client.acceptInvite(token: link.token, name: nil, deviceName: nil)
+        let result: AuthResult
+        do {
+            result = try await client.redeemInvite(link: text)
+        } catch let error as APIError where error.status == 404 && error.code != "invite_invalid" {
+            // A server from before the groups: it only knows the older way.
+            guard let link = InviteLink(text) else { throw error }
+            result = try await client.acceptInvite(token: link.token, name: nil, deviceName: nil)
+        }
         dataChanged()
-        return result.tripId
+        return (result.tripId, result.groupId != nil)
     }
 
     /// Creates the very first account on a fresh server.

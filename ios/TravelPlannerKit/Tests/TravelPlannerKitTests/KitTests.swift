@@ -1009,3 +1009,69 @@ final class HouseTests: XCTestCase {
         XCTAssertTrue(quiet.isEmpty)
     }
 }
+
+final class GroupAndFlexTests: XCTestCase {
+    func testFlexWindowHoldsStays() {
+        let window = FlexWindow(start: "2027-05-15", end: "2027-05-30", nightsMin: 7, nightsMax: 12)
+        XCTAssertTrue(window.isValid)
+        XCTAssertEqual(window.span, 15)
+        XCTAssertTrue(window.holds(start: "2027-05-16", end: "2027-05-26"))
+        XCTAssertFalse(window.holds(start: "2027-05-14", end: "2027-05-24"))
+        XCTAssertFalse(window.holds(start: "2027-05-20", end: "2027-05-31"))
+        XCTAssertFalse(window.holds(start: "2027-05-16", end: "2027-05-20"))
+        XCTAssertFalse(FlexWindow(start: "2027-05-15", end: "2027-05-18", nightsMin: 7, nightsMax: 10).isValid)
+        XCTAssertEqual(window.summary, "7 bis 12 Nächte zwischen 15.05. – 30.05.2027")
+    }
+
+    func testTripChangesSendWindowOnlyWhenAsked() throws {
+        var changes = TripChanges(title: "X", region: nil, adults: 2, children: 0, pets: 0, budgetTotalCents: nil)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(changes), as: UTF8.self).contains("flexStart"))
+        changes.sendsFlex = true
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(changes), as: UTF8.self).contains(#""flexStart":null"#))
+        changes.flex = FlexWindow(start: "2027-05-15", end: "2027-05-30", nightsMin: 7, nightsMax: 12)
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(changes), as: UTF8.self).contains(#""nightsMax":12"#))
+    }
+
+    func testWindowAndStaysInSampleData() async throws {
+        let demo = DemoBackend()
+        var changes = TripChanges(try await demo.trip("t-1").trip)
+        changes.sendsFlex = true
+        changes.flex = FlexWindow(start: "2027-05-15", end: "2027-05-30", nightsMin: 7, nightsMax: 12)
+        let trip = try await demo.updateTrip(tripId: "t-1", changes: changes)
+        XCTAssertEqual(trip.flexWindow?.nightsMax, 12)
+        _ = try await demo.checkStay(tripId: "t-1", candidateId: "c-1", startDate: "2027-05-16", endDate: "2027-05-26")
+        do {
+            _ = try await demo.checkStay(tripId: "t-1", candidateId: "c-1", startDate: "2027-06-01", endDate: "2027-06-10")
+            XCTFail("Außerhalb des Fensters")
+        } catch let error as APIError { XCTAssertEqual(error.code, "outside_window") }
+    }
+
+    func testGroupsDecodeAndChange() async throws {
+        let json = #"{"groups":[{"id":"g","name":"Unsere Gruppe","role":"admin","createdAt":"2026-11-23T10:00:00Z","members":[{"id":"u","name":"Kristian","role":"admin","joinedAt":"2026-11-23T10:00:00Z"}],"trips":[{"id":"t","title":"Pfingsten 2027"}]}]}"#
+        struct Answer: Decodable { var groups: [TravelGroup] }
+        let groups = try JSONDecoder().decode(Answer.self, from: Data(json.utf8)).groups
+        XCTAssertTrue(groups[0].isAdmin)
+        XCTAssertEqual(groups[0].trips.first?.title, "Pfingsten 2027")
+        let demo = DemoBackend()
+        var list = try await demo.removeGroupMember(groupId: "g-1", userId: "u-3")
+        XCTAssertEqual(list[0].members.count, 2)
+        do {
+            _ = try await demo.removeGroupMember(groupId: "g-1", userId: "u-1")
+            XCTFail("Die letzte Verwaltung darf nicht gehen")
+        } catch let error as APIError { XCTAssertEqual(error.code, "last_admin") }
+        list = try await demo.setGroupRole(groupId: "g-1", userId: "u-2", admin: true)
+        XCTAssertTrue(list[0].members[1].isAdmin)
+        try await demo.setTripGroup(tripId: "t-1", groupId: nil)
+        list = try await demo.groups()
+        XCTAssertEqual(list[0].trips.map(\.id), ["t-2"])
+    }
+
+    func testListEntryDecodesStays() throws {
+        let json = #"[{"startDate":"2027-05-16","endDate":"2027-05-26","nights":10,"totalCents":588000,"perNightCents":58800,"available":true,"checkedAt":"2026-11-23T10:00:00Z","best":true}]"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let stays = try decoder.decode([Stay].self, from: Data(json.utf8))
+        XCTAssertEqual(stays.first?.perNightCents, 58_800)
+        XCTAssertEqual(stays.first?.best, true)
+    }
+}
