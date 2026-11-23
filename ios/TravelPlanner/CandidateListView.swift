@@ -448,7 +448,9 @@ struct CandidateListView: View {
             let candidate = candidates.first { $0.id == id }
             let margin = sent.addingTimeInterval(-5)
             let fresh = [candidate?.price?.checkedAt, candidate?.price?.capturedAt, candidate?.availabilityCheckedAt, candidate?.emptyCheckAt].compactMap { $0 }.contains { $0 > margin }
-            if candidate == nil || fresh || Date.now.timeIntervalSince(sent) > 90 { evaluating[id] = nil }
+            // While the run on this device is still going, offers further down the queue keep waiting.
+            let waiting = checking != nil || deviceCheck != nil || !deviceQueue.isEmpty
+            if candidate == nil || fresh || (!waiting && Date.now.timeIntervalSince(sent) > 180) { evaluating[id] = nil }
         }
     }
 
@@ -511,7 +513,9 @@ struct CandidateListView: View {
         Task {
             do {
                 let result = try await backend.checkTrip(tripId: tripID, dateOptionId: periodID)
-                for check in result.checks where check.mode == "server" { evaluating[check.candidateId] = .now }
+                // Every offer of the run shows a moving sign from now on: those the server reads, and those waiting
+                // for this device, until their result is in.
+                for check in result.checks where check.mode == "server" || check.wantsDevice { evaluating[check.candidateId] = .now }
                 model.dataChanged()
                 let onDevice = result.checks.filter(\.wantsDevice)
                 deviceTotal = onDevice.count
@@ -542,7 +546,7 @@ struct CandidateListView: View {
         var needsPerson: [TripCheck.Check] = []
         for (index, check) in checks.enumerated() {
             checking = "\(index + 1) von \(checks.count)"
-            guard let address = check.checkUrl, let url = URL(string: address) else { failed += 1; continue }
+            guard let address = check.checkUrl, let url = URL(string: address) else { failed += 1; evaluating[check.candidateId] = nil; continue }
             hiddenPage.load(url)
             for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(500))
@@ -552,25 +556,27 @@ struct CandidateListView: View {
             let platform = check.platform ?? "?"
             if await hiddenPage.isChallenge() {
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): Sicherheitsabfrage")
-                needsPerson.append(check); continue
+                needsPerson.append(check); evaluating[check.candidateId] = nil; continue
             }
             await hiddenPage.waitForPrice()
             if await hiddenPage.lacksDates() {
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): Seite ohne Zeitraum")
-                withoutDates += 1; continue
+                withoutDates += 1; evaluating[check.candidateId] = nil; continue
             }
             do {
                 let captured = try await hiddenPage.capture(quick: true)
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): \(captured.html.count) Zeichen gelesen")
                 if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
-                guard captured.html.count >= 500 else { failed += 1; continue }
+                guard captured.html.count >= 500 else { failed += 1; evaluating[check.candidateId] = nil; continue }
+                // The address asked for, not where the site redirected to: only it is sure to carry the dates of the trip.
                 try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,
-                                          url: hiddenPage.advertURL ?? address, dateOptionId: periodID)
+                                          url: address, dateOptionId: periodID)
                 done += 1
                 evaluating[check.candidateId] = .now
                 model.dataChanged()
             } catch {
                 failed += 1
+                evaluating[check.candidateId] = nil
                 // Signed out, or the day's allowance on the server is used up: going on would fail the same way.
                 if let api = error as? APIError, api.isUnauthorized || api.code == "daily_limit" { notice = model.message(for: error); return }
             }
@@ -783,11 +789,14 @@ private struct CandidateRow: View {
     /// The trip has a flexible window, so the stay behind each price is worth naming.
     var flexible = false
 
-    private var working: some View {
-        HStack(spacing: 5) {
-            ProgressView().controlSize(.mini)
-            Text("Preis wird gerade ausgewertet …").font(.caption).foregroundStyle(.secondary)
-        }
+    /// Something is still being read or evaluated for this offer, here or on the server.
+    private var busy: Bool { evaluating || candidate.importStatus == .pending || candidate.deviceRead == false }
+
+    /// What exactly is going on, in a few words.
+    private var busyText: String {
+        if evaluating { return "Preis wird gerade abgefragt …" }
+        if candidate.deviceRead == false && candidate.importStatus != .pending { return "Wird gleich vom Gerät gelesen …" }
+        return "Wird gerade ausgewertet …"
     }
 
     var body: some View {
@@ -823,35 +832,39 @@ private struct CandidateRow: View {
                 }
                 switch candidate.importStatus {
                 case .pending:
-                    Label("Wird ausgelesen …", systemImage: "arrow.triangle.2.circlepath").font(.footnote).foregroundStyle(.secondary)
+                    // Covered by the moving sign in the price line below.
+                    EmptyView()
                 case .partial:
-                    Label("Details fehlen noch", systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.orange)
+                    if !busy { Label("Details fehlen noch", systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.orange) }
                 case .failed:
-                    Label("Auslesen fehlgeschlagen", systemImage: "xmark.circle").font(.footnote).foregroundStyle(.red)
+                    if !busy { Label("Auslesen fehlgeschlagen", systemImage: "xmark.circle").font(.footnote).foregroundStyle(.red) }
                 case .ready:
                     EmptyView()
                 }
                 HStack {
-                    if let price = candidate.price, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
-                        if price.forThisTrip {
-                            // Only a price asked for this trip's dates is shown as the price of the offer.
-                            Text(text).font(.subheadline.weight(.semibold))
-                            // The price on screen is the old one until the server has read the new page.
-                            if evaluating { ProgressView().controlSize(.mini).accessibilityLabel("Preis wird gerade neu ausgewertet") }
-                        } else if evaluating {
-                            working
-                        } else if !candidate.isUnavailable {
-                            // A price from the shared link belongs to other dates: named as such, small, never as "the" price.
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Preis für euren Zeitraum noch offen").font(.caption).foregroundStyle(.secondary)
+                    if let price = candidate.price, price.forThisTrip, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
+                        // Only a price asked for this trip's dates is shown as the price of the offer.
+                        Text(text).font(.subheadline.weight(.semibold))
+                        // The price on screen is the old one until the new reading is through.
+                        if busy { ProgressView().controlSize(.mini).accessibilityLabel(busyText) }
+                    } else if busy {
+                        // Still at work: say so with a moving sign, so nobody takes the wait for a failure.
+                        HStack(spacing: 5) {
+                            ProgressView().controlSize(.mini)
+                            Text(busyText).font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if !candidate.isUnavailable, candidate.importStatus != .failed {
+                        // Nothing is running and there is no price for the trip: say what to do about it.
+                        VStack(alignment: .leading, spacing: 1) {
+                            Label(candidate.emptyCheckAt != nil ? "Kein Preis gefunden, bitte erneut prüfen" : "Noch kein Preis für euren Zeitraum, tippe oben auf „Preise prüfen“",
+                                  systemImage: "arrow.triangle.2.circlepath")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let price = candidate.price, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
+                                // A price from the shared link belongs to other dates: named as such, small, never as "the" price.
                                 Text("im Link: \(text)" + (Format.dateRange(price.startDate, price.endDate).map { " für \($0)" } ?? ""))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
-                    } else if evaluating {
-                        working
-                    } else if !candidate.isUnavailable && candidate.importStatus == .ready {
-                        Text("Preis für euren Zeitraum noch offen").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     VoteBadges(votes: candidate.votes)
@@ -862,15 +875,12 @@ private struct CandidateRow: View {
                           price.totalCents.map { "\(Format.euro(cents: $0 / nights)) je Nacht" }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if candidate.deviceRead == false, candidate.importStatus != .pending {
-                    Label("Wird im Hintergrund vom Gerät gelesen", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary)
-                }
                 if let price = candidate.price, price.forThisTrip, let asked = price.persons, let persons, asked != persons {
                     // Some platforms keep the party of the shared link: the price is real, but for fewer or more people.
                     Label("Preis für \(asked == 1 ? "1 Person" : "\(asked) Personen"), nicht für \(persons)", systemImage: "person.2")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                if !evaluating, candidate.emptyCheckAt != nil {
+                if !busy, candidate.emptyCheckAt != nil, candidate.price?.forThisTrip == true {
                     Label("Letzter Abruf ohne Ergebnis, bitte erneut prüfen", systemImage: "arrow.clockwise.circle")
                         .font(.caption).foregroundStyle(.orange)
                 }

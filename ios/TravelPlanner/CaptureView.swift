@@ -180,11 +180,13 @@ struct CaptureView: View {
         Task {
             do {
                 if let stay {
-                    try await backend.captureStay(candidateId: candidateID, html: captured.html, url: page.advertURL ?? source.url,
+                    try await backend.captureStay(candidateId: candidateID, html: captured.html, url: source.url,
                                                   startDate: stay.start, endDate: stay.end)
                 } else {
+                    // For a check of the trip the address asked for goes along, not where the site redirected to: only
+                    // it is sure to carry the dates. In the automatic run nobody changed the dates on the page.
                     try await backend.capture(candidateId: candidateID, html: captured.html, sourceId: sourceID, forTrip: forTrip,
-                                              url: page.advertURL ?? source.url, dateOptionId: dateOptionID)
+                                              url: forTrip && automatic ? source.url : (page.advertURL ?? source.url), dateOptionId: dateOptionID)
                 }
                 model.dataChanged()
                 onSent(captured.pictures, captured.reviews)
