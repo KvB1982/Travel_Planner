@@ -1203,3 +1203,19 @@ final class FlagTests: XCTestCase {
         XCTAssertNil(Format.flag(forCountry: nil))
     }
 }
+
+final class VoteRemovalTests: XCTestCase {
+    func testVoteCanBeTakenBack() async throws {
+        let demo = DemoBackend()
+        try await demo.vote(candidateId: "c-1", verdict: .no, veto: true)
+        var detail = try await demo.candidate("c-1")
+        XCTAssertEqual(detail.votes.vetoes, 1)
+        try await demo.removeVote(candidateId: "c-1")
+        detail = try await demo.candidate("c-1")
+        XCTAssertFalse(detail.votes.entries.contains { $0.userId == "u-1" })
+        XCTAssertEqual(detail.votes.vetoes, 0)
+        XCTAssertEqual(detail.votes.yes, 1)
+        // Taking back a vote that is not there is no error.
+        try await demo.removeVote(candidateId: "c-1")
+    }
+}

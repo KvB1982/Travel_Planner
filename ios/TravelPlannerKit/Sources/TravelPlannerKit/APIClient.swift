@@ -158,6 +158,8 @@ public protocol TravelBackend: Sendable {
     /// Removes the offer from its trip, with its votes and comments. Cannot be undone.
     func delete(candidateId: String) async throws
     func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws
+    /// Takes the own vote back, veto included.
+    func removeVote(candidateId: String) async throws
     func comment(candidateId: String, body: String) async throws
     func logout() async throws
     /// The request that loads a picture, or nil when the address is unusable.
@@ -834,6 +836,14 @@ public struct APIClient: TravelBackend {
     public func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws {
         struct Body: Encodable { var verdict: Verdict; var veto: Bool }
         _ = try await data("PUT", "/candidates/\(candidateId.pathEscaped)/vote", body: Body(verdict: verdict, veto: veto))
+    }
+
+    public func removeVote(candidateId: String) async throws {
+        do {
+            _ = try await data("DELETE", "/candidates/\(candidateId.pathEscaped)/vote")
+        } catch let error as APIError where error.status == 404 || error.status == 405 {
+            throw APIError(status: error.status, code: "not_supported", message: "Der Server kann Stimmen noch nicht zurücknehmen. Das kommt mit seinem nächsten Update.")
+        }
     }
 
     public func comment(candidateId: String, body: String) async throws {

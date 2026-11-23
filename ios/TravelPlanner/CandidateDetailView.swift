@@ -430,13 +430,17 @@ struct CandidateDetailView: View {
             }
         } header: {
             Text(mine == nil ? "Wie findest du es?" : "Deine Stimme")
+        } footer: {
+            if mine != nil { Text("Noch einmal antippen nimmt deine Stimme zurück.") }
         }
     }
 
     private func voteButton(_ verdict: Verdict, _ label: String, _ symbol: String, _ color: Color, _ mine: VoteEntry?) -> some View {
         let chosen = mine?.verdict == verdict
         return Button {
-            perform { try await $0.vote(candidateId: candidateID, verdict: verdict, veto: verdict == .no && (mine?.veto ?? false)) }
+            // A second tap on the own choice takes the vote back.
+            if chosen { perform { try await $0.removeVote(candidateId: candidateID) } }
+            else { perform { try await $0.vote(candidateId: candidateID, verdict: verdict, veto: verdict == .no && (mine?.veto ?? false)) } }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: chosen ? symbol + ".fill" : symbol).font(.title2)
@@ -450,6 +454,7 @@ struct CandidateDetailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(label)\(chosen ? ", deine Stimme" : "")")
+        .accessibilityHint(chosen ? "Tippen nimmt die Stimme zurück" : "")
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 

@@ -1012,6 +1012,14 @@ public actor DemoBackend: TravelBackend {
         details[candidateId] = detail
     }
 
+    public func removeVote(candidateId: String) async throws {
+        var detail = try detail(candidateId)
+        let entries = detail.votes.entries.filter { $0.userId != user.id }
+        detail.votes = VoteOverview(yes: entries.filter { $0.verdict == .yes }.count, maybe: entries.filter { $0.verdict == .maybe }.count,
+                                    no: entries.filter { $0.verdict == .no }.count, vetoes: entries.filter(\.veto).count, entries: entries)
+        details[candidateId] = detail
+    }
+
     public func vote(candidateId: String, verdict: Verdict, veto: Bool) async throws {
         var detail = try detail(candidateId)
         var entries = detail.votes.entries.filter { $0.userId != user.id }
