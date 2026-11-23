@@ -4,7 +4,10 @@ import TravelPlannerKit
 /// Three columns on the iPad (trips, offers, profile), a navigation stack on the iPhone.
 struct MainView: View {
     @State private var tripID: String?
-    @State private var candidateID: String?
+    @State var candidateID: String?
+    /// Whether the last step between offers went on to the next one, for the direction the new offer comes in from.
+    @State var stepForward = true
+    @Environment(AppModel.self) var model
 
     var body: some View {
         NavigationSplitView {
@@ -18,14 +21,26 @@ struct MainView: View {
             }
         } detail: {
             if let candidateID {
-                CandidateDetailView(candidateID: candidateID) { self.candidateID = nil }
+                CandidateDetailView(candidateID: candidateID, onStep: step) { self.candidateID = nil }
                     .id(candidateID)
+                    .transition(.push(from: stepForward ? .trailing : .leading))
             } else {
                 ContentUnavailableView("Wähle ein Angebot", systemImage: "house")
             }
         }
         .onChange(of: tripID) { candidateID = nil }
         .modifier(BackgroundReader())
+    }
+}
+
+extension MainView {
+    /// Moves to the next (+1) or previous (-1) offer in the order of the list. False at either end.
+    func step(_ delta: Int) -> Bool {
+        guard let current = candidateID, let index = model.offerOrder.firstIndex(of: current),
+              model.offerOrder.indices.contains(index + delta) else { return false }
+        stepForward = delta > 0
+        withAnimation(.snappy(duration: 0.25)) { candidateID = model.offerOrder[index + delta] }
+        return true
     }
 }
 

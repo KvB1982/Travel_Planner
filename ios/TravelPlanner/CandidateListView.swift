@@ -186,6 +186,11 @@ struct CandidateListView: View {
         return result
     }
 
+    /// The offers as the list shows them from top to bottom, without those in countries folded shut.
+    private var shownOrder: [String] {
+        countrySections.filter { !foldedCountries.contains("\(tripID)|\($0.id)") }.flatMap { $0.regions.flatMap { $0.offers.map(\.id) } }
+    }
+
     /// The head of one country in the list: flag, name in large type and number of offers.
     /// A country with a single region names it here; several regions get dividers below instead.
     private func countryHeader(_ section: CountrySection, folded: Bool) -> some View {
@@ -450,6 +455,7 @@ struct CandidateListView: View {
             InviteSheet(invite: invite)
         }
         .refreshable { await load() }
+        .onChange(of: shownOrder, initial: true) { model.offerOrder = shownOrder }
         .onChange(of: periodID) { model.dataChanged() }
         .task(id: model.revision) {
             await load()

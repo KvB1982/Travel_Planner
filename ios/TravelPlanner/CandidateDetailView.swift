@@ -6,10 +6,14 @@ struct CandidateDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     let candidateID: String
+    /// Moves on to the next (+1) or back to the previous (-1) offer of the list. False when there is none.
+    var onStep: (Int) -> Bool = { _ in false }
     /// Called after the offer was deleted, so the surrounding view can close it.
     var onDeleted: () -> Void = {}
 
     @State private var detail: CandidateDetail?
+    /// Where the photo strip sits on screen: a swipe that starts on it moves the photos, not the offer.
+    @State private var stripFrame: CGRect = .zero
     @State private var error: String?
     @State private var comment = ""
     @State private var captureSource: ListingSource?
@@ -52,6 +56,16 @@ struct CandidateDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        // A sideways swipe moves to the next or previous offer of the list. It has to be clearly sideways and long,
+        // so scrolling up and down never triggers it; a swipe from the left edge stays the system's way back.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .global).onEnded { drag in
+                let across = drag.translation.width, along = drag.translation.height
+                guard abs(across) > 90, abs(across) > abs(along) * 2.5 else { return }
+                guard drag.startLocation.x > 28, !stripFrame.contains(drag.startLocation) else { return }
+                if !onStep(across < 0 ? 1 : -1) { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+            }
+        )
         .task(id: model.revision) {
             await load()
             // Imports and the search for other platforms finish on the server; look again until both are done.
@@ -200,6 +214,7 @@ struct CandidateDetailView: View {
             if !detail.gallery.isEmpty {
                 Section {
                     PhotoStrip(photos: detail.gallery)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stripFrame = $0 }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 } footer: {

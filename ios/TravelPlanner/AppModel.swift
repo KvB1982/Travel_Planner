@@ -37,6 +37,9 @@ final class AppModel {
 
     func dataChanged() { revision += 1 }
 
+    /// The offers of the open trip in the order the list shows them, for stepping from one to the next.
+    var offerOrder: [String] = []
+
     /// A platform whose pages show a cookie question on this device, so nothing can be read out of sight until a
     /// person has answered it once on a visible page. Shown as a hint above the trips.
     private(set) var consentHint: String?
