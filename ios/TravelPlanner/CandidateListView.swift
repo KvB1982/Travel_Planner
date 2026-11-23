@@ -818,6 +818,11 @@ private struct CandidateRow: View {
                 if candidate.deviceRead == false, candidate.importStatus != .pending {
                     Label("Wird im Hintergrund vom Gerät gelesen", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary)
                 }
+                if let price = candidate.price, price.forThisTrip, let asked = price.persons, let persons, asked != persons {
+                    // Some platforms keep the party of the shared link: the price is real, but for fewer or more people.
+                    Label("Preis für \(asked == 1 ? "1 Person" : "\(asked) Personen"), nicht für \(persons)", systemImage: "person.2")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if !evaluating, candidate.emptyCheckAt != nil {
                     Label("Letzter Abruf ohne Ergebnis, bitte erneut prüfen", systemImage: "arrow.clockwise.circle")
                         .font(.caption).foregroundStyle(.orange)

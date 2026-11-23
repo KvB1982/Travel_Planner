@@ -19,6 +19,8 @@ struct CandidateDetailView: View {
     @State private var showAddSource = false
     @State private var showMove = false
     @State private var showCorrection = false
+    /// The server no longer knows this offer; nothing more is asked about it.
+    @State private var gone = false
     @State private var showStays = false
     /// The advert's page to open for one stay, after the stay sheet has closed.
     @State private var stayCheck: StayCheck?
@@ -118,11 +120,18 @@ struct CandidateDetailView: View {
     }
 
     private func load() async {
-        guard let backend = model.backend else { return }
+        guard !gone, let backend = model.backend else { return }
         do {
             detail = try await backend.candidate(candidateID)
             error = nil
         } catch is CancellationError {
+        } catch let gone as APIError where gone.status == 404 {
+            // Deleted or moved elsewhere, perhaps by someone else: it quietly leaves the screen and the list.
+            guard !gone else { return }
+            gone = true
+            detail = nil
+            onDeleted()
+            model.dataChanged()
         } catch {
             self.error = model.message(for: error)
         }

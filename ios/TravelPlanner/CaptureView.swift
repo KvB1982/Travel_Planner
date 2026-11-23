@@ -666,8 +666,45 @@ final class WebPage: NSObject, WKNavigationDelegate {
         Self.log.info("Nach 20 Sekunden weder Gesamtpreis noch Belegung auf der Seite")
     }
 
+    /// The page without what the server never reads, so even heavy pages fit through: styles, drawings, frames,
+    /// linked and plain scripts, comments, inline styles and embedded image data go. What stays is what the server
+    /// evaluates: meta tags, visible text, images with an address, data scripts (JSON, JSON-LD) and scripts that
+    /// set a page state (`window.__NAME__ =`). Works on a copy; the page on screen is left alone.
+    static let slimPage = """
+    (function () {
+      var root = document.documentElement.cloneNode(true);
+      var drop = root.querySelectorAll('style, svg, template, iframe, noscript, link, canvas, video, audio, object, embed');
+      for (var i = 0; i < drop.length; i++) { if (drop[i].parentNode) { drop[i].parentNode.removeChild(drop[i]); } }
+      var scripts = root.querySelectorAll('script');
+      for (var s = 0; s < scripts.length; s++) {
+        var el = scripts[s], type = (el.getAttribute('type') || '').toLowerCase();
+        var data = type.indexOf('json') >= 0;
+        var state = !el.getAttribute('src') && /window\\.__[A-Za-z0-9_$]+\\s*=/.test(el.textContent || '');
+        if (!data && !state && el.parentNode) { el.parentNode.removeChild(el); }
+      }
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT, null);
+      var comments = [];
+      while (walker.nextNode()) { comments.push(walker.currentNode); }
+      for (var c = 0; c < comments.length; c++) { if (comments[c].parentNode) { comments[c].parentNode.removeChild(comments[c]); } }
+      var all = root.querySelectorAll('*');
+      for (var a = 0; a < all.length; a++) {
+        var node = all[a];
+        if (node.hasAttribute('style')) { node.removeAttribute('style'); }
+        for (var k = node.attributes.length - 1; k >= 0; k--) {
+          var attr = node.attributes[k];
+          if (attr.value.length > 200 && /^\\s*data:/i.test(attr.value)) { node.removeAttribute(attr.name); }
+        }
+      }
+      return '<!DOCTYPE html>' + root.outerHTML;
+    })()
+    """
+
     private func outerHTML() async throws -> String {
-        try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
+        let full = try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
+        // Slimming is an extra: when it fails, the page goes as it is.
+        guard let slim = try? await webView.evaluateJavaScript(Self.slimPage) as? String, slim.count >= 500 else { return full }
+        Self.log.info("Seite ausgedünnt: \(full.utf8.count / 1024) KB auf \(slim.utf8.count / 1024) KB")
+        return slim
     }
 
     struct Captured {

@@ -169,8 +169,9 @@ public struct APIClient: TravelBackend {
     public var token: String?
     private let session: URLSession
 
-    /// The server refuses request bodies above 6 MB; pages beyond this are sent without their content.
-    public static let maxPageBytes = 5_500_000
+    /// The server refuses request bodies above 12 MB; pages beyond this are sent without their content.
+    /// Pages are slimmed on the device before they get here, so only very unusual ones reach the limit.
+    public static let maxPageBytes = 11_000_000
 
     public init(baseURL: URL, token: String? = nil, session: URLSession = .shared) {
         self.baseURL = baseURL
