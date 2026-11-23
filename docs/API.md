@@ -498,9 +498,19 @@ Liest das Gerät eine Seite für den Zeitraum, bevor Preis und Verfügbarkeit ge
 
 Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfügbarkeit, gleicher Zeitraum), entsteht keine neue Preiszeile. Der Zeitpunkt der Bestätigung steht dann in `availabilityCheckedAt`, in `price.checkedAt` und in `periods[].checkedAt`; `price.capturedAt` bleibt der Zeitpunkt, zu dem der Preis zum ersten Mal so gesehen wurde. Wer auf das Ende eines Abrufs wartet, vergleicht `availabilityCheckedAt`, `price.checkedAt` oder `emptyCheckAt` mit dem Absenden.
 
+## Check24
+
+Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung ist die Hotelnummer). Angebote, die vorher als `other` hereinkamen, stellt der Server beim nächsten `check`, `refresh` oder `capture` selbst um. Preise gibt es nur vom Gerät: `checkUrl` trägt den Zeitraum der Reise als festen Aufenthalt. Die Zimmerbelegung des geteilten Links bleibt dabei erhalten, weil ein Hotel kein Zimmer für die ganze Gruppe hat; `price.persons` nennt deshalb die Personen aus dem Link, nicht die der Reise.
+
+## Große Seiten vom Gerät
+
+Eine vom Gerät gelesene Seite (`html` bei Import, `capture`, weiterer Quelle) darf samt Umschlag höchstens 12 MB groß sein; darüber antwortet der Server mit 413 `too_large`. Die App sollte die Seite vor dem Senden ausdünnen. Der Server liest nur: `<meta>`, sichtbaren Text, `<img>` mit Adresse, `<script>` mit `type` `application/json` oder `application/ld+json` (auch mit `id` wie `__NEXT_DATA__`, `js-hotel-data`, `data-deferred-state`) und eingebettete Skripte, die `window.__NAME__ =` zuweisen. Gefahrlos entfernen lassen sich also: `<style>`, `<svg>`, `<template>`, `<iframe>`, `<noscript>`, `<link>`, Kommentare, Skripte mit `src`, eingebettete Skripte ohne `window.__`, sowie `data:`-Adressen in Attributen und `style`-Attribute.
+
 ## Gruppen
 
 Eine Gruppe sind Leute, die immer wieder zusammen verreisen. Jede Reise der Gruppe steht allen Mitgliedern offen: Wer der Gruppe beitritt, wird Mitglied aller ihrer Reisen; eine neue Reise in der Gruppe bekommt alle als Mitglieder. Beim Umstellen wurden alle bisherigen Konten und Reisen in eine Gruppe „Unsere Gruppe" gelegt; das älteste Konto verwaltet sie.
+
+Wer eine Gruppe verwaltet (`admin`), verwaltet auch alle ihre Reisen: `role` in `GET /trips` und `GET /trips/:id` ist für diese Person `organizer`, und alles, was dem Organisator vorbehalten ist (ändern, archivieren, löschen, verschieben, einladen, Schlussrunde, Entscheidung), steht ihr offen. Das gilt nicht für die Merkliste der Gruppe und nicht für Gäste. `members[].role` zeigt weiter die eingetragene Rolle. Gibt jemand die Verwaltung ab, endet das Recht für Reisen, die andere angelegt haben.
 
 `GET /groups`:
 
@@ -565,3 +575,5 @@ Jede Gruppe hat genau eine gemeinsame Merkliste: eine Reise mit `kind: "watchlis
 - **Eindeutige Namen:** In einer Gruppe darf es jeden Reisenamen nur einmal geben, ebenso unter den privaten Reisen einer Person; Groß- und Kleinschreibung und Leerzeichen am Rand zählen nicht, archivierte Reisen zählen mit. `POST /trips` und `PATCH /trips/:id` (Name oder Gruppe) antworten sonst mit 409 `title_taken`. Schon vorhandene Doppelte bleiben, bis eine umbenannt oder gelöscht wird.
 - **Reise in eine andere Gruppe:** `PATCH /trips/:id` mit `{ "groupId" }`. Die Mitglieder der alten Gruppe gehen heraus, die der neuen kommen hinein.
 - **Inserat in eine andere Reise, auch in einer anderen Gruppe:** `POST /candidates/:id/move` mit `{ "tripId" }`; Ziel kann jede Reise oder Merkliste sein, in der man Mitglied ist. 409 `already_in_trip`.
+
+Offene Einladungen zu einer Reise (nur Organisation): `GET /trips/:id/invites` liefert `{ invites: [{ id, role, createdAt, expiresAt, maxUses, usedCount, createdBy }] }`, `DELETE /trips/:id/invites/:inviteId` (204) nimmt eine zurück. Der Link selbst lässt sich nicht noch einmal anzeigen.

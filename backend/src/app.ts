@@ -58,6 +58,7 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
   app.setErrorHandler((err: unknown, _req, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: { code: err.code, message: err.message } });
     const e = err as { statusCode?: number; code?: string; message?: string };
+    if (e.statusCode === 413) return reply.code(413).send({ error: { code: "too_large", message: "Die Seite ist zu groß, um sie zu übertragen." } });
     if (e.statusCode && e.statusCode < 500) {
       return reply.code(e.statusCode).send({ error: { code: e.statusCode === 429 ? "rate_limited" : "invalid_request", message: e.statusCode === 429 ? "Zu viele Anfragen. Bitte kurz warten." : (e.message ?? "Ungültige Anfrage.") } });
     }

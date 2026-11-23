@@ -139,7 +139,7 @@ describe("import", () => {
     const res = await s.importLink("https://urlaub.check24.de/suche/angebot?days=11-25&departureDate=2027-08-06&pageArea=package&returnDate=2027-08-30&roomAllocation=A-A-7-11&hotelId=12912");
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
     expect(new URL(s.requested.at(-1)!).searchParams.get("days")).toBe("7");
-    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 8 });
+    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 4 });
     // The window of the shared link is beside the point once the page was read for the trip.
     expect(detail.body.listing.profile.warnings.join(" ")).not.toMatch(/11 bis 25 Tagen/);
   });
@@ -940,7 +940,57 @@ describe("a window of possible dates", () => {
   });
 });
 
+describe("short links of a portal", () => {
+  it("gives a source its platform once its short link resolves", async () => {
+    const short = "https://c.24.de/pr/AbC123";
+    const target = "https://urlaub.check24.de/suche/hotelinformation?hotelId=5429&departureDate=2027-05-15&returnDate=2027-05-30&days=11-15&roomAllocation=A-A-7-11&pageArea=package";
+    let resolves = false;
+    const s = await setup({ fetcher: async (url) => page(fixture("novasol.html"), { finalUrl: resolves && url === short ? target : url }) });
+    const first = await s.importLink(short);
+    expect(first.body.platform).toBe("other");
+
+    // Later the link leads somewhere: the trip check settles the source and names the page for the trip's dates.
+    resolves = true;
+    const check = await s.call("POST", `/trips/${s.tripId}/check`, s.owner, {});
+    const [one] = check.body.checks;
+    expect(one).toMatchObject({ platform: "check24", needsDevice: true, mode: "device" });
+    const asked = new URL(one.checkUrl).searchParams;
+    expect(Object.fromEntries(asked)).toMatchObject({ hotelId: "5429", departureDate: "2027-08-21", returnDate: "2027-08-28", days: "7", roomAllocation: "A-A-7-11" });
+    const detail = await s.call("GET", `/candidates/${first.body.candidateId}`, s.owner);
+    expect(detail.body.sources[0]).toMatchObject({ platform: "check24" });
+  });
+});
+
 describe("groups", () => {
+  it("lets whoever administers a group run all its trips", async () => {
+    const t = await testApp();
+    const owner = await t.bootstrap();
+    const group = (await t.call("POST", "/groups", owner, { name: "Familie" })).body.groups[0];
+    const link = (await t.call("POST", `/groups/${group.id}/invites`, owner, {})).body;
+    const anna = (await t.call("POST", `/auth/invites/${link.token}/accept`, null, { name: "Anna" })).body;
+    const hers = (await t.call("POST", "/trips", anna.token, { title: "Annas Reise" })).body.trip;
+    const mine = (await t.call("POST", "/trips", owner, { title: "Meine Reise" })).body.trip;
+
+    // The administrator is an organizer of her trip in effect; she stays a plain member of the other.
+    expect((await t.call("GET", `/trips/${hers.id}`, owner)).body.role).toBe("organizer");
+    const roleIn = async (token: string, id: string) => (await t.call("GET", "/trips", token)).body.trips.find((x: { id: string }) => x.id === id).role;
+    expect(await roleIn(owner, hers.id)).toBe("organizer");
+    expect(await roleIn(anna.token, mine.id)).toBe("member");
+    expect((await t.call("PATCH", `/trips/${mine.id}`, anna.token, { title: "Anders" })).status).toBe(403);
+    expect((await t.call("PATCH", `/trips/${hers.id}`, owner, { title: "Umbenannt" })).status).toBe(200);
+    expect((await t.call("PATCH", `/trips/${hers.id}`, owner, { status: "archived" })).status).toBe(200);
+
+    // The shared shelf gains nothing from it, and the right goes with the administration.
+    const shelf = (await t.call("GET", "/trips", owner)).body.trips.find((x: { kind: string; groupId: string | null }) => x.kind === "watchlist" && x.groupId === group.id);
+    expect(shelf.role).not.toBe("organizer");
+    const annaId = (await t.call("GET", "/me", anna.token)).body.user.id;
+    const ownerId = (await t.call("GET", "/me", owner)).body.user.id;
+    await t.call("PATCH", `/groups/${group.id}/members/${annaId}`, owner, { role: "admin" });
+    expect((await t.call("PATCH", `/groups/${group.id}/members/${ownerId}`, anna.token, { role: "member" })).status).toBe(200);
+    expect((await t.call("DELETE", `/trips/${hers.id}`, owner)).status).toBe(403);
+    expect((await t.call("DELETE", `/trips/${mine.id}`, anna.token)).status).toBe(204);
+  });
+
   it("opens every trip of the group to all its members", async () => {
     const t = await testApp();
     const owner = await t.bootstrap();
@@ -1031,6 +1081,13 @@ describe("tidying up trips", () => {
 
     const id = (await s.importLink("https://www.novasol.de/ferienhaeuser/CLD520")).body.candidateId as string;
     const member = await s.join("member", "Tante");
+    // A link to the trip that went astray is taken back before anyone uses it.
+    const stray = (await s.call("POST", `/trips/${s.tripId}/invites`, s.owner, {})).body;
+    const openLinks = (await s.call("GET", `/trips/${s.tripId}/invites`, s.owner)).body.invites;
+    expect(openLinks).toHaveLength(1);
+    expect((await s.call("GET", `/trips/${s.tripId}/invites`, member)).status).toBe(403);
+    expect((await s.call("DELETE", `/trips/${s.tripId}/invites/${openLinks[0].id}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/auth/invites/${stray.token}`, null)).status).toBe(410);
     expect((await s.call("DELETE", `/trips/${s.tripId}`, member)).status).toBe(403);
     const shelf = (await s.call("GET", "/trips", s.owner)).body.trips.find((x: { kind: string }) => x.kind === "watchlist").id as string;
     expect((await s.call("DELETE", `/trips/${shelf}`, s.owner)).body.error.code).toBe("watchlist");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeLink, embeddedTarget, urlForStay } from "../src/import/url.js";
+import { analyzeLink, embeddedTarget, urlForStay, personsAsked } from "../src/import/url.js";
 
 // The links from the feasibility test of 15.11.2026.
 const AIRBNB = "https://www.airbnb.de/rooms/18726447?unique_share_id=0aadc6e1-9c6f-49a2-88a1-3cc52c53796d&viralityEntryPoint=1&s=76&check_in=2027-08-14&check_out=2027-08-28&guests=1&adults=1";
@@ -79,9 +79,14 @@ describe("urlForStay", () => {
   it("turns a Check24 search window into the trip's fixed stay", () => {
     const link = analyzeLink(CHECK24);
     const url = new URL(urlForStay(link, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 4, children: 2 }));
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({ hotelId: "12912", departureDate: "2027-05-15", returnDate: "2027-05-29", days: "14", roomAllocation: "A-A-A-A-7-11", pageArea: "package" });
-    // Another number of children than in the shared link: their ages are not known.
-    expect(new URL(urlForStay(link, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 2, children: 3 })).searchParams.get("roomAllocation")).toBe("A-A-10-10-10");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ hotelId: "12912", departureDate: "2027-05-15", returnDate: "2027-05-29", days: "14", roomAllocation: "A-A-7-11", pageArea: "package" });
+    // The rooms of the shared link stay: a hotel has no room for the whole party, and the price is for those in the link.
+    expect(personsAsked(link, { adults: 4, children: 4 })).toBe(4);
+    // Without rooms in the link the trip's party is asked; the children's ages are not known.
+    const bare = analyzeLink("https://urlaub.check24.de/suche/hotelinformation?hotelId=5429&departureDate=2027-05-15&returnDate=2027-05-30&days=11-15");
+    expect(bare).toMatchObject({ platform: "check24", externalId: "5429", searchWindow: true });
+    expect(new URL(urlForStay(bare, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 2, children: 3 })).searchParams.get("roomAllocation")).toBe("A-A-10-10-10");
+    expect(analyzeLink("https://c.24.de/pr/AbC123").isShortLink).toBe(true);
   });
 
   it("leaves the link alone without dates or for platforms without date parameters", () => {

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
 import { activityEvents, dateOptions, documents, groupMembers, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
-import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
+import { HttpError, effectiveRole, notFound, parseBody, requireMember, runsTrip, userId, uuidParam } from "../http.js";
 import { ensureGroupShelf, onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT");
@@ -144,6 +144,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       .select({
         trip: trips,
         role: tripMembers.role,
+        runs: runsTrip,
         candidates: sql<number>`(select count(*)::int from ${tripListings} where ${tripListings.tripId} = ${trips.id})`,
         favorites: sql<number>`(select count(*)::int from ${tripListings} where ${tripListings.tripId} = ${trips.id} and ${tripListings.status} = 'favorite')`,
       })
@@ -159,7 +160,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     };
     const named = await db.select({ id: groups.id, name: groups.name }).from(groups);
     const groupName = (id: string | null) => named.find((g) => g.id === id)?.name ?? null;
-    return { trips: rows.map((r) => ({ ...r.trip, groupName: groupName(r.trip.groupId), currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
+    return { trips: rows.map((r) => ({ ...r.trip, groupName: groupName(r.trip.groupId), currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: effectiveRole(r.role, r.runs), candidateCount: r.candidates, favoriteCount: r.favorites })) };
   });
 
   app.get("/trips/:tripId", async (req) => {
@@ -277,6 +278,30 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const expiresAt = new Date(Date.now() + body.expiresInDays * 86_400_000);
     await db.insert(invites).values({ tripId, tokenHash: hashToken(token), role: body.role, createdBy: uid, expiresAt, maxUses: body.maxUses });
     return reply.code(201).send({ token, url: `${ctx.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/einladung/${token}`, role: body.role, expiresAt, maxUses: body.maxUses });
+  });
+
+  /** Links to this trip that still work, so one that went astray can be taken back. The links themselves cannot be shown again. */
+  app.get("/trips/:tripId/invites", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const open = await db
+      .select({ id: invites.id, role: invites.role, createdAt: invites.createdAt, expiresAt: invites.expiresAt, maxUses: invites.maxUses, usedCount: invites.usedCount, createdBy: users.name })
+      .from(invites)
+      .innerJoin(users, eq(users.id, invites.createdBy))
+      .where(and(eq(invites.tripId, tripId), sql`${invites.usedCount} < ${invites.maxUses}`, sql`${invites.expiresAt} > now()`))
+      .orderBy(asc(invites.createdAt));
+    return { invites: open };
+  });
+
+  app.delete("/trips/:tripId/invites/:inviteId", async (req, reply) => {
+    const uid = userId(req);
+    const params = req.params as { tripId: string; inviteId: string };
+    const tripId = uuidParam(params.tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const gone = await db.delete(invites).where(and(eq(invites.id, uuidParam(params.inviteId)), eq(invites.tripId, tripId))).returning({ id: invites.id });
+    if (!gone.length) throw notFound();
+    return reply.code(204).send();
   });
 
   app.get("/trips/:tripId/activity", async (req) => {

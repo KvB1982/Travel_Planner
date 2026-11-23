@@ -72,7 +72,7 @@ function hostMatches(host: string, ...names: string[]): boolean {
   return names.some((n) => host === n || host.endsWith(`.${n}`) || host.startsWith(`${n}.`) || host.includes(`.${n}.`));
 }
 
-const SHORT_LINK_HOSTS = [/\.onelink\.me$/, /^abnb\.me$/, /^t\.vrbo\.io$/, /^bit\.ly$/, /^tinyurl\.com$/, /\.app\.link$/, /\.page\.link$/];
+const SHORT_LINK_HOSTS = [/\.onelink\.me$/, /^abnb\.me$/, /^t\.vrbo\.io$/, /^bit\.ly$/, /^tinyurl\.com$/, /\.app\.link$/, /\.page\.link$/, /^c\.24\.de$/];
 
 export function isShortLinkHost(host: string): boolean {
   return SHORT_LINK_HOSTS.some((re) => re.test(host));
@@ -290,6 +290,12 @@ export function analyzeLink(raw: string): LinkInfo {
   return { ...base, ...(found ?? {}) };
 }
 
+/** How many people the price of `urlForStay` is for: the trip's party, except where the link keeps its own rooms. */
+export function personsAsked(info: LinkInfo, stay: Pick<Stay, "adults" | "children">): number | null {
+  const of = (s: Pick<Stay, "adults" | "children">) => (s.adults !== null ? s.adults + (s.children ?? 0) : null);
+  return info.platform === "check24" ? (of(info.stay) ?? of(stay)) : of(stay);
+}
+
 /**
  * Rebuild a link with the dates and party of the trip, so the price read from
  * the page belongs to the trip and not to whatever the sharer had selected.
@@ -322,7 +328,8 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       p.set("departureDate", stay.startDate);
       p.set("returnDate", stay.endDate);
       if (nights) p.set("days", String(nights));
-      if (stay.adults !== null) {
+      // A hotel sells rooms, not the house: the rooms the sharer chose stay as they are, and the price is theirs.
+      if (stay.adults !== null && !p.get("roomAllocation")) {
         // The link wants every child's age. Those of the shared link serve where the number fits; otherwise a school child.
         const known = (p.get("roomAllocation") ?? "").split(/[-,]/).filter((x) => /^\d+$/.test(x));
         const children = stay.children ?? 0;
