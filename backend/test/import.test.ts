@@ -148,6 +148,22 @@ describe("what real pages taught us", () => {
     expect(photos[1]!.caption).toBe("Zimmer 2");
   });
 
+  it("keeps the larger of two Check24 sizes, drops maps and guests' snapshots, and asks Novasol for the largest step", () => {
+    const c = "https://cdn1.urlaub.check24.de";
+    const state = { hotel: { images: [
+      `${c}/size=335c220/di=3/nfc=200/source=aHR0cHM6Ly9pbWFnZXMuZXhhbXBsZS50ZXN0L2VpLzEvMC5qcGc=!2769da/picture.jpg?cts_c=gallery`,
+      `${c}/size=625c440/di=3/nfc=200/source=aHR0cHM6Ly9pbWFnZXMuZXhhbXBsZS50ZXN0L2VpLzEvMC5qcGc=!1a2e24/picture.jpg?cts_c=gallery`,
+      `${c}/size=784t1184/di=3/source=aHR0cHM6Ly9tYXBzLmdvb2dsZWFwaXMuY29tL21hcHMvYXBpL3N0YXRpY21hcD9jZW50ZXI9MSwy!aaaaaa/picture.jpg`,
+      `${c}/di=3/nfc=200/source=aHR0cHM6Ly9idWNrZXQuZXhhbXBsZS50ZXN0L2N0cy1yYXRpbmdzL2FiYy5qcGc=!bbbbbb/picture.jpg`,
+      "https://image.novasol.com/pic/600/cld/cld520_bed_07.jpg",
+      "https://image.novasol.com/pic/1024/cld/cld520_bed_07.jpg",
+    ] } };
+    const blocks = extractBlocks(`<html><body><script id="js-hotel-data" type="application/json">${JSON.stringify(state)}</script></body></html>`);
+    expect(blocks.photos.map((p) => p.url)).toEqual([`${c}/size=625c440/di=3/nfc=200/source=aHR0cHM6Ly9pbWFnZXMuZXhhbXBsZS50ZXN0L2VpLzEvMC5qcGc=!1a2e24/picture.jpg?cts_c=gallery`, "https://image.novasol.com/pic/1024/cld/cld520_bed_07.jpg"]);
+    const photos = profileFromBlocks(blocks, "hotel").profile.photos;
+    expect(photos[1]).toMatchObject({ url: "https://image.novasol.com/pic/2048/cld/cld520_bed_07.jpg", thumbUrl: "https://image.novasol.com/pic/600/cld/cld520_bed_07.jpg" });
+  });
+
   it("hands a huge page state to the model as readable lines instead of its first slice", () => {
     const filler = Array.from({ length: 400 }, (_, i) => ({ __typename: "LoggingContext", loggingId: `evt_${i}_${"x".repeat(40)}`, icon: "SYSTEM_CHECK", sectionId: `SECTION_${i}` }));
     const state = { niobe: { filler, sections: [{ title: "Schlafbereiche", items: [{ title: "Schlafzimmer 1", subtitle: "1 Doppelbett" }] }, { amenities: [{ title: "Geschirrspüler", available: true }, { title: "Geschirrspüler" }] }, { bedroomCount: 4, personCapacity: 8, layoutWidth: 1200 }] } };

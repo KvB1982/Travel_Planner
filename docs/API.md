@@ -502,6 +502,10 @@ Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfüg
 
 Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung ist die Hotelnummer). Angebote, die vorher als `other` hereinkamen, stellt der Server beim nächsten `check`, `refresh` oder `capture` selbst um. Preise gibt es nur vom Gerät: `checkUrl` trägt den Zeitraum der Reise als festen Aufenthalt. Die Zimmerbelegung des geteilten Links bleibt dabei erhalten, weil ein Hotel kein Zimmer für die ganze Gruppe hat; `price.persons` nennt deshalb die Personen aus dem Link, nicht die der Reise.
 
+## Bildgrößen
+
+Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220` … mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
+
 ## Große Seiten vom Gerät
 
 Eine vom Gerät gelesene Seite (`html` bei Import, `capture`, weiterer Quelle) darf samt Umschlag höchstens 12 MB groß sein; darüber antwortet der Server mit 413 `too_large`. Die App sollte die Seite vor dem Senden ausdünnen. Der Server liest nur: `<meta>`, sichtbaren Text, `<img>` mit Adresse, `<script>` mit `type` `application/json` oder `application/ld+json` (auch mit `id` wie `__NEXT_DATA__`, `js-hotel-data`, `data-deferred-state`) und eingebettete Skripte, die `window.__NAME__ =` zuweisen. Gefahrlos entfernen lassen sich also: `<style>`, `<svg>`, `<template>`, `<iframe>`, `<noscript>`, `<link>`, Kommentare, Skripte mit `src`, eingebettete Skripte ohne `window.__`, sowie `data:`-Adressen in Attributen und `style`-Attribute.
