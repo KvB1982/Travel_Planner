@@ -16,3 +16,11 @@ it("puts two readings together: the newer leads, the larger rendition stays, old
   expect(joined.map((p) => p.url)).toEqual([`${c}/2048/a.jpg`, `${c}/1024/b.jpg`, `${c}/600/c.jpg`]);
   expect(sameIn(`${c}/600/a.jpg`, joined)).toBe(`${c}/2048/a.jpg`);
 });
+
+it("drops Check24 previews once a gallery of sharp pictures is there", () => {
+  const c = "https://cdn1.urlaub.check24.de";
+  const sharp = Array.from({ length: 10 }, (_, i) => ({ url: `${c}/size=1920x/di=3/source=big${i}!a/picture.jpg` }));
+  const small = [{ url: `${c}/size=335c220/di=3/source=old1!a/picture.jpg` }, { url: `${c}/size=800x/di=3/source=mid1!a/picture.jpg` }];
+  expect(joinPhotos(sharp, small).map((p) => p.url)).toEqual([...sharp.map((p) => p.url), small[1]!.url]);
+  expect(joinPhotos(sharp.slice(0, 3), small)).toHaveLength(5);
+});

@@ -267,7 +267,11 @@ export function joinPhotos<P extends { url: string }>(newer: P[], older: P[], li
     ranks.push(k.rank);
     out.push(photo);
   }
-  return out;
+  // Check24 previews an earlier reading left behind and no later one found large: beside a gallery of
+  // sharp pictures they only look broken.
+  const preview = (p: P, i: number) => /check24\./.test(p.url) && ranks[i]! < 600;
+  const sharp = out.filter((p, i) => /check24\./.test(p.url) && ranks[i]! >= 1000 && ranks[i]! < 10_000).length;
+  return sharp >= 10 ? out.filter((p, i) => !preview(p, i)) : out;
 }
 
 /** The rendition of this picture that a list holds, which may be a larger one. */
