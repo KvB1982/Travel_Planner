@@ -603,12 +603,25 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
     }
 
+    /// Check24 hands an iPad its desktop page, whose gallery only ever loads small previews (335 wide).
+    /// Its phone page loads the large versions, at any width. So Check24 is always read as a phone would.
+    static func wantsPhonePage(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host.contains("check24") || host == "24.de" || host.hasSuffix(".24.de")
+    }
+
+    static let phoneAgent: String = {
+        let version = UIDevice.current.systemVersion.split(separator: ".").prefix(2)
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(version.joined(separator: "_")) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version.joined(separator: ".")) Mobile/15E148 Safari/604.1"
+    }()
+
     /// The address of the advert as first reached, after the site's own redirects.
     private(set) var advertURL: String?
 
     func load(_ url: URL) {
         advertURL = nil
         isLoading = true
+        webView.customUserAgent = Self.wantsPhonePage(url) ? Self.phoneAgent : nil
         webView.load(URLRequest(url: url))
     }
 
