@@ -298,6 +298,14 @@ describe("working with candidates", () => {
     const list = await s.call("GET", `/trips/${s.tripId}/candidates`, anna);
     expect(list.body.candidates[0].votes).toEqual({ yes: 1, maybe: 0, no: 1, vetoes: 1 });
     expect(list.body.candidates[0].myVote).toMatchObject({ verdict: "no", veto: true });
+
+    // A second tap takes one's own vote back, veto included; nothing to take back is no error.
+    expect((await s.call("DELETE", `/candidates/${id}/vote`, anna)).status).toBe(204);
+    expect((await s.call("DELETE", `/candidates/${id}/vote`, anna)).status).toBe(204);
+    const after = await s.call("GET", `/trips/${s.tripId}/candidates`, anna);
+    expect(after.body.candidates[0].votes).toEqual({ yes: 1, maybe: 0, no: 0, vetoes: 0 });
+    expect(after.body.candidates[0].myVote).toBeNull();
+    await s.call("PUT", `/candidates/${id}/vote`, anna, { verdict: "no", veto: true });
     const detail = await s.call("GET", `/candidates/${id}`, s.owner);
     expect(detail.body.votes.entries.map((v: { name: string }) => v.name).sort()).toEqual(["Anna", "Kristian"]);
   });

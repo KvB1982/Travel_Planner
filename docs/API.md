@@ -77,6 +77,7 @@ Ein Angebot innerhalb einer Reise heißt in der Schnittstelle `candidate`.
 | POST | `/candidates/:id/capture` | Auf dem Gerät ausgelesenen Seiteninhalt nachreichen: `html`. |
 | POST | `/candidates/:id/refresh` | Angebot erneut vom Server abrufen und auswerten (ohne Inhalt). Antwort 202, danach wie beim Import auf `importStatus` warten. 429, wenn der letzte Abruf weniger als eine Minute her ist. |
 | PUT | `/candidates/:id/vote` | Abstimmen: `verdict` (`yes`, `maybe`, `no`), `veto`. |
+| DELETE | `/candidates/:id/vote` | Eigene Stimme samt Veto zurücknehmen. 204, auch wenn es keine gab. Erlaubt ist es jedem, der abstimmen darf. |
 | POST | `/candidates/:id/comments` | Kommentar: `body`. |
 | POST | `/candidates/:id/prices` | Preis von Hand festhalten: `totalCents`, `startDate`, `endDate`, `persons`, `breakdown[]`. |
 
@@ -504,7 +505,7 @@ Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung
 
 ## Bildgrößen
 
-Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220` … mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
+Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) und Casamundo (`/large/`) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220` … mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
 
 ## Große Seiten vom Gerät
 

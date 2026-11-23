@@ -751,6 +751,14 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     return { vote };
   });
 
+  /** Take one's own vote back, veto included. Nothing to take back is no error. */
+  app.delete("/candidates/:candidateId/vote", async (req, reply) => {
+    const uid = userId(req);
+    const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid);
+    await db.delete(votes).where(and(eq(votes.tripListingId, candidate.id), eq(votes.userId, uid)));
+    return reply.code(204).send();
+  });
+
   app.post("/candidates/:candidateId/comments", async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid);

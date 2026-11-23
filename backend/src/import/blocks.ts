@@ -245,6 +245,10 @@ export function originalOf(url: string): string {
       u.searchParams.delete("im_q");
       return u.toString();
     }
+    if (u.hostname === "cdn.hometogo.net" && u.pathname.startsWith("/medium/")) {
+      u.pathname = u.pathname.replace(/^\/medium\//, "/large/");
+      return u.toString();
+    }
     if (u.hostname === "image.novasol.com" && /^\/pic\/\d+\//.test(u.pathname)) {
       // Fixed steps only; this is the largest the service hands out.
       u.pathname = u.pathname.replace(/^\/pic\/\d+\//, "/pic/2048/");
