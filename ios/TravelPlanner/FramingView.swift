@@ -12,7 +12,10 @@ struct FramingSections: View {
     /// Sheets and alerts live on the screen, not on the rows: attached to rows they open unreliably.
     @Binding var sheet: FramingSheet?
     @Binding var removing: DateOption?
+    /// A change of where the trip belongs, waiting to be confirmed on the screen.
+    @Binding var rehoming: TripHome?
     @State private var events: [ActivityEvent] = []
+    @State private var groups: [TravelGroup] = []
     @State private var allEvents = false
 
     private var trip: Trip { detail.trip }
@@ -27,6 +30,21 @@ struct FramingSections: View {
                 LabeledContent("Budget gesamt", value: trip.budgetTotalCents.map { Format.euro(cents: $0) } ?? "nicht festgelegt")
                 if let window = trip.flexWindow {
                     LabeledContent("Flexibel", value: window.summary)
+                }
+                if detail.role == .organizer, !groups.isEmpty {
+                    // Where the trip belongs; changing it asks first, because people lose or gain access.
+                    Menu {
+                        ForEach(groups.filter { $0.id != trip.groupId }) { group in
+                            Button("In „\(group.name)“ legen", systemImage: "person.3") { rehoming = TripHome(groupID: group.id, groupName: group.name) }
+                        }
+                        if trip.groupId != nil {
+                            Button("Privat machen", systemImage: "lock") { rehoming = TripHome(groupID: nil, groupName: nil) }
+                        }
+                    } label: {
+                        LabeledContent("Gehört zu", value: trip.groupName ?? "Privat")
+                    }
+                } else if let group = trip.groupName {
+                    LabeledContent("Gehört zu", value: group)
                 }
                 if detail.role == .organizer {
                     Button("Rahmen bearbeiten", systemImage: "pencil") { sheet = .edit }
@@ -95,6 +113,7 @@ struct FramingSections: View {
         .task(id: model.revision) {
             // The chronicle is an extra: when it cannot be read, the frame still shows.
             if let list = try? await model.backend?.activity(tripId: trip.id) { events = list }
+            groups = (try? await model.backend?.groups()) ?? []
         }
     }
 
@@ -110,6 +129,13 @@ struct FramingSections: View {
               let count = Calendar.current.dateComponents([.day], from: start, to: end).day, count > 0 else { return nil }
         return count == 1 ? "1 Nacht" : "\(count) Nächte"
     }
+}
+
+/// Where a trip is to go: a group, or private with nil.
+struct TripHome: Identifiable {
+    var groupID: String?
+    var groupName: String?
+    var id: String { groupID ?? "private" }
 }
 
 enum FramingSheet: String, Identifiable {
@@ -248,6 +274,7 @@ struct FramingPresenter: ViewModifier {
     let trip: Trip?
     @Binding var sheet: FramingSheet?
     @Binding var removing: DateOption?
+    @Binding var rehoming: TripHome?
     let run: (@escaping (any TravelBackend) async throws -> Void) -> Void
 
     func body(content: Content) -> some View {
@@ -263,6 +290,17 @@ struct FramingPresenter: ViewModifier {
                         run { _ = try await $0.addDateOption(tripId: tripID, label: label, startDate: start, endDate: end) }
                     }
                 }
+            }
+            .alert(rehoming?.groupID == nil ? "Reise privat machen?" : "Reise in die Gruppe legen?",
+                   isPresented: Binding(get: { rehoming != nil }, set: { if !$0 { rehoming = nil } }), presenting: rehoming) { home in
+                Button(home.groupID == nil ? "Privat machen" : "In die Gruppe legen", role: home.groupID == nil ? .destructive : nil) {
+                    run { try await $0.setTripGroup(tripId: tripID, groupId: home.groupID) }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { home in
+                Text(home.groupID == nil
+                     ? "Die Mitglieder von „\(trip?.groupName ?? "der Gruppe")“ verlieren sofort den Zugriff auf diese Reise, auch wer zusätzlich einzeln eingeladen war. Es bleiben du und wer die Reise organisiert. Stimmen und Kommentare bleiben stehen."
+                     : "Alle Mitglieder von „\(home.groupName ?? "der Gruppe")“ sehen die Reise dann und können mitmachen." + (trip?.groupId != nil ? " Die Mitglieder der bisherigen Gruppe verlieren den Zugriff." : ""))
             }
             .alert("Zeitraum entfernen?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { option in
                 Button("Entfernen", role: .destructive) { run { try await $0.removeDateOption(tripId: tripID, optionId: option.id) } }

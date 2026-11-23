@@ -29,6 +29,7 @@ struct CandidateListView: View {
     @State private var planSheet: PlanSheet?
     @State private var houseEditing: HouseBook?
     @State private var removingPeriod: DateOption?
+    @State private var rehoming: TripHome?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
     @State private var phasePicked = false
@@ -124,7 +125,7 @@ struct CandidateListView: View {
             PitchSections(tripID: tripID, role: detail.role, candidates: candidates, persons: detail.trip.persons, selection: $selection)
         case .framing:
             FramingSections(detail: detail, showCriteria: { showCriteria = true }, invite: { createInvite() },
-                            showLedger: { showLedger = true }, sheet: $framingSheet, removing: $removingPeriod)
+                            showLedger: { showLedger = true }, sheet: $framingSheet, removing: $removingPeriod, rehoming: $rehoming)
         case .booking:
             BookingSections(detail: detail, candidates: candidates, requests: $bookingRequests)
         case .preparation:
@@ -316,7 +317,7 @@ struct CandidateListView: View {
         }
         .modifier(PlanPresenter(tripID: tripID, sheet: $planSheet, run: frame))
         .modifier(BookingPresenter(tripID: tripID, requests: $bookingRequests, run: frame))
-        .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, run: frame))
+        .modifier(FramingPresenter(tripID: tripID, trip: detail?.trip, sheet: $framingSheet, removing: $removingPeriod, rehoming: $rehoming, run: frame))
         .sheet(isPresented: $showLedger) { LedgerView(tripID: tripID, role: detail?.role ?? .guest, members: detail?.members ?? []) }
         .fullScreenCover(isPresented: $showPresentation) {
             PresentationView(candidates: presentable, persons: detail?.trip.persons)
