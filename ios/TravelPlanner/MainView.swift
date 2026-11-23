@@ -37,6 +37,9 @@ struct TripListView: View {
     @State private var error: String?
     @State private var showNewTrip = false
     @State private var showSettings = false
+    @State private var showRedeem = false
+    @State private var inviteText = ""
+    @State private var redeemNote: String?
 
     var body: some View {
         List(selection: $selection) {
@@ -95,13 +98,33 @@ struct TripListView: View {
         .navigationTitle("Reisen")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Reise anlegen", systemImage: "plus") { showNewTrip = true }
+                Menu {
+                    Button("Reise anlegen", systemImage: "suitcase") { showNewTrip = true }
+                    Button("Einladung einlösen", systemImage: "envelope.open") { showRedeem = true }
+                } label: {
+                    Label("Hinzufügen", systemImage: "plus")
+                }
             }
             ToolbarItem(placement: .topBarLeading) {
                 Button("Einstellungen", systemImage: "gearshape") { showSettings = true }
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .alert("Einladung einlösen", isPresented: $showRedeem) {
+            TextField("https://…/einladung/…", text: $inviteText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+            Button("Abbrechen", role: .cancel) { inviteText = "" }
+            Button("Einlösen") { redeem() }
+        } message: {
+            Text("Füge den Einladungslink ein, den du für eine weitere Reise bekommen hast. Du bleibst mit deinem Konto angemeldet.")
+        }
+        .alert("Einladung", isPresented: Binding(get: { redeemNote != nil }, set: { if !$0 { redeemNote = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(redeemNote ?? "")
+        }
         .sheet(isPresented: $showNewTrip) {
             NewTripView { trip in
                 model.dataChanged()
@@ -110,6 +133,20 @@ struct TripListView: View {
         }
         .refreshable { await load() }
         .task(id: model.revision) { await load() }
+    }
+
+    private func redeem() {
+        let text = inviteText
+        inviteText = ""
+        Task {
+            do {
+                let trip = try await model.redeem(inviteText: text)
+                await load()
+                if let trip { selection = trip } else { redeemNote = "Die Einladung ist eingelöst. Die Reise steht jetzt in deiner Liste." }
+            } catch {
+                redeemNote = model.message(for: error)
+            }
+        }
     }
 
     private func load() async {

@@ -59,6 +59,22 @@ final class AppModel {
         try signIn(server: link.serverURL, result: result)
     }
 
+    /// Redeems an invite to a further trip while signed in. Returns the trip it leads to, when the server names it.
+    func redeem(inviteText: String) async throws -> String? {
+        guard let link = InviteLink(inviteText) else {
+            throw APIError(status: 0, code: "bad_invite", message: "Das ist kein Einladungslink. Er sieht so aus: https://…/einladung/…")
+        }
+        guard let client = backend as? APIClient else {
+            throw APIError(status: 0, code: "demo", message: "Mit den Beispieldaten lässt sich keine Einladung einlösen.")
+        }
+        guard link.serverURL.host() == client.baseURL.host() else {
+            throw APIError(status: 0, code: "other_server", message: "Diese Einladung gehört zu einem anderen Server (\(link.serverURL.host() ?? "?")). Du bist bei \(client.baseURL.host() ?? "?") angemeldet.")
+        }
+        let result = try await client.acceptInvite(token: link.token, name: nil, deviceName: nil)
+        dataChanged()
+        return result.tripId
+    }
+
     /// Creates the very first account on a fresh server.
     func bootstrap(server: String, secret: String, name: String) async throws {
         var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,13 +86,9 @@ final class AppModel {
         try signIn(server: url, result: result)
     }
 
-    /// Opens the account this Apple ID is linked to, on the given server.
-    func signInWithApple(server: String, identityToken: String, nonce: String) async throws {
-        var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.contains("://") { text = "https://" + text }
-        guard let url = URL(string: text), url.host() != nil else {
-            throw APIError(status: 0, code: "bad_url", message: "Die Serveradresse ist ungültig.")
-        }
+    /// Opens the account this Apple ID is linked to. The server is the one used last, else the built-in one.
+    func signInWithApple(identityToken: String, nonce: String) async throws {
+        let url = store.serverURL ?? ServerDefaults.url
         do {
             let result = try await APIClient(baseURL: url).signInWithApple(identityToken: identityToken, nonce: nonce, deviceName: UIDevice.current.name)
             try signIn(server: url, result: result)

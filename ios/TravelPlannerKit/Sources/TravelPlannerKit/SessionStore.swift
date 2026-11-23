@@ -114,3 +114,9 @@ public enum LinkFinder {
         return nil
     }
 }
+
+/// Until the app is used with more than one server, the address of the family's server is built in,
+/// so nobody has to type it when signing in.
+public enum ServerDefaults {
+    public static let url = URL(string: "https://reisen.tail39c0d8.ts.net")!
+}

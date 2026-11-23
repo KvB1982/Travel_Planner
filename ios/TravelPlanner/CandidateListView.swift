@@ -48,6 +48,8 @@ struct CandidateListView: View {
     @State private var deviceTotal = 0
     /// How many of them were actually read and sent; the rest were cancelled.
     @State private var deviceDone = 0
+    /// New adverts are being read out of sight right now; the hidden page is busy.
+    @State private var readingNew = false
     /// Offers whose page went to the server a moment ago: when it was sent. Until the server has read it,
     /// the list says so instead of showing the old state as if nothing had happened.
     @State private var evaluating: [String: Date] = [:]
@@ -351,12 +353,14 @@ struct CandidateListView: View {
         .onChange(of: periodID) { model.dataChanged() }
         .task(id: model.revision) {
             await load()
+            readNewOnes()
             // Imports finish in the background on the server; look again until none is pending.
             while !Task.isCancelled, candidates.contains(where: { $0.importStatus == .pending }) || !evaluating.isEmpty {
                 try? await Task.sleep(for: .seconds(3))
                 if Task.isCancelled { break }
                 await load()
                 settleEvaluating()
+                readNewOnes()
             }
         }
     }
@@ -424,8 +428,60 @@ struct CandidateListView: View {
 
     /// Has the server check every offer for the trip's dates and party, then reads on this device what the
     /// server cannot see, one advert after the other.
+    /// Adverts already tried out of sight since the app started, so a page that cannot be read is not tried over and over.
+    private static var triedOutOfSight: Set<String> = []
+
+    /// New adverts the server could not read itself are read here on the device, out of sight, without being asked:
+    /// the full page with up to the usual number of photos and the reviews. A page that asks "bot or human?" is left
+    /// for the person; it stays marked "Details fehlen noch" and can be opened by hand.
+    private func readNewOnes() {
+        guard !model.isDemo, checking == nil, !readingNew, let backend = model.backend else { return }
+        let fresh = candidates.filter {
+            $0.needsDevice == true && ($0.importStatus == .partial || $0.importStatus == .failed) && !Self.triedOutOfSight.contains($0.id)
+        }
+        guard !fresh.isEmpty else { return }
+        readingNew = true
+        for candidate in fresh { Self.triedOutOfSight.insert(candidate.id) }
+        Task {
+            defer { readingNew = false }
+            for candidate in fresh {
+                // The page for the dates of the trip, when the server names one: then the price comes along.
+                var address = candidate.checkUrl
+                if address == nil { address = try? await backend.candidate(candidate.id).sources.first?.url }
+                guard let address, let url = URL(string: address) else { continue }
+                hiddenPage.load(url)
+                for _ in 0..<40 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if !hiddenPage.isLoading { break }
+                }
+                try? await Task.sleep(for: .seconds(2))
+                let platform = candidate.listing.platforms.first ?? "?"
+                if await hiddenPage.isChallenge() {
+                    WebPage.log.info("Neues Inserat \(platform, privacy: .public): Sicherheitsabfrage, bleibt für die Person")
+                    continue
+                }
+                if candidate.checkUrl != nil { await hiddenPage.waitForPrice() }
+                guard let captured = try? await hiddenPage.capture(maxPictures: WebPage.usualPictures), captured.html.count >= 500 else { continue }
+                if await hiddenPage.isChallenge() { continue }
+                do {
+                    try await backend.capture(candidateId: candidate.id, html: captured.html, sourceId: nil, forTrip: false,
+                                              url: hiddenPage.advertURL ?? address, dateOptionId: periodID)
+                    WebPage.log.info("Neues Inserat \(platform, privacy: .public): \(captured.pictures) Bilder, \(captured.reviews) Bewertungen gesendet")
+                    model.dataChanged()
+                } catch {
+                    if let api = error as? APIError, api.isUnauthorized || api.code == "daily_limit" { break }
+                }
+            }
+            hiddenPage.load(URL(string: "about:blank")!)
+        }
+    }
+
     private func checkAll() {
         guard let backend = model.backend else { return }
+        guard !readingNew else {
+            notice = "Die App liest gerade neue Inserate im Hintergrund. Bitte starte die Prüfung in einer Minute noch einmal."
+            return
+        }
         checking = "alle Angebote"
         Task {
             do {

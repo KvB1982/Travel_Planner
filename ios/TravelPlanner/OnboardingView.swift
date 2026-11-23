@@ -8,7 +8,6 @@ struct OnboardingView: View {
     @State private var name = ""
     @State private var server = ""
     @State private var secret = ""
-    @State private var appleServer = ""
     @State private var busy = false
     @State private var error: String?
 
@@ -38,15 +37,10 @@ struct OnboardingView: View {
                 }
 
                 Section {
-                    TextField("Serveradresse", text: $appleServer)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
                     AppleButton { token, nonce in
-                        run { try await model.signInWithApple(server: appleServer, identityToken: token, nonce: nonce) }
+                        run { try await model.signInWithApple(identityToken: token, nonce: nonce) }
                     } failed: { error = $0 }
-                    .disabled(busy || appleServer.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .opacity(appleServer.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                    .disabled(busy)
                 } header: {
                     Text("Schon ein Konto?")
                 } footer: {
@@ -81,7 +75,7 @@ struct OnboardingView: View {
                 }
             }
             .navigationTitle("Travel Planner")
-            .onAppear { if appleServer.isEmpty, let known = model.serverURL { appleServer = known.absoluteString } }
+            .onAppear { if server.isEmpty { server = (model.serverURL ?? ServerDefaults.url).absoluteString } }
             .overlay {
                 if busy { ProgressView().controlSize(.large) }
             }

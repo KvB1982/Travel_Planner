@@ -34,6 +34,8 @@ struct CaptureView: View {
     @State private var sending = false
     /// Browse the gallery and send its photos. Off by default when the offer has its photos already.
     @State private var readPictures = true
+    /// Read the whole gallery instead of stopping at the usual number.
+    @State private var allPictures = false
     @State private var confirmFewPictures = false
     /// The site showed a "bot or human?" question; the automatic run has stopped and waits for the person.
     @State private var gate = false
@@ -68,6 +70,11 @@ struct CaptureView: View {
                     }
                     if knownPictures >= 5, !automatic {
                         Toggle("Bilder neu einlesen (\(knownPictures) sind schon da)", isOn: $readPictures)
+                            .font(.footnote)
+                            .disabled(sending)
+                    }
+                    if readPictures, !automatic {
+                        Toggle("Alle Bilder der Galerie laden (sonst höchstens \(WebPage.usualPictures))", isOn: $allPictures)
                             .font(.footnote)
                             .disabled(sending)
                     }
@@ -142,7 +149,7 @@ struct CaptureView: View {
                     gate = true
                     throw APIError(status: 0, code: "no_dates", message: "Die Seite hat den Zeitraum der Reise nicht übernommen und zeigt keinen Preis dafür. Stelle Zeitraum und Gäste hier auf der Seite selbst ein und tippe dann auf „Übernehmen“. Oder brich ab, dann bleibt dieses Angebot ungeprüft.")
                 }
-                let captured = try await page.capture(quick: automatic, gallery: readPictures)
+                let captured = try await page.capture(quick: automatic, gallery: readPictures, maxPictures: allPictures ? nil : WebPage.usualPictures)
                 if await page.isChallenge() {
                     gate = true
                     throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“.")
@@ -150,7 +157,7 @@ struct CaptureView: View {
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
-                if readPictures, let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < expectedPictures {
+                if readPictures, let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < (allPictures ? expectedPictures : min(expectedPictures, WebPage.usualPictures)) {
                     held = captured
                     sending = false
                     confirmFewPictures = true
@@ -186,6 +193,9 @@ struct CaptureView: View {
 @MainActor
 @Observable
 final class WebPage: NSObject, WKNavigationDelegate {
+    /// How many photos of a gallery are read without being asked for more.
+    static let usualPictures = 30
+
     static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Auslesen")
     let webView: WKWebView
     var isLoading = false
@@ -290,6 +300,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
     /// and the collector sees it. Stops when no new photo has appeared for a while.
     private static let browseGallery = """
     function count() { try { return window.__tpCollect().filter(function (p) { return p.gallery; }).length; } catch (e) { return 0; } }
+    // Enough is enough: browsing stops once this many photos are in.
+    function full() { return count() >= (window.__tpMax || 100000); }
     function wait(ms) { return new Promise(function (done) { setTimeout(done, ms); }); }
     function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !el.disabled; }
     function staysHere(el) {
@@ -378,7 +390,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
 
     // 2. Flip and scroll until nothing new arrives.
     var still = 0, last = count();
-    for (var round = 0; round < 200 && still < 8; round++) {
+    for (var round = 0; round < 200 && still < 8 && !full(); round++) {
       // The gallery is the layer over the page with the most pictures: a dialog, or on sites that do not
       // mark it as one, a box that covers the screen. A cookie banner is such a layer too, but has no pictures.
       var scope = document, most = 0;
@@ -440,7 +452,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
         if (boxesWide[w].scrollWidth > boxesWide[w].clientWidth + 100 && boxesWide[w].querySelectorAll('img').length >= 3 && rows.indexOf(boxesWide[w]) < 0) { rows.push(boxesWide[w]); }
       }
       var idle = 0, known = count();
-      for (var pass = 0; rows.length > 0 && pass < 150 && idle < 6; pass++, swiped++) {
+      for (var pass = 0; rows.length > 0 && pass < 150 && idle < 6 && !full(); pass++, swiped++) {
         for (var q = 0; q < rows.length; q++) { rows[q].scrollLeft += Math.max(200, rows[q].clientWidth * 0.9); }
         await wait(400);
         var total = count();
@@ -449,7 +461,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
       }
       seen.push('ROWS ' + rows.length + ' after ' + count());
       var quiet = 0, had = count();
-      for (; swiped < 150 && quiet < 6; swiped++) {
+      for (; swiped < 150 && quiet < 6 && !full(); swiped++) {
         var top = document.elementFromPoint(window.innerWidth / 2, hero.getBoundingClientRect().top + hero.getBoundingClientRect().height / 2) || hero;
         await swipeLeft(top);
         await wait(450);
@@ -692,7 +704,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
     /// `quick` reads only the page itself, for a price and availability check: no gallery, no reviews.
     /// `gallery: false` leaves the photos alone, for an offer whose photos the server already has: the gallery is
     /// not browsed and no photos are sent, so the stored ones stay as they are.
-    func capture(quick: Bool = false, gallery readGallery: Bool = true) async throws -> Captured {
+    /// `maxPictures` ends the browsing once that many photos of the gallery are in; nil reads them all.
+    func capture(quick: Bool = false, gallery readGallery: Bool = true, maxPictures: Int? = nil) async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()
@@ -709,8 +722,18 @@ final class WebPage: NSObject, WKNavigationDelegate {
         }
 
         progress = "Blättere die Bildergalerie durch …"
+        _ = try? await webView.evaluateJavaScript("window.__tpMax = \(maxPictures ?? 100_000); true")
         let gallery = await run(Self.browseGallery)
         merge(gallery.pictures, into: &photos)
+        if let maxPictures {
+            // The browsing stops a little late; what goes to the server is cut to the limit, the advert's own first.
+            var kept = 0
+            photos = photos.filter { photo in
+                guard photo.gallery else { return true }
+                kept += 1
+                return kept <= maxPictures
+            }
+        }
 
         progress = "Klappe die Bewertungen auf …"
         let reviews = await run(Self.expandReviews)
