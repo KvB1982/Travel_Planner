@@ -26,6 +26,8 @@ struct RootView: View {
                 MainView()
             }
         }
+        // A tap on an invitation, in a message or on its web page, opens the app with the link.
+        .onOpenURL { model.open($0) }
         // Links shared through the extension arrive while the app is in the background.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.dataChanged() }

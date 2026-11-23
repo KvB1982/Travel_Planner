@@ -85,8 +85,25 @@ public struct InviteLink: Equatable, Sendable {
     public var serverURL: URL
     public var token: String
 
+    public static let appScheme = "reiseplaner"
+
+    /// The link in the form the organizer shares it, whatever form it arrived in.
+    public var webAddress: String {
+        serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/einladung/" + token
+    }
+
     public init?(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The app's own form, used by the button on the invitation's web page:
+        // `reiseplaner://einladung/<token>?server=https://server`.
+        if let own = URLComponents(string: trimmed), own.scheme == Self.appScheme {
+            guard own.host == "einladung", let token = own.path.split(separator: "/").first.map(String.init), !token.isEmpty,
+                  let address = own.queryItems?.first(where: { $0.name == "server" })?.value,
+                  let server = URL(string: address), server.scheme == "https" || server.scheme == "http", server.host() != nil else { return nil }
+            self.serverURL = server
+            self.token = token
+            return
+        }
         guard let components = URLComponents(string: trimmed), let scheme = components.scheme, let host = components.host,
               scheme == "https" || scheme == "http" else { return nil }
         let parts = components.path.split(separator: "/").map(String.init)

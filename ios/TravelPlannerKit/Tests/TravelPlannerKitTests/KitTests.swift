@@ -1262,4 +1262,16 @@ final class Check24PictureTests: XCTestCase {
         XCTAssertEqual(picked, [address(hotel1, size: "1920x"), address(nested, size: "1600x")])
         XCTAssertEqual(PictureQuality.check24Selection([address(hotel1, size: "450x"), address(nested, size: "450x")], limit: 1).count, 1)
     }
+
+    func testInviteLinkInTheAppsOwnForm() {
+        let own = InviteLink("reiseplaner://einladung/abc123?server=https%3A%2F%2Freisen.example.net")
+        XCTAssertEqual(own?.token, "abc123")
+        XCTAssertEqual(own?.serverURL.absoluteString, "https://reisen.example.net")
+        XCTAssertEqual(own?.webAddress, "https://reisen.example.net/einladung/abc123")
+        XCTAssertEqual(InviteLink("https://reisen.example.net/einladung/abc123")?.webAddress, "https://reisen.example.net/einladung/abc123")
+        XCTAssertNil(InviteLink("reiseplaner://einladung/abc123"))
+        XCTAssertNil(InviteLink("reiseplaner://einladung/?server=https%3A%2F%2Freisen.example.net"))
+        XCTAssertNil(InviteLink("reiseplaner://einladung/abc?server=javascript%3Aalert(1)"))
+        XCTAssertNil(InviteLink("reiseplaner://anderes/abc?server=https%3A%2F%2Fx.example"))
+    }
 }

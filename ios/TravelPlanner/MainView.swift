@@ -253,6 +253,14 @@ struct TripListView: View {
         } message: { trip in
             Text("Stimmen, Kommentare, Kasse, Buchungen, Listen und Dokumente der Reise werden für alle Mitglieder gelöscht. Das lässt sich nicht rückgängig machen. Auf die Merkliste verschobene Angebote kommen dort als neue an, ohne Stimmen. Im Archiv bliebe alles erhalten.")
         }
+        // Already signed in and opened by an invitation: the link is filled in, and one tap on "Einlösen" joins.
+        // Nothing is joined just because a link was tapped somewhere.
+        .onChange(of: model.pendingInvite, initial: true) {
+            guard let link = model.pendingInvite else { return }
+            model.pendingInvite = nil
+            inviteText = link
+            showRedeem = true
+        }
         .alert("Hinweis", isPresented: Binding(get: { redeemNote != nil }, set: { if !$0 { redeemNote = nil } })) {
             Button("OK") {}
         } message: {

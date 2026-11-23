@@ -63,6 +63,15 @@ final class AppModel {
         Task { await loadUser() }
     }
 
+    /// An invitation the app was opened with, as its web address, until it has been joined or redeemed.
+    var pendingInvite: String?
+
+    /// Takes a link the system handed to the app. Only invitations are known; anything else is ignored.
+    func open(_ url: URL) {
+        guard let link = InviteLink(url.absoluteString) else { return }
+        pendingInvite = link.webAddress
+    }
+
     /// Joins with an invite link such as `https://server/einladung/<token>`.
     func join(inviteText: String, name: String) async throws {
         guard let link = InviteLink(inviteText) else {

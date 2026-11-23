@@ -10,6 +10,8 @@ struct OnboardingView: View {
     @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
+    /// The invitation came with the link the app was opened by, so nobody had to paste it.
+    @State private var arrived = false
 
     var body: some View {
         NavigationStack {
@@ -33,7 +35,8 @@ struct OnboardingView: View {
                 } header: {
                     Text("Mit Einladung beitreten")
                 } footer: {
-                    Text("Den Link bekommst du von der Person, die die Reise organisiert.")
+                    Text(arrived ? "Deine Einladung ist schon eingetragen. Gib oben deinen Namen ein und tippe auf „Beitreten“."
+                                 : "Den Link bekommst du von der Person, die die Reise organisiert.")
                 }
 
                 Section {
@@ -76,6 +79,12 @@ struct OnboardingView: View {
             }
             .navigationTitle("Travel Planner")
             .onAppear { if server.isEmpty { server = (model.serverURL ?? ServerDefaults.url).absoluteString } }
+            .onChange(of: model.pendingInvite, initial: true) {
+                guard let link = model.pendingInvite else { return }
+                invite = link
+                arrived = true
+                model.pendingInvite = nil
+            }
             .overlay {
                 if busy { ProgressView().controlSize(.large) }
             }
