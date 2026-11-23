@@ -1094,6 +1094,8 @@ public actor DemoBackend: TravelBackend {
         blocked.candidate.importNote = "Die Plattform lässt den Abruf vom Server nicht zu. Öffne das Angebot in der App, dann werden die Details auf deinem Gerät ausgelesen."
         blocked.sources = [ListingSource(id: "s-c-3", platform: "vrbo", url: "https://www.fewo-direkt.de/", canonicalUrl: "https://www.fewo-direkt.de/")]
         blocked.prices = []
+        // A second region in the same country, so the sample shows how regions are set apart.
+        blocked.listing.profile.region = "Umbrien"
 
         return [
             home("c-1", trip: "t-1", title: "Casa Olivia mit Pool", place: "Castellina in Chianti", country: "Italien", lat: 43.4701, lon: 11.2893,

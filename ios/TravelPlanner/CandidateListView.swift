@@ -157,14 +157,32 @@ struct CandidateListView: View {
         return option?.label ?? option.flatMap { Format.dateRange($0.startDate, $0.endDate) } ?? "Zeitraum"
     }
 
-    /// The head of one country in the list: flag, name in large type, region and number of offers.
-    private func countryHeader(_ group: OfferGroup) -> some View {
+    /// The offers of one country with its regions, the way the list shows them.
+    private struct CountrySection: Identifiable {
+        var country: String?
+        var regions: [OfferGroup]
+        var id: String { country ?? "?" }
+        var count: Int { regions.reduce(0) { $0 + $1.offers.count } }
+    }
+
+    private var countrySections: [CountrySection] {
+        var result: [CountrySection] = []
+        for group in OfferGrouping.groups(visible) {
+            if let index = result.firstIndex(where: { $0.country == group.country }) { result[index].regions.append(group) }
+            else { result.append(CountrySection(country: group.country, regions: [group])) }
+        }
+        return result
+    }
+
+    /// The head of one country in the list: flag, name in large type and number of offers.
+    /// A country with a single region names it here; several regions get dividers below instead.
+    private func countryHeader(_ section: CountrySection) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if let flag = Format.flag(forCountry: group.country) { Text(flag).font(.title2) }
-            Text(group.country ?? "Land unbekannt").font(.title3.weight(.bold)).foregroundStyle(.primary)
-            if let region = group.region { Text(region).font(.subheadline).foregroundStyle(.secondary) }
+            if let flag = Format.flag(forCountry: section.country) { Text(flag).font(.title2) }
+            Text(section.country ?? "Land unbekannt").font(.title3.weight(.bold)).foregroundStyle(.primary)
+            if section.regions.count == 1, let region = section.regions[0].region { Text(region).font(.subheadline).foregroundStyle(.secondary) }
             Spacer()
-            Text(group.offers.count == 1 ? "1 Angebot" : "\(group.offers.count) Angebote")
+            Text(section.count == 1 ? "1 Angebot" : "\(section.count) Angebote")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Color.accentColor.opacity(0.15), in: Capsule())
@@ -173,6 +191,21 @@ struct CandidateListView: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// A region inside a country: a slim line with its name, far less weight than the country above.
+    private func regionDivider(_ name: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(name.uppercased()).font(.caption2.weight(.semibold)).kerning(0.6).foregroundStyle(.secondary)
+            Rectangle().fill(Color(.separator)).frame(height: 0.5)
+            Text("\(count)").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .frame(height: 16)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
+        .listRowSeparator(.hidden)
+        .selectionDisabled()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Region \(name), \(count == 1 ? "1 Angebot" : "\(count) Angebote")")
     }
 
     /// Everything but the research: each phase brings its own sections.
@@ -222,18 +255,22 @@ struct CandidateListView: View {
             if let error {
                 Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.red)
             }
-            let groups = OfferGrouping.groups(visible)
-            // One section per country and region, each under a head that cannot be overlooked.
-            ForEach(groups) { group in
+            // One section per country under a head that cannot be overlooked; its regions follow with a slim divider.
+            ForEach(countrySections) { section in
                 Section {
                     // A row of its own, not a section header: headers are forced small and grey by the system.
-                    if groups.count > 1 || group.country != nil {
-                        countryHeader(group)
+                    if countrySections.count > 1 || section.country != nil {
+                        countryHeader(section)
                             .listRowBackground(Color.accentColor.opacity(0.10))
                             .listRowSeparator(.hidden)
                             .selectionDisabled()
                     }
-                    ForEach(group.offers) { row($0) }
+                    ForEach(section.regions) { region in
+                        if section.regions.count > 1 {
+                            regionDivider(region.region ?? "Weitere", count: region.offers.count)
+                        }
+                        ForEach(region.offers) { row($0) }
+                    }
                 }
                 .listSectionSpacing(14)
             }
@@ -252,6 +289,8 @@ struct CandidateListView: View {
             }
             }
         }
+        // Region dividers are slimmer than a normal row may be by default.
+        .environment(\.defaultMinListRowHeight, 12)
         .overlay {
             if loaded && candidates.isEmpty && error == nil && viewedPhase == .research {
                 ContentUnavailableView {
