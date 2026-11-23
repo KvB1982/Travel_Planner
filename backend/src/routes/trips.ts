@@ -27,6 +27,7 @@ const tripFields = {
   nightsMin: z.number().int().min(1).max(60).nullish(),
   nightsMax: z.number().int().min(1).max(60).nullish(),
   nightsPreferred: z.number().int().min(1).max(60).nullish(),
+  households: z.number().int().min(1).max(12).nullish(),
 };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -117,6 +118,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
           nightsMin: body.nightsMin ?? null,
           nightsMax: body.nightsMax ?? null,
           nightsPreferred: body.nightsPreferred ?? null,
+          households: body.households ?? null,
           groupId,
           createdBy: uid,
         })

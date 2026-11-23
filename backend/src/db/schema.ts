@@ -101,6 +101,8 @@ export const trips = pgTable(
   nightsMax: integer("nights_max"),
   /** The length the group would like best, between the shortest and the longest. */
   nightsPreferred: integer("nights_preferred"),
+  /** How many households travel together. Hotels are often priced for one of them, houses for all. */
+  households: integer("households"),
   /** The group this trip belongs to; its members are members of the trip. Plain id, the table comes further down. */
   groupId: uuid("group_id"),
   createdBy: uuid("created_by")
@@ -245,6 +247,8 @@ export const tripListings = pgTable(
       .notNull()
       .references(() => users.id),
     rejectionReason: text("rejection_reason"),
+    /** Whom this advert's prices are for, where the trip's members said so: "group" or "household". */
+    priceBasis: text("price_basis").$type<"group" | "household">(),
     notes: text("notes"),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     /** Hints of the advert that this trip's members chose not to see, by their wording. */

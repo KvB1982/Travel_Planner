@@ -211,6 +211,7 @@ export async function tripStay(db: Db, tripId: string, dateOptionId?: string | n
     window: { flexStart: trip?.flexStart ?? null, flexEnd: trip?.flexEnd ?? null, nightsMin: trip?.nightsMin ?? null, nightsMax: trip?.nightsMax ?? null, nightsPreferred: trip?.nightsPreferred ?? null } as Window,
     adults: trip?.adults ?? null,
     children: trip?.children ?? null,
+    households: trip?.households ?? null,
   };
 }
 

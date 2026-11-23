@@ -231,6 +231,14 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const link = shared?.isShortLink && first ? analyzeLink(first.canonicalUrl) : shared;
       const needsDevice = first !== undefined && onlyTheDeviceSeesPrices(first);
       const p = listing.profile;
+      // Whom the price is for. Houses are priced for everyone; a hotel is usually asked about for one household.
+      // What the members said for this advert counts first, then the number of people the price was asked for.
+      const households = stay.households && stay.households > 1 ? stay.households : 1;
+      const asked = price?.persons ?? null;
+      const basis: "group" | "household" =
+        households === 1 ? "group" : (candidate.priceBasis ?? (asked && partySize ? (asked < partySize ? "household" : "group") : p.kind === "vacation_home" ? "group" : "household"));
+      const forGroup = (cents: number | null) => (cents === null ? null : basis === "household" ? cents * households : cents);
+      const forHousehold = (cents: number | null) => (cents === null ? null : basis === "household" ? cents : Math.round(cents / households));
       const entry = {
         id: candidate.id,
         status: candidate.status,
@@ -263,7 +271,11 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           // Hints still shown for this trip; hidden ones are not counted.
           warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
         },
-        price: price && { available: stale ? price.available : best ? true : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price) },
+        price: price && { available: stale ? price.available : best ? true : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price), basis, groupTotalCents: forGroup(price.totalCents), householdTotalCents: forHousehold(price.totalCents) },
+        // "group" or "household": whom `price.totalCents` and the stays' totals are for. `priceBasisSet` is what a member chose, null while the server decides.
+        priceBasis: basis,
+        priceBasisSet: candidate.priceBasis,
+        households,
         // For the trip's dates and party. "unknown" until a reading for those dates said one or the other.
         availability,
         availabilityCheckedAt: stale ? null : seenAt(said),
@@ -280,7 +292,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         // What is known for each stay looked at, by the night, so that different dates and lengths compare. `best` marks the one `price` shows.
         // Why that stay leads: "cheapest" by the night, the "preferred" length, a "cheaper_longer" one, or the "nearest" length to be had.
         bestStayReason: choice?.why ?? null,
-        stays: stays.map(({ row: _r, ...x }) => ({ ...x, best: best !== null && x.startDate === best.startDate && x.endDate === best.endDate })),
+        stays: stays.map(({ row: _r, ...x }) => ({ ...x, groupTotalCents: forGroup(x.totalCents), householdTotalCents: forHousehold(x.totalCents), best: best !== null && x.startDate === best.startDate && x.endDate === best.endDate })),
         // What is known for each of the trip's periods, so they can be set side by side.
         periods: options.map((o) => {
           const seen = ownPrices.filter((x) => inPeriod(x, o));
@@ -485,6 +497,10 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       // The same as in the trip's list: every stay something is known about, which of them leads, and why.
       stays: self?.entry.stays ?? [],
       bestStayReason: self?.entry.bestStayReason ?? null,
+      priceBasis: self?.entry.priceBasis ?? "group",
+      priceBasisSet: self?.entry.priceBasisSet ?? null,
+      households: self?.entry.households ?? 1,
+      price: self?.entry.price ?? null,
       checkWindow: self?.entry.checkWindow ?? false,
       listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
@@ -700,6 +716,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           hiddenWarnings: z.array(z.string().max(1000)).max(40),
           criteriaChecks: z.record(z.string().uuid(), z.enum(["met", "missed"])),
           finalist: z.boolean(),
+          priceBasis: z.enum(["group", "household"]).nullable(),
         })
         .partial(),
       req.body,

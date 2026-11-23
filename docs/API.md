@@ -512,6 +512,12 @@ Eingelöst wird weiter nur über die API.
 
 Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung ist die Hotelnummer). Angebote, die vorher als `other` hereinkamen, stellt der Server beim nächsten `check`, `refresh` oder `capture` selbst um. Preise gibt es nur vom Gerät: `checkUrl` trägt den Zeitraum der Reise als festen Aufenthalt. Die Zimmerbelegung des geteilten Links bleibt dabei erhalten, weil ein Hotel kein Zimmer für die ganze Gruppe hat; `price.persons` nennt deshalb die Personen aus dem Link, nicht die der Reise.
 
+### Preis je Haushalt oder für die Gruppe
+
+Die Reise trägt `households` (Zahl der Haushalte, 1 bis 12 oder `null`; `POST /trips`, `PATCH /trips/:id`). Jedes Angebot hat eine Preisbasis: `group` (Preis gilt für alle) oder `household` (Preis gilt für einen Haushalt). Der Server wählt sie selbst: gilt der Preis laut Abfrage für weniger Personen als die Reise hat, ist es `household`, sonst `group`; ohne Personenzahl gelten Hotels und Pauschalreisen je Haushalt, Häuser für die Gruppe. Mit `PATCH /candidates/:id` und `priceBasis: "group" | "household" | null` legt ein Mitglied sie je Angebot fest (`null` überlässt es wieder dem Server). Bei einem Haushalt oder ohne Angabe ist alles `group`.
+
+In `GET /trips/:id/candidates` und `GET /candidates/:id`: `priceBasis` (wirksam), `priceBasisSet` (von Hand gewählt oder `null`), `households`. `price` und jeder Eintrag in `stays` tragen neben `totalCents` (wie abgefragt) `groupTotalCents` und `householdTotalCents`. Die Umrechnung teilt oder vervielfacht mit der Zahl der Haushalte, ist bei ungleich großen Haushalten also ein Näherungswert. `perNightCents` bleibt auf der abgefragten Basis.
+
 ### Mögliche Reisedaten aus einer Seite
 
 Check24 zählt Tage samt Rückreisetag: `days` ist Nächte plus eins (11 Tage sind 10 Nächte). Hat eine Reise nur ein Zeitfenster (`flexStart`, `flexEnd`, `nightsMin`, `nightsMax`) und keinen festen Zeitraum, nennt `POST /trips/:id/check` für Check24 eine einzige Seite über das ganze Fenster (`departureDate` = frühester Anreisetag, `returnDate` = spätester Abreisetag, `days` = Spanne) und setzt `window: true` am Eintrag; in der Angebotsliste steht dieselbe Adresse als `checkUrl` mit `checkWindow: true`. Die App öffnet dann nur diese eine Seite und schickt sie mit `forTrip: true` und `url`, aber ohne `startDate`/`endDate`. Die drei `stayVariants` braucht dieses Angebot nicht.

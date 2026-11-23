@@ -1006,6 +1006,16 @@ describe("every possible stay from one page", () => {
     const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
     expect(c.price).toMatchObject({ startDate: "2027-08-05", endDate: "2027-08-15", totalCents: 540000, available: true });
     expect(c.availability).toBe("available");
+    // One household so far: the price is the group's.
+    expect(c).toMatchObject({ priceBasis: "group", households: 1, price: { basis: "group", groupTotalCents: 540000, householdTotalCents: 540000 } });
+
+    // Two households of four: the price was asked for four of eight, so it is one household's and doubles for the group.
+    expect((await t.call("PATCH", `/trips/${tripId}`, owner, { adults: 4, children: 4, households: 2 })).body.trip.households).toBe(2);
+    const list = async () => (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates[0];
+    expect(await list()).toMatchObject({ priceBasis: "household", priceBasisSet: null, households: 2, price: { totalCents: 540000, basis: "household", groupTotalCents: 1080000, householdTotalCents: 540000 } });
+    // A member says otherwise for this advert.
+    await t.call("PATCH", `/candidates/${id}`, owner, { priceBasis: "group" });
+    expect(await list()).toMatchObject({ priceBasis: "group", priceBasisSet: "group", price: { groupTotalCents: 540000, householdTotalCents: 270000 } });
   });
 });
 
