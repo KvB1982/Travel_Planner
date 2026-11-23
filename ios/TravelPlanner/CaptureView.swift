@@ -784,6 +784,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
           var whole = '(gesamt|insgesamt|total|summe|für\\\\s+\\\\d+\\\\s+(nächte|nacht|nights?)|\\\\d+\\\\s+(nächte|nights)|vor steuern|inkl\\\\. (aller )?gebühren)';
           var price = new RegExp(money + '[^\\\\n]{0,60}' + whole + '|' + whole + '[^\\\\n]{0,60}' + money + '|' + whole + '[^\\\\n]{0,30}\\\\n\\\\s*' + money + '|' + money + '[^\\\\n]{0,30}\\\\n\\\\s*' + whole, 'i');
           var taken = /(nicht verfügbar|nicht mehr verfügbar|ausgebucht|belegt|not available|unavailable|sold out|keine verfügbarkeit|leider vergeben|maximal \\d+ gäste|zu viele gäste)/i;
+          // Check24 looks up each operator's offer live and says so meanwhile; what stands there before is not final.
+          if (/wird geprüft|werden geprüft|verfügbarkeit wird|preise werden (geladen|aktualisiert)/i.test(text)) { return false; }
           return price.test(text) || taken.test(text);
         })()
         """
