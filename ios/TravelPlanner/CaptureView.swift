@@ -668,8 +668,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
 
     /// The page without what the server never reads, so even heavy pages fit through: styles, drawings, frames,
     /// linked and plain scripts, comments, inline styles and embedded image data go. What stays is what the server
-    /// evaluates: meta tags, visible text, images with an address, data scripts (JSON, JSON-LD) and scripts that
-    /// set a page state (`window.__NAME__ =`). Works on a copy; the page on screen is left alone.
+    /// evaluates: meta tags, visible text, images with an address, data scripts (typed as JSON, known by their id such
+    /// as `js-hotel-data`, or simply holding JSON) and scripts that set a page state (`window.__NAME__ =`). Works on a copy; the page on screen is left alone.
     static let slimPage = """
     (function () {
       var root = document.documentElement.cloneNode(true);
@@ -678,8 +678,12 @@ final class WebPage: NSObject, WKNavigationDelegate {
       var scripts = root.querySelectorAll('script');
       for (var s = 0; s < scripts.length; s++) {
         var el = scripts[s], type = (el.getAttribute('type') || '').toLowerCase();
-        var data = type.indexOf('json') >= 0;
-        var state = !el.getAttribute('src') && /window\\.__[A-Za-z0-9_$]+\\s*=/.test(el.textContent || '');
+        var id = el.getAttribute('id') || '', text = (el.textContent || '').replace(/^\\s+/, '');
+        // Data the server reads: scripts typed as JSON, the ones it knows by their id whatever their type, and
+        // anything else that holds plain JSON.
+        var data = type.indexOf('json') >= 0 || id === '__NEXT_DATA__' || id === 'js-hotel-data' || id.indexOf('data-deferred-state') === 0
+                   || (!el.getAttribute('src') && (text.charAt(0) === '{' || text.charAt(0) === '['));
+        var state = !el.getAttribute('src') && /window\\.__[A-Za-z0-9_$]+\\s*=/.test(text);
         if (!data && !state && el.parentNode) { el.parentNode.removeChild(el); }
       }
       var walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT, null);
