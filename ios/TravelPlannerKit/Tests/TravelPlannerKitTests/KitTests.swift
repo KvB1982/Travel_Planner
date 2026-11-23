@@ -1100,3 +1100,25 @@ final class ShelfTests: XCTestCase {
         XCTAssertEqual(shelf.archived.map(\.id), ["c"])
     }
 }
+
+final class NewTripHomeTests: XCTestCase {
+    func testHomeGoesWithTheRequest() async throws {
+        var trip = NewTrip(title: "X")
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(trip), as: UTF8.self).contains("groupId"))
+        trip.home = .personal
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(trip), as: UTF8.self).contains(#""groupId":null"#))
+        trip.home = .group("g-1")
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(trip), as: UTF8.self).contains(#""groupId":"g-1""#))
+        let demo = DemoBackend()
+        let shared = try await demo.createTrip(trip)
+        XCTAssertEqual(shared.groupId, "g-1")
+        trip.home = .personal
+        let own = try await demo.createTrip(trip)
+        XCTAssertNil(own.groupId)
+        let groups = try await demo.groups()
+        XCTAssertFalse(groups[0].trips.contains { $0.id == own.id })
+        trip.home = .serverDefault
+        let byDefault = try await demo.createTrip(trip)
+        XCTAssertEqual(byDefault.groupId, "g-1")
+    }
+}

@@ -152,10 +152,47 @@ public struct NewTrip: Codable, Sendable {
     public var pets: Int
     public var budgetTotalCents: Int?
     public var dateOptions: [Dates]
+    /// Where the trip belongs. It has to go with the request that creates the trip: a trip the server put into a
+    /// group keeps the group's members, even when it is made private afterwards.
+    public enum Home: Sendable, Equatable {
+        /// Leave it to the server: into the group when the person is in exactly one.
+        case serverDefault
+        case group(String)
+        /// Only for the person who creates it.
+        case personal
+    }
+    public var home: Home = .serverDefault
 
     public init(title: String, region: String? = nil, adults: Int = 2, children: Int = 0, pets: Int = 0, budgetTotalCents: Int? = nil, dateOptions: [Dates] = []) {
         self.title = title; self.region = region; self.adults = adults; self.children = children; self.pets = pets
         self.budgetTotalCents = budgetTotalCents; self.dateOptions = dateOptions
+    }
+
+    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, dateOptions, groupId }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        region = try c.decodeIfPresent(String.self, forKey: .region)
+        adults = try c.decodeIfPresent(Int.self, forKey: .adults) ?? 2
+        children = try c.decodeIfPresent(Int.self, forKey: .children) ?? 0
+        pets = try c.decodeIfPresent(Int.self, forKey: .pets) ?? 0
+        budgetTotalCents = try c.decodeIfPresent(Int.self, forKey: .budgetTotalCents)
+        dateOptions = try c.decodeIfPresent([Dates].self, forKey: .dateOptions) ?? []
+        if c.contains(.groupId) { home = (try c.decodeIfPresent(String.self, forKey: .groupId)).map(Home.group) ?? .personal }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title); try c.encodeIfPresent(region, forKey: .region); try c.encode(adults, forKey: .adults)
+        try c.encode(children, forKey: .children); try c.encode(pets, forKey: .pets)
+        try c.encodeIfPresent(budgetTotalCents, forKey: .budgetTotalCents); try c.encode(dateOptions, forKey: .dateOptions)
+        switch home {
+        case .serverDefault: break
+        case .group(let id): try c.encode(id, forKey: .groupId)
+        // An explicit null: the server keeps the trip private.
+        case .personal: try c.encodeNil(forKey: .groupId)
+        }
     }
 }
 

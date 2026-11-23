@@ -61,8 +61,19 @@ public actor DemoBackend: TravelBackend {
     }
 
     public func createTrip(_ new: NewTrip) async throws -> Trip {
-        let trip = Trip(id: nextID("t"), title: new.title, region: new.region, adults: new.adults, children: new.children, pets: new.pets,
+        var trip = Trip(id: nextID("t"), title: new.title, region: new.region, adults: new.adults, children: new.children, pets: new.pets,
                         budgetTotalCents: new.budgetTotalCents, role: .organizer)
+        // As on the server: into the only group unless the request says otherwise.
+        let home: String?
+        switch new.home {
+        case .serverDefault: home = circles.count == 1 ? circles[0].id : nil
+        case .group(let id): home = id
+        case .personal: home = nil
+        }
+        if let home, let index = circles.firstIndex(where: { $0.id == home }) {
+            trip.groupId = home; trip.groupName = circles[index].name
+            circles[index].trips.append(.init(id: trip.id, title: trip.title))
+        }
         trips.insert(trip, at: 0)
         return trip
     }

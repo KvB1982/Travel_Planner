@@ -85,18 +85,14 @@ struct NewTripView: View {
             dates = [.init(startDate: Format.isoDay(start), endDate: Format.isoDay(end))]
         }
         let euros = Int(budget.filter(\.isNumber))
-        let trip = NewTrip(title: title.trimmingCharacters(in: .whitespaces), region: region.isEmpty ? nil : region, adults: adults,
+        var trip = NewTrip(title: title.trimmingCharacters(in: .whitespaces), region: region.isEmpty ? nil : region, adults: adults,
                            children: children, pets: pets, budgetTotalCents: euros.map { $0 * 100 }, dateOptions: dates)
+        // Group or private goes with the request itself: a trip made private afterwards would keep the group's members.
+        if !groups.isEmpty { trip.home = home == "private" ? .personal : .group(home) }
         busy = true
         Task {
             do {
-                var created = try await backend.createTrip(trip)
-                // The server puts a new trip into the group when there is exactly one; anything else is set here.
-                let wanted = groups.isEmpty ? created.groupId : (home == "private" ? nil : home)
-                if wanted != created.groupId {
-                    try await backend.setTripGroup(tripId: created.id, groupId: wanted)
-                    created.groupId = wanted
-                }
+                let created = try await backend.createTrip(trip)
                 onCreated(created)
                 dismiss()
             } catch {
