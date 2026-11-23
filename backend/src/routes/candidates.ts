@@ -5,7 +5,7 @@ import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { chooseStay, inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
-import { analyzeLink, nightsBetween, urlForStay, urlForWindow } from "../import/url.js";
+import { analyzeLink, carriesStay, nightsBetween, urlForStay, urlForWindow } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
@@ -441,7 +441,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid, dateOptionId: stay.dateOptionId, dates }));
       }
       // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
-      const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;
+      const pointless = device && stay.startDate !== null && stay.endDate !== null && whole === null && !carriesStay(link, stay);
       checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url, window: whole !== null });
     }
     await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });

@@ -6,7 +6,7 @@ import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { looksBlocked, UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
-import { analyzeLink, embeddedTarget, nightsBetween, personsAsked, urlForStay, urlForWindow, type LinkInfo } from "./url.js";
+import { analyzeLink, carriesStay, embeddedTarget, nightsBetween, personsAsked, urlForStay, urlForWindow, type LinkInfo } from "./url.js";
 
 const APPROXIMATE_POSITION = new Set(["airbnb", "vrbo"]);
 /** A title a security check left behind in place of the advert's own. */
@@ -246,12 +246,12 @@ export async function processImport(
     let html = input.html ?? "";
     // The device's word only counts where a link can carry the trip's dates; otherwise it opened the undated page.
     let priceBelongsToTrip =
-      fromDevice && input.forTrip === true && stay.startDate !== null && stay.endDate !== null && urlForStay(input.link, stay) !== input.link.canonicalUrl;
+      fromDevice && input.forTrip === true && carriesStay(input.link, stay);
 
     if (!fromDevice) {
       // Ask for the trip's dates and party, so the price on the page is the one that matters.
       const target = windowUrl ?? urlForStay(input.link, stay);
-      priceBelongsToTrip = target !== input.link.canonicalUrl;
+      priceBelongsToTrip = windowUrl !== null || carriesStay(input.link, stay);
       const page = await deps.fetcher(target);
       const refused = page.blocked || page.status >= 400 || page.html.length < 500;
       await db.update(listingSources).set({ lastFetchedAt: new Date(), fetchNote: refused ? "blocked" : `http ${page.status}` }).where(eq(listingSources.id, input.sourceId));

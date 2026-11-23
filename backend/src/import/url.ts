@@ -299,6 +299,17 @@ export function personsAsked(info: LinkInfo, stay: Pick<Stay, "adults" | "childr
 }
 
 /**
+ * Whether the platform's links can carry a stay at all. A link that was shared with the trip's very dates
+ * comes back unchanged from `urlForStay` and is a page for the trip all the same.
+ */
+export function carriesStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDate" | "adults" | "children">): boolean {
+  if (!stay.startDate || !stay.endDate) return false;
+  if (urlForStay(info, stay) !== info.canonicalUrl) return true;
+  const later = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return urlForStay(info, { ...stay, startDate: later(stay.startDate), endDate: later(stay.endDate) }) !== info.canonicalUrl;
+}
+
+/**
  * A link that asks for every stay inside a window of possible dates at once, where the platform has such a page.
  * Null where it has none: then each stay needs a page of its own.
  */

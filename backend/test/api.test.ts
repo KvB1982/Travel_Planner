@@ -1005,6 +1005,12 @@ describe("every possible stay from one page", () => {
     await t.ctx.queue.idle();
     const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
     expect(c.price).toMatchObject({ startDate: "2027-08-05", endDate: "2027-08-15", totalCents: 540000, available: true });
+    // A link shared with the trip's very dates is still a page to open for the trip, not one to skip.
+    const same = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://urlaub.check24.de/suche/hotelinformation?hotelId=777&departureDate=2027-08-05&returnDate=2027-08-15&days=11&roomAllocation=A-A-7-11&pageArea=package", html: hotel })).body.candidateId as string;
+    await t.ctx.queue.idle();
+    const checks = (await t.call("POST", `/trips/${tripId}/check`, owner, {})).body.checks as { candidateId: string; mode: string }[];
+    expect(checks.find((x) => x.candidateId === same)!.mode).toBe("device");
+    await t.call("DELETE", `/candidates/${same}`, owner);
     expect(c.availability).toBe("available");
     // One household so far: the price is the group's.
     expect(c).toMatchObject({ priceBasis: "group", households: 1, price: { basis: "group", groupTotalCents: 540000, householdTotalCents: 540000 } });
