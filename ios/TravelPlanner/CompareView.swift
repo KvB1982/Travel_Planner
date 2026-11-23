@@ -15,13 +15,23 @@ struct CompareView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var showSelection = false
+    /// Only offers of this country are compared; nil compares those of all countries.
+    @State private var country: String?
+
+    private var countries: [String] { OfferGrouping.countries(in: candidates) }
+
+    /// The offers of the chosen country, or all of them.
+    private var inCountry: [CandidateSummary] {
+        guard let country else { return candidates }
+        return candidates.filter { OfferGrouping.country(of: $0) == country }
+    }
 
     private let labelWidth: CGFloat = 132
     private let columnWidth: CGFloat = 176
 
     /// Offers in list order, as far as they are chosen and loaded.
     private var offers: [CandidateDetail] {
-        candidates.filter { selected.contains($0.id) }.compactMap { details[$0.id] }
+        inCountry.filter { selected.contains($0.id) }.compactMap { details[$0.id] }
     }
 
     private var comparison: Comparison {
@@ -38,9 +48,12 @@ struct CompareView: View {
                     ContentUnavailableView("Nicht geladen", systemImage: "wifi.exclamationmark", description: Text(error))
                 } else if offers.count < 2 {
                     ContentUnavailableView {
-                        Label("Wähle mindestens zwei Angebote", systemImage: "rectangle.split.3x1")
+                        Label(country == nil ? "Wähle mindestens zwei Angebote" : "Zu wenige Angebote in \(country ?? "")", systemImage: "rectangle.split.3x1")
+                    } description: {
+                        if country != nil { Text("Für einen Vergleich braucht es mindestens zwei ausgewählte Angebote aus diesem Land.") }
                     } actions: {
                         Button("Angebote auswählen") { showSelection = true }
+                        if country != nil { Button("Alle Länder zeigen") { country = nil } }
                     }
                 } else {
                     table(comparison)
@@ -50,8 +63,23 @@ struct CompareView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Fertig") { dismiss() } }
+                if countries.count > 1 {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Picker("Land", selection: $country) {
+                                Text("Alle Länder").tag(String?.none)
+                                ForEach(countries, id: \.self) { name in
+                                    Text([Format.flag(forCountry: name), name].compactMap { $0 }.joined(separator: " ")).tag(String?.some(name))
+                                }
+                            }
+                        } label: {
+                            Label(country ?? "Land", systemImage: country == nil ? "globe.europe.africa" : "globe.europe.africa.fill")
+                        }
+                        .accessibilityLabel(country.map { "Land: \($0)" } ?? "Nach Land filtern")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Auswahl (\(selected.count))", systemImage: "checklist") { showSelection = true }
+                    Button("Auswahl (\(inCountry.filter { selected.contains($0.id) }.count))", systemImage: "checklist") { showSelection = true }
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Toggle("Nur Unterschiede zeigen", isOn: $onlyDifferences).toggleStyle(.switch)
@@ -83,7 +111,7 @@ struct CompareView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(candidates) { candidate in
+                    ForEach(inCountry) { candidate in
                         Button {
                             if selected.contains(candidate.id) { selected.remove(candidate.id) } else { selected.insert(candidate.id) }
                         } label: {
@@ -98,15 +126,19 @@ struct CompareView: View {
                         }
                         .accessibilityAddTraits(selected.contains(candidate.id) ? .isSelected : [])
                     }
+                } header: {
+                    if let country { Text("Angebote in \(country)") }
                 } footer: {
                     Text("Zwei bis fünf Angebote lassen sich gut nebeneinander lesen.")
                 }
                 Section {
-                    Button("Alle") { selected = Set(candidates.map(\.id)) }
+                    // With a country chosen these act on its offers only; the choice in other countries stays.
+                    Button("Alle") { selected.formUnion(inCountry.map(\.id)) }
                     Button("Nur Favoriten und engere Wahl") {
-                        selected = Set(candidates.filter { $0.status == .favorite || $0.status == .shortlist }.map(\.id))
+                        selected.subtract(inCountry.map(\.id))
+                        selected.formUnion(inCountry.filter { $0.status == .favorite || $0.status == .shortlist }.map(\.id))
                     }
-                    Button("Keine") { selected = [] }
+                    Button("Keine") { selected.subtract(inCountry.map(\.id)) }
                 }
             }
             .navigationTitle("Angebote auswählen")
