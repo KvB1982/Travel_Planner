@@ -83,6 +83,8 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     public var nightsMin: Int?
     public var nightsMax: Int?
     public var nightsPreferred: Int?
+    /// How many households travel together, 1 to 12; nil when not said. Hotels are mostly priced per household.
+    public var households: Int?
 
     public var flexWindow: FlexWindow? {
         guard let flexStart, let flexEnd else { return nil }
@@ -319,6 +321,12 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     /// Why the marked stay leads: "cheapest" (no wish given), "preferred" (the wished length), "cheaper_longer"
     /// (longer, but clearly cheaper a night), "nearest" (the wished length is not on offer).
     public var bestStayReason: String?
+    /// Whom `price.totalCents` is for, as it takes effect: "group" (everyone) or "household" (one household).
+    public var priceBasis: String?
+    /// What a member chose by hand; nil while the server decides.
+    public var priceBasisSet: String?
+    /// How many households travel; 1 or nil means prices need no splitting.
+    public var households: Int?
     /// `checkUrl` is one page covering the whole flexible window of the trip: reading it once brings every
     /// possible stay, so no single stays need to be asked for.
     public var checkWindow: Bool?
@@ -815,6 +823,13 @@ public struct CandidateDetail: Decodable, Hashable, Sendable {
     public var otherPlatforms: OtherPlatforms?
     /// The offer against the trip's criteria, with one result per criterion.
     public var criteria: CriteriaVerdict?
+    /// The same as in the trip's list. Missing on older servers.
+    public var stays: [Stay]?
+    public var bestStayReason: String?
+    public var priceBasis: String?
+    public var priceBasisSet: String?
+    public var households: Int?
+    public var checkWindow: Bool?
 
     /// Hints of the offer, taken from the profile when the server sent no list of its own.
     public var hints: [Hint] {

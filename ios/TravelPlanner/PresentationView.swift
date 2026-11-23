@@ -204,9 +204,8 @@ struct PresentationView: View {
 
     private func priceLine(_ candidate: CandidateSummary) -> String {
         if candidate.isUnavailable { return "Im Reisezeitraum nicht verfügbar" }
-        if let price = candidate.price, price.forThisTrip,
-           let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
-            return text
+        if let price = candidate.price, price.forThisTrip, let text = candidate.groupPriceText {
+            return candidate.share.splits ? "\(text) für die Gruppe" : text
         }
         return "Preis für euren Zeitraum noch offen"
     }
@@ -223,7 +222,7 @@ struct PresentationView: View {
                     Text(priceLine(candidate)).font(.title2.weight(.semibold))
                         .foregroundStyle(candidate.isUnavailable ? Color.red : Color.primary)
                     if let price = candidate.price, price.forThisTrip, !candidate.isUnavailable,
-                       let each = Format.perPersonNight(totalCents: price.totalCents, persons: persons ?? price.persons, nights: price.nights) {
+                       let each = Format.perPersonNight(totalCents: persons == nil ? price.totalCents : candidate.share.group(price.totalCents), persons: persons ?? price.persons, nights: price.nights) {
                         Text(each).foregroundStyle(.secondary)
                     }
                 }

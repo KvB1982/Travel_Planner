@@ -316,8 +316,7 @@ struct PitchSections: View {
 
     private func price(_ candidate: CandidateSummary) -> String {
         if candidate.isUnavailable { return "Im Reisezeitraum nicht verfügbar" }
-        if let price = candidate.price, price.forThisTrip,
-           let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) { return text }
+        if let price = candidate.price, price.forThisTrip, let text = candidate.groupPriceText { return text }
         return "Preis noch offen"
     }
 

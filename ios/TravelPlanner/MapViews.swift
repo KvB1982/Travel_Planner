@@ -343,8 +343,7 @@ struct TripMapView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(candidate.listing.title ?? "Angebot").font(.headline).lineLimit(2)
                 HStack(spacing: 8) {
-                    if let price = candidate.price, price.forThisTrip,
-                       let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
+                    if let price = candidate.price, price.forThisTrip, let text = candidate.groupPriceText {
                         Text(text).font(.subheadline.weight(.semibold))
                     }
                     VoteBadges(votes: candidate.votes)
@@ -393,7 +392,7 @@ private struct PricePin: View {
     }
 
     private var label: String {
-        if let price = candidate.price, price.forThisTrip, let cents = price.totalCents { return Format.euro(cents: cents) }
+        if let price = candidate.price, price.forThisTrip, let cents = candidate.share.group(price.totalCents) { return Format.euro(cents: cents) }
         return candidate.status == .new ? "ohne Preis" : candidate.status.label
     }
 }

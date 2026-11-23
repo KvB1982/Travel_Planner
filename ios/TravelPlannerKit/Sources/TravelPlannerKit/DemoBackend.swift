@@ -95,6 +95,10 @@ public actor DemoBackend: TravelBackend {
             var summary = summarize(detail, tripId: tripId)
             summary.criteria = verdict(for: detail, results: false)
             summary.finalist = finalists[tripId]?.contains(detail.candidate.id) ?? false
+            // The first sample trip is two families travelling together, unless the frame says otherwise.
+            summary.households = trips.first { $0.id == tripId }?.households ?? (tripId == "t-1" ? 2 : nil)
+            summary.priceBasisSet = priceBasis[detail.candidate.id]
+            summary.priceBasis = priceBasis[detail.candidate.id] ?? "group"
             // One sample offer shows what a flexible window brings: several possible stays with their prices.
             if detail.candidate.id == order.first, tripId == "t-1" {
                 summary.stays = [("2027-05-15", "2027-05-22", 7, 259_000), ("2027-05-17", "2027-05-27", 10, 349_000), ("2027-05-19", "2027-05-29", 10, 362_000),
@@ -606,6 +610,8 @@ public actor DemoBackend: TravelBackend {
             trips[index].nightsMin = changes.flex?.nightsMin; trips[index].nightsMax = changes.flex?.nightsMax
             trips[index].nightsPreferred = changes.flex?.nightsPreferred
         }
+        if changes.sendsHouseholds { trips[index].households = changes.households
+        }
         return trips[index]
     }
 
@@ -721,6 +727,7 @@ public actor DemoBackend: TravelBackend {
     // MARK: Phases and pitch
 
     private var finalists: [String: [String]] = [:]
+    private var priceBasis: [String: String] = [:]
     private var rankings: [String: [String: [String]]] = [:]
     private var decided: [String: String] = [:]
     /// Two fellow travellers who have already ranked, so the result has something to show.
@@ -882,6 +889,11 @@ public actor DemoBackend: TravelBackend {
     public func candidate(_ id: String) async throws -> CandidateDetail {
         var found = try detail(id)
         found.criteria = verdict(for: found, results: true)
+        // As on the server: the offer itself carries what the list says about its stays and its price basis.
+        if let summary = try? await candidates(tripId: found.candidate.tripId, dateOptionId: nil).first(where: { $0.id == id }) {
+            found.stays = summary.stays; found.bestStayReason = summary.bestStayReason; found.checkWindow = summary.checkWindow
+            found.priceBasis = summary.priceBasis; found.priceBasisSet = summary.priceBasisSet; found.households = summary.households
+        }
         return found
     }
 
@@ -1011,6 +1023,10 @@ public actor DemoBackend: TravelBackend {
         _ = try detail(candidateId)
         details[candidateId] = nil
         order.removeAll { $0 == candidateId }
+    }
+
+    public func setPriceBasis(candidateId: String, basis: String?) async throws {
+        priceBasis[candidateId] = basis
     }
 
     public func setStatus(candidateId: String, status: CandidateStatus) async throws {

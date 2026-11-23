@@ -29,6 +29,7 @@ struct FramingSections: View {
                 LabeledContent("Titel", value: trip.title)
                 LabeledContent("Region", value: trip.region ?? "noch offen")
                 LabeledContent("Wer fährt mit", value: party)
+                if let count = trip.households, count > 1 { LabeledContent("Haushalte", value: "\(count)") }
                 LabeledContent("Budget gesamt", value: trip.budgetTotalCents.map { Format.euro(cents: $0) } ?? "nicht festgelegt")
                 if let window = trip.flexWindow {
                     LabeledContent("Flexibel", value: window.summary)
@@ -227,6 +228,7 @@ struct TripEditor: View {
     @State private var adults = 2
     @State private var children = 0
     @State private var pets = 0
+    @State private var households = 1
     @State private var budget = ""
     @State private var flexible = false
     @State private var flexStart = Calendar.current.date(byAdding: .month, value: 6, to: .now) ?? .now
@@ -255,10 +257,13 @@ struct TripEditor: View {
                     Stepper("Erwachsene: \(adults)", value: $adults, in: 1...40)
                     Stepper("Kinder: \(children)", value: $children, in: 0...40)
                     Stepper("Haustiere: \(pets)", value: $pets, in: 0...10)
+                    Stepper("Haushalte: \(households)", value: $households, in: 1...12)
                 } header: {
                     Text("Wer fährt mit?")
                 } footer: {
-                    Text("Preise und Verfügbarkeit werden für diese Personenzahl geprüft. Nach einer Änderung lohnt sich ein neuer Prüflauf.")
+                    Text(households > 1
+                         ? "Preise und Verfügbarkeit werden für diese Personenzahl geprüft. Hotels fragt man meist je Haushalt ab, Häuser für die ganze Gruppe: Die App rechnet jeden Preis auf die Gruppe hoch und zeigt daneben den Anteil je Haushalt. Bei jedem Angebot lässt sich umstellen, wofür sein Preis gilt."
+                         : "Preise und Verfügbarkeit werden für diese Personenzahl geprüft. Fahrt ihr mit mehreren Haushalten, trag ihre Zahl ein: Hotels fragt man meist je Haushalt ab, Häuser für die ganze Gruppe.")
                 }
                 Section("Budget gesamt (freiwillig)") {
                     TextField("Euro", text: $budget).keyboardType(.numberPad)
@@ -299,6 +304,7 @@ struct TripEditor: View {
                         // The window is only touched when it changed, so servers and trips without one stay as they are.
                         let wanted = flexible ? window : nil
                         if wanted != trip.flexWindow { changes.flex = wanted; changes.sendsFlex = true }
+                        if !onlyWindow, households != (trip.households ?? 1) { changes.households = households; changes.sendsHouseholds = true }
                         save(changes)
                         dismiss()
                     }
@@ -310,6 +316,7 @@ struct TripEditor: View {
                 filled = true
                 title = trip.title; region = trip.region ?? ""; adults = max(1, trip.adults); children = trip.children; pets = trip.pets
                 budget = trip.budgetTotalCents.map { String($0 / 100) } ?? ""
+                households = min(12, max(1, trip.households ?? 1))
                 if let known = trip.flexWindow {
                     flexible = true
                     flexStart = Format.day(known.start) ?? flexStart; flexEnd = Format.day(known.end) ?? flexEnd

@@ -908,9 +908,12 @@ private struct CandidateRow: View {
                     EmptyView()
                 }
                 HStack {
-                    if let price = candidate.price, price.forThisTrip, let text = Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) {
-                        // Only a price asked for this trip's dates is shown as the price of the offer.
+                    if let price = candidate.price, price.forThisTrip, let text = candidate.groupPriceText {
+                        // Only a price asked for this trip's dates is shown as the price of the offer, and always for the whole group.
                         Text(text).font(.subheadline.weight(.semibold))
+                        if candidate.share.splits, let each = candidate.share.household(price.totalCents) {
+                            Text("\(Format.euro(cents: each)) je Haushalt").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                         // The price on screen is the old one until the new reading is through.
                         if busy { ProgressView().controlSize(.mini).accessibilityLabel(busyText) }
                     } else if busy {

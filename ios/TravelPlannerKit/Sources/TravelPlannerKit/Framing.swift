@@ -11,6 +11,9 @@ public struct TripChanges: Encodable, Hashable, Sendable {
     /// nil switches the flexible window off. Only sent when `sendsFlex` is set, so older callers leave it alone.
     public var flex: FlexWindow?
     public var sendsFlex = false
+    /// How many households travel; nil clears it. Only sent when `sendsHouseholds` is set.
+    public var households: Int?
+    public var sendsHouseholds = false
 
     public init(title: String, region: String?, adults: Int, children: Int, pets: Int, budgetTotalCents: Int?) {
         self.title = title; self.region = region; self.adults = adults; self.children = children; self.pets = pets
@@ -22,7 +25,7 @@ public struct TripChanges: Encodable, Hashable, Sendable {
         flex = trip.flexWindow
     }
 
-    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, flexStart, flexEnd, nightsMin, nightsMax, nightsPreferred }
+    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, flexStart, flexEnd, nightsMin, nightsMax, nightsPreferred, households }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -35,6 +38,7 @@ public struct TripChanges: Encodable, Hashable, Sendable {
             // Always along with the two bounds, so a wish outside new bounds never stays behind on the server.
             try c.encode(flex?.nightsPreferred, forKey: .nightsPreferred)
         }
+        if sendsHouseholds { try c.encode(households, forKey: .households) }
     }
 }
 

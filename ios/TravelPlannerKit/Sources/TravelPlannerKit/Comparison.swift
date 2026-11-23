@@ -58,24 +58,36 @@ public struct Comparison: Sendable, Equatable {
         let otherPrices: [PriceSnapshot?] = offers.enumerated().map { index, offer in
             prices[index] == nil ? offer.prices.first { $0.totalCents != nil } : nil
         }
-        let totals = prices.map { $0?.totalCents.map(Double.init) }
+        // Compared is always the price for the whole group, whatever each offer was asked for.
+        let shares = offers.map(\.share)
+        let splits = shares.contains { $0.splits }
+        let totals = offers.indices.map { index in shares[index].group(prices[index]?.totalCents).map(Double.init) }
         let shownTotals: [String?] = offers.indices.map { index in
-            if let price = prices[index] { return Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) }
-            if let other = otherPrices[index], let text = Format.price(totalCents: other.totalCents, rangeMaxCents: other.rangeMaxCents, kind: other.kind) {
+            let share = shares[index]
+            if let price = prices[index] {
+                return Format.price(totalCents: share.group(price.totalCents), rangeMaxCents: share.group(price.rangeMaxCents), kind: price.kind)
+            }
+            if let other = otherPrices[index],
+               let text = Format.price(totalCents: share.group(other.totalCents), rangeMaxCents: share.group(other.rangeMaxCents), kind: other.kind) {
                 return "(\(text))"
             }
             return nil
         }
-        var priceRow = number("price", "Gesamtpreis", totals, .lower) { Format.euro(cents: Int($0)) }
+        var priceRow = number("price", splits ? "Gesamtpreis der Gruppe" : "Gesamtpreis", totals, .lower) { Format.euro(cents: Int($0)) }
         priceRow.values = shownTotals
         priceRow.differs = Set(shownTotals).count > 1
-        if otherPrices.contains(where: { $0 != nil }) {
-            priceRow.note = "Preise in Klammern gelten für einen anderen Zeitraum und zählen nicht für den Vergleich."
-        }
-        let perHead: [Double?] = prices.map { price in
-            guard let price, let total = price.totalCents, let nights = price.nights, nights > 0,
-                  let people = persons ?? price.persons, people > 0 else { return nil }
-            return (Double(total) / Double(people * nights)).rounded()
+        var notes: [String] = []
+        if otherPrices.contains(where: { $0 != nil }) { notes.append("Preise in Klammern gelten für einen anderen Zeitraum und zählen nicht für den Vergleich.") }
+        if shares.contains(where: { $0.perHousehold }) { notes.append("Preise, die je Haushalt abgefragt wurden, sind auf die Gruppe hochgerechnet.") }
+        if !notes.isEmpty { priceRow.note = notes.joined(separator: " ") }
+        let perHousehold: [Double?] = offers.indices.map { index in shares[index].household(prices[index]?.totalCents).map(Double.init) }
+        let perHead: [Double?] = offers.indices.map { index in
+            guard let price = prices[index], let asked = price.totalCents, let nights = price.nights, nights > 0 else { return nil }
+            // With the travellers of the trip the group's price is what gets shared; a price asked for one household
+            // without them is shared among the people it was asked for.
+            if let persons, persons > 0, let total = shares[index].group(asked) { return (Double(total) / Double(persons * nights)).rounded() }
+            guard let people = price.persons, people > 0 else { return nil }
+            return (Double(asked) / Double(people * nights)).rounded()
         }
         let dates = offers.indices.map { index -> String? in
             let price = prices[index] ?? otherPrices[index]
@@ -84,8 +96,8 @@ public struct Comparison: Sendable, Equatable {
             return "\(range) · \(nights == 1 ? "1 Nacht" : "\(nights) Nächte")"
         }
         // With a flexible window the stays differ in length, so the price per night is what compares.
-        let perNight: [Double?] = prices.map { price in
-            guard let price, let total = price.totalCents, let nights = price.nights, nights > 0 else { return nil }
+        let perNight: [Double?] = offers.indices.map { index in
+            guard let price = prices[index], let total = shares[index].group(price.totalCents), let nights = price.nights, nights > 0 else { return nil }
             return (Double(total) / Double(nights)).rounded()
         }
         let ratings: [Double?] = profiles.map { profile in
@@ -107,6 +119,7 @@ public struct Comparison: Sendable, Equatable {
         var sections: [Section] = []
         sections.append(Section(id: "price", title: "Preis", rows: [
             priceRow,
+        ] + (splits ? [number("perHousehold", "Je Haushalt", perHousehold, nil) { Format.euro(cents: Int($0)) }] : []) + [
             // Shown, but not counted as a win of its own: total and price per person and night already are.
             number("perNight", "Pro Nacht", perNight, nil) { Format.euro(cents: Int($0)) },
             number("perHead", "Pro Person und Nacht", perHead, .lower) { Format.euro(cents: Int($0)) },

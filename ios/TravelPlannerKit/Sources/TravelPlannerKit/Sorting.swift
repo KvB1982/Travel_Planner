@@ -33,7 +33,7 @@ public enum OfferSort: String, CaseIterable, Sendable, Identifiable {
             return offers
         case .price:
             // Only a price for the trip's dates is a price to compare; an unavailable offer has none.
-            return ordered({ $0.isUnavailable || $0.price?.forThisTrip != true ? nil : $0.price?.totalCents }, ascending: true)
+            return ordered({ $0.isUnavailable || $0.price?.forThisTrip != true ? nil : $0.share.group($0.price?.totalCents) }, ascending: true)
         case .rating:
             return ordered({ offer -> Double? in
                 guard let value = offer.listing.rating?.value else { return nil }

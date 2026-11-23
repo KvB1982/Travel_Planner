@@ -345,7 +345,10 @@ struct StaySheet: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
-                                if let total = stay.totalCents { Text(Format.euro(cents: total)).font(.body.weight(stay.best == true ? .semibold : .regular)) }
+                                if let total = stay.groupTotalCents ?? stay.totalCents { Text(Format.euro(cents: total)).font(.body.weight(stay.best == true ? .semibold : .regular)) }
+                                if let each = stay.householdTotalCents, each != (stay.groupTotalCents ?? stay.totalCents) {
+                                    Text("\(Format.euro(cents: each)) je Haushalt").font(.footnote).foregroundStyle(.secondary)
+                                }
                                 if let night = stay.perNightCents { Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary) }
                             }
                         }

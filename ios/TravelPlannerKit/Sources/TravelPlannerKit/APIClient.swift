@@ -150,6 +150,8 @@ public protocol TravelBackend: Sendable {
     /// Notes a price by hand. It counts for the trip the offer belongs to.
     func addPrice(candidateId: String, price: ManualPrice) async throws
     func setStatus(candidateId: String, status: CandidateStatus) async throws
+    /// Says whom the offer's price is for: "group", "household", or nil to let the server decide again.
+    func setPriceBasis(candidateId: String, basis: String?) async throws
     /// Sets which hints of an offer are hidden for the whole trip, by their exact wording. An empty list shows all again.
     func setHiddenWarnings(candidateId: String, hidden: [String]) async throws
     /// Moves the offer to another trip or to the watchlist. Votes and prices for the old trip stay behind.
@@ -845,6 +847,18 @@ public struct APIClient: TravelBackend {
 
     public func delete(candidateId: String) async throws {
         _ = try await data("DELETE", "/candidates/\(candidateId.pathEscaped)")
+    }
+
+    public func setPriceBasis(candidateId: String, basis: String?) async throws {
+        struct Body: Encodable {
+            var priceBasis: String?
+            func encode(to encoder: any Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(priceBasis, forKey: .priceBasis)
+            }
+            enum CodingKeys: String, CodingKey { case priceBasis }
+        }
+        _ = try await data("PATCH", "/candidates/\(candidateId.pathEscaped)", body: Body(priceBasis: basis))
     }
 
     public func setStatus(candidateId: String, status: CandidateStatus) async throws {

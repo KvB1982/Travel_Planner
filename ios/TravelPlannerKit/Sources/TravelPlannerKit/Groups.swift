@@ -128,6 +128,9 @@ public struct Stay: Codable, Identifiable, Hashable, Sendable {
     public var checkedAt: Date?
     /// The bookable stay with the lowest price per night.
     public var best: Bool?
+    /// The total for the whole group and for one household; `totalCents` is the price as asked.
+    public var groupTotalCents: Int?
+    public var householdTotalCents: Int?
     public var id: String { "\(startDate)|\(endDate)" }
     public init(startDate: String, endDate: String, nights: Int? = nil, totalCents: Int? = nil, perNightCents: Int? = nil,
                 available: Bool? = nil, checkedAt: Date? = nil, best: Bool? = nil) {

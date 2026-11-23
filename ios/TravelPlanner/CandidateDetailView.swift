@@ -178,8 +178,12 @@ struct CandidateDetailView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        if let total = stay.totalCents { Text(Format.euro(cents: total)).fontWeight(stay.best == true ? .semibold : .regular) }
-                        if let night = stay.perNightCents { Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary) }
+                        if let total = stay.groupTotalCents ?? stay.totalCents { Text(Format.euro(cents: total)).fontWeight(stay.best == true ? .semibold : .regular) }
+                        if let each = stay.householdTotalCents, each != (stay.groupTotalCents ?? stay.totalCents) {
+                            Text("\(Format.euro(cents: each)) je Haushalt").font(.footnote).foregroundStyle(.secondary)
+                        } else if let night = stay.perNightCents {
+                            Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -203,8 +207,11 @@ struct CandidateDetailView: View {
             }
             detail = try answer.get()
             error = nil
-            // The possible stays come with the list of the trip, not with the offer itself.
-            if let trip = detail?.candidate.tripId, let list = try? await backend.candidates(tripId: trip) {
+            if let known = detail?.stays {
+                stays = known.sorted { $0.startDate < $1.startDate }
+                bestStayReason = detail?.bestStayReason
+            } else if let trip = detail?.candidate.tripId, let list = try? await backend.candidates(tripId: trip) {
+                // An older server: the possible stays come with the list of the trip, not with the offer itself.
                 stays = (list.first { $0.id == id }?.stays ?? []).sorted { $0.startDate < $1.startDate }
                 bestStayReason = list.first { $0.id == id }?.bestStayReason
             }
@@ -636,11 +643,17 @@ struct CandidateDetailView: View {
     private func priceSection(_ detail: CandidateDetail) -> some View {
         let tripID = detail.candidate.tripId
         let current = detail.prices.first { $0.tripId == tripID } ?? detail.prices.first
+        let share = detail.share
         Section("Preis") {
-            if let current, let text = Format.price(totalCents: current.totalCents, rangeMaxCents: current.rangeMaxCents, kind: current.kind) {
+            if let current, let text = Format.price(totalCents: share.group(current.totalCents), rangeMaxCents: share.group(current.rangeMaxCents), kind: current.kind) {
                 VStack(alignment: .leading, spacing: 2) {
                     if current.tripId == tripID {
-                        Text(text).font(.title3.weight(.semibold))
+                        Text(share.splits ? "\(text) für die Gruppe" : text).font(.title3.weight(.semibold))
+                        if share.splits, let each = share.household(current.totalCents) {
+                            // Both readings side by side, and which of them was asked: the other is worked out.
+                            Text("\(Format.euro(cents: each)) je Haushalt").font(.subheadline.weight(.medium))
+                            Text(share.note).font(.footnote).foregroundStyle(.secondary)
+                        }
                     } else {
                         // Same wording as in the list: a link price is never shown as the price of the trip.
                         Text("Preis für euren Zeitraum noch offen").font(.headline)
@@ -662,6 +675,15 @@ struct CandidateDetailView: View {
                 }
             } else {
                 Text("Noch kein Preis bekannt").foregroundStyle(.secondary)
+            }
+            if share.splits, detail.role.canEdit {
+                // Whom the price as read is for. The server guesses; a person knows what they asked for.
+                Picker("Preis gilt für", selection: Binding(
+                    get: { detail.priceBasis == "household" ? "household" : "group" },
+                    set: { basis in perform { try await $0.setPriceBasis(candidateId: candidateID, basis: basis) } })) {
+                    Text("die ganze Gruppe").tag("group")
+                    Text("einen Haushalt").tag("household")
+                }
             }
             // What the price is made of, what comes on top and what it used to be: folded away until asked for.
             let lines = current?.breakdown ?? []
