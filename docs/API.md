@@ -505,7 +505,7 @@ Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung
 
 ## Bildgrößen
 
-Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) und Casamundo (`/large/`) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220` … mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
+Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) und Casamundo (`/large/`) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220`, `size=1920x` … als Pfadsegment, je mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
 
 ## Große Seiten vom Gerät
 

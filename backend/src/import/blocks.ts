@@ -184,7 +184,7 @@ function photoKey(url: string): { key: string; rank: number } | null {
   // Check24 signs each size of a picture separately; what stays the same is the encoded address of the original.
   const c24 = /check24\./.test(u.hostname) ? /\/source=([^/!]+)/.exec(u.pathname)?.[1] : undefined;
   if (c24) {
-    const w = Number(/\/size=(\d+)[a-z]\d+\//.exec(u.pathname)?.[1] ?? 0);
+    const w = Number(/\/size=(\d+)[a-z]\d*\//.exec(u.pathname)?.[1] ?? 0);
     return { key: `check24:${c24}`, rank: w || 10_000 };
   }
   // Novasol names the width as a path segment.
