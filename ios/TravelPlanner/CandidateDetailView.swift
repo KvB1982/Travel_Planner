@@ -250,11 +250,16 @@ struct CandidateDetailView: View {
                 Section(detail.listing.kind.label) {
                     number("Sterne", trip.hotelStars, "packageTrip.hotelStars", profile)
                     fact("Verpflegung", trip.board, "packageTrip.board", profile)
-                    fact("Zimmer", trip.roomType, "packageTrip.roomType", profile)
-                    fact("Abflug", trip.departureAirport, "packageTrip.departureAirport", profile)
-                    number("Dauer", trip.durationDays, "packageTrip.durationDays", profile, unit: " Tage")
-                    fact("Veranstalter", trip.tourOperator, "packageTrip.tourOperator", profile)
-                    if let transfer = trip.transferIncluded { LabeledContent("Transfer", value: transfer ? "inklusive" : "nicht inklusive") }
+                    if open.contains("hotel") {
+                        fact("Zimmer", trip.roomType, "packageTrip.roomType", profile)
+                        fact("Abflug", trip.departureAirport, "packageTrip.departureAirport", profile)
+                        number("Dauer", trip.durationDays, "packageTrip.durationDays", profile, unit: " Tage")
+                        fact("Veranstalter", trip.tourOperator, "packageTrip.tourOperator", profile)
+                        if let transfer = trip.transferIncluded { LabeledContent("Transfer", value: transfer ? "inklusive" : "nicht inklusive") }
+                    }
+                    if trip.roomType != nil || trip.departureAirport != nil || trip.durationDays != nil || trip.tourOperator != nil || trip.transferIncluded != nil {
+                        more("hotel", "Zimmer, Abflug, Dauer, Veranstalter")
+                    }
                 }
             }
 
@@ -554,23 +559,29 @@ struct CandidateDetailView: View {
                             .font(.footnote.weight(.semibold)).foregroundStyle(.red)
                     }
                 }
-                ForEach(current.breakdown ?? [], id: \.self) { line in
-                    LabeledContent(line.item, value: line.amountCents.map { Format.euro(cents: $0) } ?? "nicht beziffert")
-                }
-                let earlier = detail.prices.filter { $0.id != current.id && $0.totalCents != nil }
-                if !earlier.isEmpty {
-                    DisclosureGroup("Frühere Preise (\(earlier.count))") {
-                        ForEach(earlier) { price in
-                            LabeledContent(price.capturedAt.formatted(date: .abbreviated, time: .omitted),
-                                           value: Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) ?? "")
-                        }
-                    }
-                }
             } else {
                 Text("Noch kein Preis bekannt").foregroundStyle(.secondary)
             }
-            ForEach(detail.listing.profile.price?.extraCosts ?? [], id: \.self) { cost in
-                LabeledContent(cost.item, value: cost.amountEur.map { Format.euro($0) } ?? (cost.note ?? "zusätzlich"))
+            // What the price is made of, what comes on top and what it used to be: folded away until asked for.
+            let lines = current?.breakdown ?? []
+            let extras = detail.listing.profile.price?.extraCosts ?? []
+            let earlier = detail.prices.filter { $0.id != current?.id && $0.totalCents != nil }
+            if open.contains("price") {
+                ForEach(lines, id: \.self) { line in
+                    LabeledContent(line.item, value: line.amountCents.map { Format.euro(cents: $0) } ?? "nicht beziffert")
+                }
+                ForEach(extras, id: \.self) { cost in
+                    LabeledContent(cost.item, value: cost.amountEur.map { Format.euro($0) } ?? (cost.note ?? "zusätzlich"))
+                }
+                ForEach(earlier) { price in
+                    LabeledContent("Früher, \(price.capturedAt.formatted(date: .abbreviated, time: .omitted))",
+                                   value: Format.price(totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind) ?? "")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !lines.isEmpty || !extras.isEmpty || !earlier.isEmpty {
+                more("price", [lines.isEmpty ? nil : "Aufschlüsselung", extras.isEmpty ? nil : "Nebenkosten",
+                               earlier.isEmpty ? nil : (earlier.count == 1 ? "1 früherer Preis" : "\(earlier.count) frühere Preise")].compactMap { $0 }.joined(separator: ", "))
             }
         }
     }
