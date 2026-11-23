@@ -181,6 +181,15 @@ function photoKey(url: string): { key: string; rank: number } | null {
   } catch {
     return null;
   }
+  // Check24 signs each size of a picture separately; what stays the same is the encoded address of the original.
+  const c24 = /check24\./.test(u.hostname) ? /\/source=([^/!]+)/.exec(u.pathname)?.[1] : undefined;
+  if (c24) {
+    const w = Number(/\/size=(\d+)[a-z]\d+\//.exec(u.pathname)?.[1] ?? 0);
+    return { key: `check24:${c24}`, rank: w || 10_000 };
+  }
+  // Novasol names the width as a path segment.
+  const nova = u.hostname === "image.novasol.com" ? /^\/pic\/(\d+)\/(.+)$/.exec(u.pathname) : null;
+  if (nova) return { key: `novasol:${nova[2]}`, rank: Number(nova[1]) };
   const word = SIZE_SEGMENT.exec(u.pathname)?.[1]?.toLowerCase();
   const width = Number(u.searchParams.get("im_w") ?? u.searchParams.get("w") ?? u.searchParams.get("width") ?? /[_-](\d{3,4})x\d{3,4}(?=\.)/.exec(u.pathname)?.[1] ?? 0);
   const path = u.pathname.replace(SIZE_SEGMENT, "").replace(/[_-]\d{3,4}x\d{3,4}(?=\.)/, "");
@@ -189,12 +198,25 @@ function photoKey(url: string): { key: string; rank: number } | null {
   return { key: `${u.host}${path}`, rank };
 }
 
+/** What a portal's image service wraps: the address behind a Check24 picture, read to tell a map or a guest's snapshot from the advert's pictures. */
+function notTheAdverts(url: string): boolean {
+  if (/images\.ctfassets\.net/.test(url)) return true;
+  const wrapped = /check24\.[^/]+\/.*source=([A-Za-z0-9+/=_-]+)/.exec(url)?.[1];
+  if (!wrapped) return false;
+  try {
+    const inner = Buffer.from(wrapped, "base64").toString("utf8");
+    return /maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner);
+  } catch {
+    return false;
+  }
+}
+
 function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
   const position = new Map<string, number>();
   const ranks: number[] = [];
   const out: PagePhoto[] = [];
   for (const photo of candidates) {
-    if (NOT_A_PHOTO.test(photo.url)) continue;
+    if (NOT_A_PHOTO.test(photo.url) || notTheAdverts(photo.url)) continue;
     const k = photoKey(photo.url);
     if (!k) continue;
     const at = position.get(k.key);
@@ -223,6 +245,11 @@ export function originalOf(url: string): string {
       u.searchParams.delete("im_q");
       return u.toString();
     }
+    if (u.hostname === "image.novasol.com" && /^\/pic\/\d+\//.test(u.pathname)) {
+      // Fixed steps only; this is the largest the service hands out.
+      u.pathname = u.pathname.replace(/^\/pic\/\d+\//, "/pic/2048/");
+      return u.toString();
+    }
     if (/(^|\.)(media\.vrbo\.com|trvl-media\.com)$/.test(u.hostname)) {
       for (const key of ["impolicy", "rw", "rh", "ra", "w", "h", "q"]) u.searchParams.delete(key);
       return u.toString();
@@ -242,6 +269,10 @@ export function thumbFor(url: string): string | null {
     const u = new URL(url);
     if (/(^|\.)muscache\.com$/.test(u.hostname)) {
       u.searchParams.set("im_w", "720");
+      return u.toString();
+    }
+    if (u.hostname === "image.novasol.com" && /^\/pic\/\d+\//.test(u.pathname)) {
+      u.pathname = u.pathname.replace(/^\/pic\/\d+\//, "/pic/600/");
       return u.toString();
     }
     // HomeToGo and Casamundo name the size in the first path segment.
@@ -576,7 +607,7 @@ export function profileFromBlocks(blocks: PageBlocks, kind: ListingKind): { prof
   }
 
   if (blocks.photos.length) {
-    profile.photos = blocks.photos.map((p) => ({ id: photoId(p.url), url: p.url, thumbUrl: thumbFor(p.url), width: p.width, height: p.height, caption: p.caption }));
+    profile.photos = blocks.photos.map((p) => ({ ...p, url: originalOf(p.url) })).map((p) => ({ id: photoId(p.url), url: p.url, thumbUrl: thumbFor(p.url), width: p.width, height: p.height, caption: p.caption }));
     profile.photoCount = Math.max(profile.photoCount ?? 0, profile.photos.length);
     profile.coverImageUrl ??= profile.photos[0]!.url;
     provenance.photos = `${profile.photos.length} Bilder aus den Seitendaten`;
