@@ -289,11 +289,14 @@ struct TripListView: View {
     private func load() async {
         guard let backend = model.backend else { return }
         do {
-            trips = try await backend.trips()
+            var answer = await Task { try await backend.trips() }.result
+            if case .failure(let failure) = answer, failure is CancellationError { answer = await Task { try await backend.trips() }.result }
+            trips = try answer.get()
             // Groups are an extra: a server without them still shows the trips.
             groups = (try? await backend.groups()) ?? []
             error = nil
         } catch is CancellationError {
+            return
         } catch {
             self.error = model.message(for: error)
         }

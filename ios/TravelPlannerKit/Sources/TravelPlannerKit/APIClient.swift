@@ -255,7 +255,14 @@ public struct APIClient: TravelBackend {
         }
     }
 
+    /// Every call runs apart from the task that asked for it. A screen's own task is ended by the system whenever
+    /// the screen changes, sometimes right after it appeared; a call ended with it never left the device and the
+    /// screen stayed empty. Now the answer always arrives, and a screen that is gone simply does not use it.
     private func perform(_ request: URLRequest) async throws -> Data {
+        try await Task { try await attempt(request) }.value
+    }
+
+    private func attempt(_ request: URLRequest) async throws -> Data {
         let method = request.httpMethod ?? "GET"
         var tries = 0
         while true {
@@ -282,7 +289,10 @@ public struct APIClient: TravelBackend {
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
-            if error.code == .cancelled { throw CancellationError() }
+            // Ended by the system although nobody here asked for it: told like a lost connection, so reading tries again.
+            if error.code == .cancelled {
+                throw Failure(status: nil, code: .networkConnectionLost, shown: APIError(status: 0, code: "offline", message: "Die Verbindung zum Server wurde unterbrochen. Bitte versuche es noch einmal."))
+            }
             throw Failure(status: nil, code: error.code, shown: APIError(status: 0, code: "offline", message: "Der Server ist nicht erreichbar. Bitte prüfe die Verbindung. Falls Tailscale eingeschaltet ist, trenne es dort oder verbinde es neu. (\(error.localizedDescription))"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

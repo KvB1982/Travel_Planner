@@ -484,15 +484,27 @@ struct CandidateListView: View {
     private func load() async {
         guard let backend = model.backend else { return }
         do {
-            async let trip = backend.trip(tripID)
-            async let list = backend.candidates(tripId: tripID, dateOptionId: periodID)
-            (detail, candidates) = try await (trip, list)
+            // Fetched apart from the screen's own task: when the system ends that task early, as it does after
+            // coming back from another screen, the answer still arrives instead of leaving an empty list.
+            let id = tripID, period = periodID
+            func fetch() async -> Result<(TripDetail, [CandidateSummary]), Error> {
+                await Task {
+                    async let trip = backend.trip(id)
+                    async let list = backend.candidates(tripId: id, dateOptionId: period)
+                    return try await (trip, list)
+                }.result
+            }
+            var answer = await fetch()
+            if case .failure(let failure) = answer, failure is CancellationError { answer = await fetch() }
+            (detail, candidates) = try answer.get()
             error = nil
             if !phasePicked, let trip = detail?.trip {
                 // Open the surface the trip is in; phases without a surface yet fall back to the research.
                 viewedPhase = [.framing, .research, .decision, .booking, .preparation, .travelling].contains(trip.activePhase) ? trip.activePhase : .research
             }
         } catch is CancellationError {
+            // Nothing was learned: the list must not claim to be empty.
+            if !loaded { error = "Die Angebote wurden nicht geladen. Zieh die Liste nach unten, um es noch einmal zu versuchen." }
         } catch {
             self.error = model.message(for: error)
         }
