@@ -18,6 +18,11 @@ struct CompareView: View {
     /// How far the table is scrolled sideways and down, so the pinned line of names moves with its columns.
     @State private var across: CGFloat = 0
     @State private var pinned = false
+    /// The bar with "Fertig" and the filters is out of the way while reading down the table, as in Safari:
+    /// scrolling down hides it, scrolling back up or reaching the top brings it back.
+    @State private var barHidden = false
+    @State private var barMoved = Date.distantPast
+    @State private var turn: CGFloat = 0
     /// Only offers of this country are compared; nil compares those of all countries.
     @State private var country: String?
 
@@ -64,6 +69,7 @@ struct CompareView: View {
             }
             .navigationTitle("Vergleich")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarVisibility(barHidden && offers.count >= 2 ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Fertig") { dismiss() } }
                 if countries.count > 1 {
@@ -229,6 +235,23 @@ struct CompareView: View {
         }
         .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > headerHeight - 24 } action: { _, now in
             withAnimation(.easeInOut(duration: 0.15)) { pinned = now }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { before, now in
+            // Hiding the bar shifts the table itself; what follows right after a change is that shift, not a finger.
+            guard Date.now.timeIntervalSince(barMoved) > 0.4 else { turn = now; return }
+            if now < 30 {
+                if barHidden { barHidden = false; barMoved = .now }
+                turn = now
+            } else if (now > before) != (now > turn) || abs(now - before) < 0.5 {
+                // Direction changed: measure the new stretch from here.
+                turn = before
+            } else if !barHidden, now - turn > 40 {
+                withAnimation(.easeInOut(duration: 0.2)) { barHidden = true }
+                barMoved = .now
+            } else if barHidden, turn - now > 40 {
+                withAnimation(.easeInOut(duration: 0.2)) { barHidden = false }
+                barMoved = .now
+            }
         }
         // Once the pictures and names have scrolled away, a slim line keeps saying which column is which offer.
         .overlay(alignment: .top) {
