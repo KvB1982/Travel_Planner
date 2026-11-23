@@ -1017,6 +1017,30 @@ describe("groups", () => {
   });
 });
 
+describe("tidying up trips", () => {
+  it("keeps names apart, archives, and deletes a trip while its adverts move on", async () => {
+    const s = await setup();
+    expect((await s.call("POST", "/trips", s.owner, { title: " sommer 2027 " })).body.error.code).toBe("title_taken");
+    const other = (await s.call("POST", "/trips", s.owner, { title: "Herbst" })).body.trip.id as string;
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "Sommer 2027" })).body.error.code).toBe("title_taken");
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "herbst" })).status).toBe(200);
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { status: "archived" })).body.trip.status).toBe("archived");
+
+    const id = (await s.importLink("https://www.novasol.de/ferienhaeuser/CLD520")).body.candidateId as string;
+    const member = await s.join("member", "Tante");
+    expect((await s.call("DELETE", `/trips/${s.tripId}`, member)).status).toBe(403);
+    const shelf = (await s.call("GET", "/trips", s.owner)).body.trips.find((x: { kind: string }) => x.kind === "watchlist").id as string;
+    expect((await s.call("DELETE", `/trips/${shelf}`, s.owner)).body.error.code).toBe("watchlist");
+    expect((await s.call("DELETE", `/trips/${s.tripId}?moveCandidatesTo=${other}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/trips/${s.tripId}`, s.owner)).status).toBe(404);
+    expect((await s.call("GET", `/trips/${other}/candidates`, s.owner)).body.candidates.map((c: { id: string; status: string }) => [c.id, c.status])).toEqual([[id, "new"]]);
+    expect((await s.call("DELETE", `/trips/${other}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/candidates/${id}`, s.owner)).status).toBe(404);
+    // The name is free again.
+    expect((await s.call("POST", "/trips", s.owner, { title: "Sommer 2027" })).status).toBe(201);
+  });
+});
+
 describe("sign in with Apple", () => {
   it("opens the linked account and nothing else", async () => {
     const { generateKeyPairSync, createSign } = await import("node:crypto");

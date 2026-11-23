@@ -557,3 +557,11 @@ Jede Gruppe hat genau eine gemeinsame Merkliste: eine Reise mit `kind: "watchlis
 - Hinzufügen, Entfernen, Rollen und Links sind der Verwaltung (`admin`) vorbehalten; verlassen kann jede Person die Gruppe selbst.
 
 `PATCH /trips/:id` mit `groupId: null` (oder einer anderen Gruppe) nimmt die Mitglieder der bisherigen Gruppe aus der Reise. Es bleiben, wer die Reise organisiert, und wer den Aufruf macht. Wer zusätzlich einzeln eingeladen war und zur alten Gruppe gehört, verliert den Zugriff ebenfalls und braucht eine neue Einladung.
+
+## Reisen aufräumen
+
+- **Archivieren:** `PATCH /trips/:id` mit `{ "status": "archived" }`, zurückholen mit `{ "status": "planning" }` (Organisation). Archivierte Reisen bleiben in `GET /trips`, die App zeigt sie eingeklappt.
+- **Löschen:** `DELETE /trips/:id` (nur Organisation) entfernt die Reise endgültig mit allem darin: Inserate der Reise, Stimmen, Notizen, Kasse, Buchungen, Dokumente, Listen, Plan. Antwort 204. Mit `?moveCandidatesTo=<tripId>` ziehen die Inserate vorher in eine andere Reise oder Merkliste um (als neu, ohne Stimmen; was dort schon liegt, wird nicht verdoppelt). Merklisten lassen sich nicht löschen (409 `watchlist`).
+- **Eindeutige Namen:** In einer Gruppe darf es jeden Reisenamen nur einmal geben, ebenso unter den privaten Reisen einer Person; Groß- und Kleinschreibung und Leerzeichen am Rand zählen nicht, archivierte Reisen zählen mit. `POST /trips` und `PATCH /trips/:id` (Name oder Gruppe) antworten sonst mit 409 `title_taken`. Schon vorhandene Doppelte bleiben, bis eine umbenannt oder gelöscht wird.
+- **Reise in eine andere Gruppe:** `PATCH /trips/:id` mit `{ "groupId" }`. Die Mitglieder der alten Gruppe gehen heraus, die der neuen kommen hinein.
+- **Inserat in eine andere Reise, auch in einer anderen Gruppe:** `POST /candidates/:id/move` mit `{ "tripId" }`; Ziel kann jede Reise oder Merkliste sein, in der man Mitglied ist. 409 `already_in_trip`.

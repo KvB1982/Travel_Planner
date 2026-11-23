@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
-import { activityEvents, dateOptions, groupMembers, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
+import { activityEvents, dateOptions, documents, groupMembers, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
 import { ensureGroupShelf, onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
@@ -76,6 +78,16 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     if (t?.kind === "watchlist") throw new HttpError(409, "watchlist", message);
   };
 
+  /** Two trips of one group, or two private ones of one person, cannot be told apart by the same name. */
+  const nameIsFree = async (title: string, groupId: string | null, owner: string, except?: string) => {
+    const [same] = await db
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(eq(trips.kind, "trip"), sql`lower(trim(${trips.title})) = ${title.trim().toLowerCase()}`, groupId ? eq(trips.groupId, groupId) : and(isNull(trips.groupId), eq(trips.createdBy, owner)), except ? ne(trips.id, except) : undefined))
+      .limit(1);
+    if (same) throw new HttpError(409, "title_taken", groupId ? "In dieser Gruppe gibt es schon eine Reise mit diesem Namen, vielleicht im Archiv." : "Du hast schon eine private Reise mit diesem Namen, vielleicht im Archiv.");
+  };
+
   app.post("/trips", async (req, reply) => {
     const uid = userId(req);
     const body = parseBody(
@@ -86,6 +98,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     // Without a word on it, a new trip goes into the person's group, when there is exactly one. null keeps it private.
     const groupId = body.groupId === undefined ? await onlyGroupOf(db, uid) : body.groupId;
     if (groupId) await requireGroupMember(db, groupId, uid);
+    await nameIsFree(body.title, groupId, uid);
     const trip = await db.transaction(async (tx) => {
       const [t] = await tx
         .insert(trips)
@@ -172,6 +185,11 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     await requireMember(db, tripId, uid, "organizer");
     await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
     const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases), splitMode: z.enum(["equal", "heads"]), childWeight: z.number().min(0).max(1), groupId: z.string().uuid().nullable() }).partial(), req.body);
+    if ("groupId" in body || body.title !== undefined) {
+      const [now] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
+      const target = "groupId" in body ? (body.groupId ?? null) : now!.groupId;
+      if (body.title !== undefined ? body.title.trim().toLowerCase() !== now!.title.trim().toLowerCase() || target !== now!.groupId : target !== now!.groupId) await nameIsFree(body.title ?? now!.title, target, now!.createdBy, tripId);
+    }
     if ("groupId" in body) {
       const [now] = await db.select({ groupId: trips.groupId }).from(trips).where(eq(trips.id, tripId)).limit(1);
       if (body.groupId) await requireGroupMember(db, body.groupId, uid);
@@ -191,6 +209,29 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     if (Object.keys(values).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");
     const [trip] = await db.update(trips).set(values).where(eq(trips.id, tripId)).returning();
     return { trip };
+  });
+
+  /**
+   * Remove a trip for good, with everything in it: adverts, votes, notes, the purse, bookings, papers, lists.
+   * Adverts worth keeping can be moved to another trip or a shelf first, in the same call.
+   */
+  app.delete("/trips/:tripId", async (req, reply) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht löschen.");
+    const keep = (req.query as { moveCandidatesTo?: string }).moveCandidatesTo;
+    if (keep) {
+      const target = uuidParam(keep);
+      if (target === tripId) throw new HttpError(400, "invalid_request", "Das Ziel ist die Reise selbst.");
+      await requireMember(db, target, uid, "member");
+      // What is there already stays as it is; the rest moves over as new.
+      await db.execute(sql`update ${tripListings} set trip_id = ${target}, status = 'new', rejection_reason = null, criteria_checks = '{}'::jsonb, finalist = false where trip_id = ${tripId} and listing_id not in (select listing_id from ${tripListings} where trip_id = ${target})`);
+    }
+    const papers = await db.select({ storedName: documents.storedName }).from(documents).where(eq(documents.tripId, tripId));
+    await db.delete(trips).where(eq(trips.id, tripId));
+    for (const p of papers) await rm(path.join(ctx.config.FILES_DIR, path.basename(p.storedName)), { force: true });
+    return reply.code(204).send();
   });
 
   app.post("/trips/:tripId/date-options", async (req, reply) => {
