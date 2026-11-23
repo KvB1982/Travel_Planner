@@ -5,6 +5,7 @@ import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
 import { activityEvents, dateOptions, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
+import { onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT");
 const dateOption = z
@@ -19,7 +20,18 @@ const tripFields = {
   pets: z.number().int().min(0).max(10),
   budgetTotalCents: z.number().int().min(0).nullish(),
   voteDeadline: z.string().datetime().nullish(),
+  flexStart: isoDate.nullish(),
+  flexEnd: isoDate.nullish(),
+  nightsMin: z.number().int().min(1).max(60).nullish(),
+  nightsMax: z.number().int().min(1).max(60).nullish(),
 };
+
+/** A window needs both ends in order, and a shortest stay no longer than the longest. */
+function checkWindow(w: { flexStart?: string | null; flexEnd?: string | null; nightsMin?: number | null; nightsMax?: number | null }) {
+  if (Boolean(w.flexStart) !== Boolean(w.flexEnd)) throw new HttpError(400, "invalid_request", "Das Zeitfenster braucht einen frühesten Anreisetag und einen spätesten Abreisetag.");
+  if (w.flexStart && w.flexEnd && w.flexEnd <= w.flexStart) throw new HttpError(400, "invalid_request", "Der späteste Abreisetag muss nach dem frühesten Anreisetag liegen.");
+  if (w.nightsMin && w.nightsMax && w.nightsMin > w.nightsMax) throw new HttpError(400, "invalid_request", "Die kürzeste Dauer darf nicht länger sein als die längste.");
+}
 
 /**
  * The phase the trip is in today. Arrival and departure move it on by themselves: a booked trip is
@@ -48,9 +60,13 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post("/trips", async (req, reply) => {
     const uid = userId(req);
     const body = parseBody(
-      z.object({ ...tripFields, adults: tripFields.adults.default(2), children: tripFields.children.default(0), pets: tripFields.pets.default(0), dateOptions: z.array(dateOption).max(10).default([]) }),
+      z.object({ ...tripFields, adults: tripFields.adults.default(2), children: tripFields.children.default(0), pets: tripFields.pets.default(0), dateOptions: z.array(dateOption).max(10).default([]), groupId: z.string().uuid().nullable().optional() }),
       req.body,
     );
+    checkWindow(body);
+    // Without a word on it, a new trip goes into the person's group, when there is exactly one. null keeps it private.
+    const groupId = body.groupId === undefined ? await onlyGroupOf(db, uid) : body.groupId;
+    if (groupId) await requireGroupMember(db, groupId, uid);
     const trip = await db.transaction(async (tx) => {
       const [t] = await tx
         .insert(trips)
@@ -62,10 +78,16 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
           pets: body.pets,
           budgetTotalCents: body.budgetTotalCents ?? null,
           voteDeadline: body.voteDeadline ? new Date(body.voteDeadline) : null,
+          flexStart: body.flexStart ?? null,
+          flexEnd: body.flexEnd ?? null,
+          nightsMin: body.nightsMin ?? null,
+          nightsMax: body.nightsMax ?? null,
+          groupId,
           createdBy: uid,
         })
         .returning();
       await tx.insert(tripMembers).values({ tripId: t!.id, userId: uid, role: "organizer" });
+      if (groupId) await openTripToGroup(tx, t!.id, groupId);
       if (body.dateOptions.length) await tx.insert(dateOptions).values(body.dateOptions.map((d) => ({ ...d, tripId: t!.id })));
       return t!;
     });
@@ -124,7 +146,16 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
     await requireMember(db, tripId, uid, "organizer");
     await notTheWatchlist(tripId, "Die Merkliste lässt sich nicht ändern.");
-    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases), splitMode: z.enum(["equal", "heads"]), childWeight: z.number().min(0).max(1) }).partial(), req.body);
+    const body = parseBody(z.object({ ...tripFields, status: z.enum(["planning", "decided", "booked", "archived"]), phase: z.enum(tripPhases), splitMode: z.enum(["equal", "heads"]), childWeight: z.number().min(0).max(1), groupId: z.string().uuid().nullable() }).partial(), req.body);
+    // Into a group: everyone in it joins the trip. Out of it: whoever is in the trip stays.
+    if (body.groupId) {
+      await requireGroupMember(db, body.groupId, uid);
+      await openTripToGroup(db, tripId, body.groupId);
+    }
+    if (["flexStart", "flexEnd", "nightsMin", "nightsMax"].some((k) => k in body)) {
+      const [now] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
+      checkWindow({ flexStart: now!.flexStart, flexEnd: now!.flexEnd, nightsMin: now!.nightsMin, nightsMax: now!.nightsMax, ...body });
+    }
     const { voteDeadline, ...rest } = body;
     const values = { ...rest, ...(voteDeadline !== undefined ? { voteDeadline: voteDeadline ? new Date(voteDeadline) : null } : {}) };
     if (Object.keys(values).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");

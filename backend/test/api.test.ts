@@ -900,6 +900,88 @@ describe("written offline", () => {
   });
 });
 
+describe("a window of possible dates", () => {
+  it("takes any stay inside the window and compares them by the night", async () => {
+    const extractor: Extractor = async ({ baseline }) => ({ profile: { ...baseline, title: "Haus", price: { ...baseline.price, totalEur: 3000, kind: "total", available: true } }, note: null });
+    const t = await testApp({ extractor });
+    const owner = await t.bootstrap();
+    expect((await t.call("POST", "/trips", owner, { title: "x", flexStart: "2027-05-14" })).status).toBe(400);
+    const tripId = (await t.call("POST", "/trips", owner, { title: "Pfingsten", adults: 4, flexStart: "2027-05-14", flexEnd: "2027-05-30", nightsMin: 7, nightsMax: 14 })).body.trip.id as string;
+    const list = async () => (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+
+    // Shared with dates that fit: they are the stay this advert is looked at for.
+    const id = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520?start=15-05-2027&nights=10&adult=4", html: fixture("novasol.html") })).body.candidateId as string;
+    await t.ctx.queue.idle();
+    let c = (await list())[0];
+    expect(c.price).toMatchObject({ forThisTrip: true, startDate: "2027-05-15", endDate: "2027-05-25", totalCents: 300000 });
+    expect(c.stays).toEqual([expect.objectContaining({ startDate: "2027-05-15", endDate: "2027-05-25", nights: 10, perNightCents: 30000, best: true })]);
+
+    // Another stay for the same advert, asked about by its dates. Seven nights at the same total cost more by the night.
+    expect((await t.call("POST", `/candidates/${id}/capture`, owner, { html: fixture("novasol.html"), forTrip: true, startDate: "2027-06-01", endDate: "2027-06-08" })).body.error.code).toBe("outside_window");
+    expect((await t.call("POST", `/candidates/${id}/capture`, owner, { html: fixture("novasol.html"), forTrip: true, startDate: "2027-05-16", endDate: "2027-05-19" })).body.error.code).toBe("outside_window");
+    expect((await t.call("POST", `/candidates/${id}/capture`, owner, { html: fixture("novasol.html"), forTrip: true, startDate: "2027-05-16", endDate: "2027-05-23" })).status).toBe(202);
+    await t.ctx.queue.idle();
+    c = (await list())[0];
+    expect(c.stays.map((x: { startDate: string; nights: number; perNightCents: number; best: boolean }) => [x.startDate, x.nights, x.perNightCents, x.best])).toEqual([["2027-05-15", 10, 30000, true], ["2027-05-16", 7, 42857, false]]);
+    expect(c.price).toMatchObject({ startDate: "2027-05-15", totalCents: 300000 });
+    expect(c.availability).toBe("available");
+
+    // The check of the whole trip says which page to open for dates named in the call.
+    await t.db.update(listingSources).set({ lastFetchedAt: new Date(Date.now() - 120_000) });
+    const check = await t.call("POST", `/trips/${tripId}/check`, owner, { startDate: "2027-05-20", endDate: "2027-05-29", candidateId: id });
+    expect(check.body).toMatchObject({ startDate: "2027-05-20", endDate: "2027-05-29", dateOptionId: null });
+    expect(check.body.checks[0].checkUrl).toContain("start=20-05-2027");
+    expect((await t.call("GET", "/me/pending-readings", owner)).body.pending).toEqual([]);
+  });
+});
+
+describe("groups", () => {
+  it("opens every trip of the group to all its members", async () => {
+    const t = await testApp();
+    const owner = await t.bootstrap();
+    const first = (await t.call("POST", "/trips", owner, { title: "Vor der Gruppe" })).body.trip;
+    expect(first.groupId).toBeNull();
+    const made = await t.call("POST", "/groups", owner, { name: "Familie" });
+    expect(made.status).toBe(201);
+    const group = made.body.groups[0];
+    expect(group).toMatchObject({ name: "Familie", role: "admin" });
+    await t.call("PATCH", `/trips/${first.id}`, owner, { groupId: group.id });
+
+    // Someone new comes in by link and sees what is there.
+    const link = (await t.call("POST", `/groups/${group.id}/invites`, owner, {})).body;
+    expect((await t.call("GET", `/auth/invites/${link.token}`, null)).body).toMatchObject({ group: { name: "Familie" }, trip: null });
+    const anna = (await t.call("POST", `/auth/invites/${link.token}/accept`, null, { name: "Anna" })).body;
+    expect(anna.groupId).toBe(group.id);
+    const titles = async (token: string) => (await t.call("GET", "/trips", token)).body.trips.filter((x: { kind: string }) => x.kind === "trip").map((x: { title: string }) => x.title).sort();
+    expect(await titles(anna.token)).toEqual(["Vor der Gruppe"]);
+
+    // A new trip lands in the group by itself, and both see it. A private one stays private.
+    const second = (await t.call("POST", "/trips", anna.token, { title: "Pfingsten" })).body.trip;
+    expect(second.groupId).toBe(group.id);
+    await t.call("POST", "/trips", owner, { title: "Nur ich", groupId: null });
+    expect(await titles(owner)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
+    expect(await titles(anna.token)).toEqual(["Pfingsten", "Vor der Gruppe"]);
+
+    // A link to a single trip, pasted by someone who is signed in already.
+    const solo = (await t.call("GET", "/trips", owner)).body.trips.find((x: { title: string }) => x.title === "Nur ich");
+    const tripLink = (await t.call("POST", `/trips/${solo.id}/invites`, owner, {})).body;
+    expect((await t.call("POST", "/invites/redeem", anna.token, { link: "kein link, nur text" })).body.error.code).toBe("invite_unreadable");
+    const redeemed = await t.call("POST", "/invites/redeem", anna.token, { link: `${tripLink.url}?x=1` });
+    expect(redeemed.status).toBe(201);
+    expect(redeemed.body).toMatchObject({ tripId: solo.id, token: null });
+    expect(await titles(anna.token)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
+    expect((await t.call("POST", "/invites/redeem", anna.token, { link: tripLink.url })).status).toBe(410);
+
+    // Only the administration adds people, and the group never loses it.
+    expect((await t.call("POST", `/groups/${group.id}/invites`, anna.token, {})).status).toBe(403);
+    expect((await t.call("DELETE", `/groups/${group.id}/members/${made.body.groups[0].members[0].id}`, owner)).body.error.code).toBe("last_admin");
+    // Leaving takes the group's trips along, except the one Anna set up and the one she was invited to by itself.
+    await t.call("DELETE", `/groups/${group.id}/members/${anna.user.id}`, anna.token);
+    expect(await titles(anna.token)).toEqual(["Nur ich", "Pfingsten"]);
+    expect((await t.call("GET", "/groups", anna.token)).body.groups).toEqual([]);
+  });
+});
+
 describe("sign in with Apple", () => {
   it("opens the linked account and nothing else", async () => {
     const { generateKeyPairSync, createSign } = await import("node:crypto");

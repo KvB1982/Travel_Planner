@@ -89,6 +89,16 @@ export const trips = pgTable(
   splitMode: text("split_mode").$type<"equal" | "heads">().notNull().default("equal"),
   childWeight: doublePrecision("child_weight").notNull().default(1),
   voteDeadline: timestamp("vote_deadline", { withTimezone: true }),
+  /**
+   * When the dates are not fixed: the earliest day to arrive, the latest to leave, and how many nights it may be.
+   * Any stay inside counts as one for this trip, so each advert can be looked at for the dates it is free.
+   */
+  flexStart: date("flex_start"),
+  flexEnd: date("flex_end"),
+  nightsMin: integer("nights_min"),
+  nightsMax: integer("nights_max"),
+  /** The group this trip belongs to; its members are members of the trip. Plain id, the table comes further down. */
+  groupId: uuid("group_id"),
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
@@ -114,9 +124,9 @@ export const tripMembers = pgTable(
 
 export const invites = pgTable("invites", {
   id: id(),
-  tripId: uuid("trip_id")
-    .notNull()
-    .references(() => trips.id, { onDelete: "cascade" }),
+  /** An invite leads to one trip or into a group, never both. */
+  tripId: uuid("trip_id").references(() => trips.id, { onDelete: "cascade" }),
+  groupId: uuid("group_id"),
   tokenHash: text("token_hash").notNull().unique(),
   role: memberRole("role").notNull().default("member"),
   createdBy: uuid("created_by")
@@ -636,3 +646,26 @@ export const houseInfo = pgTable("house_info", {
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** People who travel together again and again. Every trip of the group is open to all of them. */
+export const groups = pgTable("groups", {
+  id: id(),
+  name: text("name").notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+});
+
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<"admin" | "member">().notNull().default("member"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
+);

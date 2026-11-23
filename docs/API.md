@@ -497,3 +497,48 @@ Liest das Gerät eine Seite für den Zeitraum, bevor Preis und Verfügbarkeit ge
 `fitsParty` im Listeneintrag ist `false`, wenn das Inserat laut Steckbrief weniger Gäste aufnimmt (`maxGuests`), als die Reise Personen hat, `true`, wenn es passt, und `null`, wenn eines von beiden unbekannt ist. Bei `false` zeigen Plattformen statt eines Preises oft nur einen Hinweis zur Gästezahl.
 
 Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfügbarkeit, gleicher Zeitraum), entsteht keine neue Preiszeile. Der Zeitpunkt der Bestätigung steht dann in `availabilityCheckedAt`, in `price.checkedAt` und in `periods[].checkedAt`; `price.capturedAt` bleibt der Zeitpunkt, zu dem der Preis zum ersten Mal so gesehen wurde. Wer auf das Ende eines Abrufs wartet, vergleicht `availabilityCheckedAt`, `price.checkedAt` oder `emptyCheckAt` mit dem Absenden.
+
+## Gruppen
+
+Eine Gruppe sind Leute, die immer wieder zusammen verreisen. Jede Reise der Gruppe steht allen Mitgliedern offen: Wer der Gruppe beitritt, wird Mitglied aller ihrer Reisen; eine neue Reise in der Gruppe bekommt alle als Mitglieder. Beim Umstellen wurden alle bisherigen Konten und Reisen in eine Gruppe „Unsere Gruppe" gelegt; das älteste Konto verwaltet sie.
+
+`GET /groups`:
+
+```json
+{ "groups": [ { "id": "…", "name": "Unsere Gruppe", "role": "admin", "createdAt": "…",
+                "members": [ { "id": "…", "name": "Kristian", "role": "admin", "joinedAt": "…" } ],
+                "trips": [ { "id": "…", "title": "Pfingsten 2027" } ] } ] }
+```
+
+- `POST /groups` mit `{ "name" }` legt eine Gruppe an, `PATCH /groups/:id` benennt sie um (nur Verwaltung).
+- `POST /groups/:id/invites` (nur Verwaltung) mit optional `maxUses`, `expiresInDays` liefert einmalig `{ token, url, expiresAt, maxUses }`. Der Link funktioniert wie eine Einladung zu einer Reise, führt aber in die Gruppe.
+- `DELETE /groups/:id/members/:userId` entfernt jemanden (Verwaltung) oder verlässt die Gruppe (man selbst). Die Reisen der Gruppe gehen mit, außer denen, die die Person selbst angelegt hat. 409 `last_admin`, wenn die Gruppe sonst niemanden hätte, der sie verwaltet.
+- `PATCH /groups/:id/members/:userId` mit `{ "role": "admin" | "member" }` gibt die Verwaltung weiter oder teilt sie.
+- Alle schreibenden Aufrufe antworten mit `{ groups }`.
+- Reisen: `POST /trips` nimmt `groupId`. Ohne Angabe landet die Reise in der Gruppe der Person, wenn sie in genau einer ist; `groupId: null` hält sie privat. `PATCH /trips/:id` mit `groupId` legt eine Reise nachträglich in eine Gruppe. Jede Reise nennt ihre `groupId`.
+
+### Einladungen
+
+- `GET /auth/invites/:token` liefert jetzt `{ trip, group, role }`; eines von `trip` und `group` ist `null`.
+- `POST /auth/invites/:token/accept` antwortet zusätzlich mit `groupId` (`tripId` ist bei einer Gruppeneinladung `null`).
+- `POST /invites/redeem` (angemeldet) mit `{ "link": "…" }` löst einen erhaltenen Link ein; der ganze Link oder nur sein letzter Teil. Antwort 201 wie `accept`, mit `token: null`. Fehler: 400 `invite_unreadable`, 410 `invite_invalid`.
+
+## Noch nicht vom Gerät gelesen
+
+`GET /me/pending-readings` liefert über alle Reisen der Person die Inserate, die nur ein Gerät lesen kann und die noch kein Gerät gelesen hat, neueste zuerst, höchstens 50:
+
+```json
+{ "pending": [ { "candidateId": "…", "tripId": "…", "platform": "airbnb", "title": "…", "url": "https://…", "addedAt": "…" } ] }
+```
+
+Die App arbeitet die Liste nach der Anmeldung im Hintergrund ab: Seite öffnen, wie gewohnt an `POST /candidates/:id/capture` senden. Danach fehlt der Eintrag. Im Listeneintrag steht dasselbe als `deviceRead`.
+
+## Flexibler Reisezeitraum
+
+Eine Reise kann statt fester Daten (oder zusätzlich) ein Zeitfenster haben: `flexStart` (frühester Anreisetag), `flexEnd` (spätester Abreisetag), `nightsMin`, `nightsMax`. Setzen bei `POST /trips` oder `PATCH /trips/:id`; `flexStart` und `flexEnd` nur gemeinsam, zum Abschalten beide `null`.
+
+- Jeder Aufenthalt, der im Fenster liegt und so lang ist wie erlaubt, zählt als Preis für die Reise. Wird ein Link mit Daten geteilt, die ins Fenster passen (jemand hat auf der Plattform gewählt, wann das Haus frei ist), gilt genau dieser Aufenthalt, ohne dass ein Zeitraum in der Reise angelegt sein muss.
+- Ein anderer Aufenthalt für ein Inserat: `POST /candidates/:id/capture` mit `forTrip: true` und `startDate`, `endDate`. Die Seite dafür nennt `POST /trips/:id/check` mit `startDate`, `endDate` und optional `candidateId` (nur dieses Inserat) unter `checks[].checkUrl`. 400 `outside_window`, wenn die Daten weder im Fenster liegen noch ein Zeitraum der Reise sind.
+- Im Listeneintrag steht `stays`: alle Aufenthalte, zu denen etwas bekannt ist, je `{ startDate, endDate, nights, totalCents, perNightCents, available, checkedAt, best }`. `best` ist der buchbare Aufenthalt mit dem niedrigsten Preis je Nacht; ihn zeigt `price` (mit seinen eigenen `startDate`, `endDate`, `nights`). `availability` ist `available`, sobald ein Aufenthalt im Fenster frei ist, und `unavailable` erst, wenn alle angesehenen belegt sind.
+- Ohne eigenen Zeitraum fragt der Prüflauf der Reise nach der mittleren Dauer ab dem frühesten Anreisetag. Hat die Reise Zeiträume, bleibt der früheste der Standard; mit `dateOptionId` in der Liste gilt wie bisher nur dieser eine.
+- Novasol-Links mit `start=TT-MM-JJJJ&nights=N` werden jetzt als Aufenthalt gelesen.

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { appleKeys, verifyAppleToken } from "../auth/apple.js";
 import { hashToken, newToken, safeEqual } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
-import { invites, sessions, tripMembers, trips, users } from "../db/schema.js";
+import { groups, invites, sessions, tripMembers, trips, users } from "../db/schema.js";
+import { joinGroup } from "./groups.js";
 import { HttpError, parseBody, userId } from "../http.js";
 
 const strictLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } };
@@ -51,15 +52,15 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get("/auth/invites/:token", strictLimit, async (req) => {
     const { token } = req.params as { token: string };
     const invite = await findInvite(ctx, token);
-    const [trip] = await db.select({ title: trips.title, region: trips.region }).from(trips).where(eq(trips.id, invite.tripId)).limit(1);
-    return { trip, role: invite.role };
+    const [trip] = invite.tripId ? await db.select({ title: trips.title, region: trips.region }).from(trips).where(eq(trips.id, invite.tripId)).limit(1) : [];
+    const [group] = invite.groupId ? await db.select({ name: groups.name }).from(groups).where(eq(groups.id, invite.groupId)).limit(1) : [];
+    return { trip: trip ?? null, group: group ?? null, role: invite.role };
   });
 
-  /** Join a trip with an invite. Signed-in users join as themselves, everyone else gets a new account. */
-  app.post("/auth/invites/:token/accept", strictLimit, async (req, reply) => {
-    const { token } = req.params as { token: string };
-    const body = parseBody(z.object({ name: z.string().trim().min(1).max(80).optional(), deviceName: z.string().max(80).optional() }), req.body);
+  const acceptBody = z.object({ name: z.string().trim().min(1).max(80).optional(), deviceName: z.string().max(80).optional() });
 
+  /** Join a trip or a group with an invite. Signed-in users join as themselves, everyone else gets a new account. */
+  async function accept(token: string, user: { id: string; name: string } | null, body: z.infer<typeof acceptBody>) {
     const result = await db.transaction(async (tx) => {
       // Counting the use first, in one statement, keeps two people from sharing a single-use invite.
       const [invite] = await tx
@@ -69,20 +70,37 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
         .returning();
       if (!invite) throw new HttpError(410, "invite_invalid", "Diese Einladung ist abgelaufen oder wurde schon verwendet.");
 
-      let uid = req.user?.id;
-      let name = req.user?.name;
+      let uid = user?.id;
+      let name = user?.name;
       if (!uid) {
         if (!body.name) throw new HttpError(400, "invalid_request", "name: erforderlich");
-        const [user] = await tx.insert(users).values({ name: body.name }).returning();
-        uid = user!.id;
-        name = user!.name;
+        const [created] = await tx.insert(users).values({ name: body.name }).returning();
+        uid = created!.id;
+        name = created!.name;
       }
-      await tx.insert(tripMembers).values({ tripId: invite.tripId, userId: uid, role: invite.role }).onConflictDoNothing();
-      return { uid, name: name!, tripId: invite.tripId, role: invite.role };
+      if (invite.groupId) await joinGroup(tx, invite.groupId, uid);
+      if (invite.tripId) await tx.insert(tripMembers).values({ tripId: invite.tripId, userId: uid, role: invite.role }).onConflictDoNothing();
+      return { uid, name: name!, tripId: invite.tripId, groupId: invite.groupId, role: invite.role };
     });
+    const sessionToken = user ? null : await createSession(ctx, result.uid, body.deviceName);
+    return { token: sessionToken, user: { id: result.uid, name: result.name }, tripId: result.tripId, groupId: result.groupId, role: result.role };
+  }
 
-    const sessionToken = req.user ? null : await createSession(ctx, result.uid, body.deviceName);
-    return reply.code(201).send({ token: sessionToken, user: { id: result.uid, name: result.name }, tripId: result.tripId, role: result.role });
+  app.post("/auth/invites/:token/accept", strictLimit, async (req, reply) => {
+    const { token } = req.params as { token: string };
+    return reply.code(201).send(await accept(token, req.user, parseBody(acceptBody, req.body ?? {})));
+  });
+
+  /**
+   * The same for someone who is signed in and was sent a link: paste the link, or just its last part.
+   * The link travels in the body, so it does not show up in the log.
+   */
+  app.post("/invites/redeem", strictLimit, async (req, reply) => {
+    userId(req);
+    const body = parseBody(z.object({ link: z.string().trim().min(10).max(2000) }), req.body);
+    const token = body.link.replace(/[?#].*$/, "").replace(/\/+$/, "").split("/").pop() ?? "";
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) throw new HttpError(400, "invite_unreadable", "Das ist kein Einladungslink. Füge den ganzen Link ein, so wie du ihn bekommen hast.");
+    return reply.code(201).send(await accept(token, req.user, {}));
   });
 
   const keys = ctx.appleKeys ?? appleKeys();

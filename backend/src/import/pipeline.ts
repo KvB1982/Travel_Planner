@@ -125,15 +125,42 @@ export async function startImport(deps: ImportDeps, input: { tripId: string; use
   return { candidateId: candidate!.id, listingId, sourceId, link, duplicate: false };
 }
 
-/** The stay a trip asks about: the chosen period, or the earliest one when none is named. */
-export async function tripStay(db: Db, tripId: string, dateOptionId?: string | null) {
+export interface Window {
+  flexStart: string | null;
+  flexEnd: string | null;
+  nightsMin: number | null;
+  nightsMax: number | null;
+}
+
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/** Whether a stay lies inside the trip's window of possible dates and is as long as the trip may be. */
+export function inWindow(w: Window, startDate: string | null, endDate: string | null): boolean {
+  if (!w.flexStart || !w.flexEnd || !startDate || !endDate || endDate <= startDate) return false;
+  const nights = nightsBetween(startDate, endDate);
+  if (nights === null) return false;
+  return startDate >= w.flexStart && endDate <= w.flexEnd && nights >= (w.nightsMin ?? 1) && nights <= (w.nightsMax ?? 366);
+}
+
+/**
+ * The stay a trip asks about: dates named for this one look, else the chosen period, else the earliest one.
+ * A trip with only a window is asked about its middle length from the first possible day.
+ */
+export async function tripStay(db: Db, tripId: string, dateOptionId?: string | null, dates?: { startDate: string; endDate: string } | null) {
   const [trip] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
   const all = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
-  const option = (dateOptionId ? all.find((o) => o.id === dateOptionId) : undefined) ?? all[0];
+  let option: { id: string | null; startDate: string; endDate: string } | undefined = dates ? { id: all.find((o) => o.startDate === dates.startDate && o.endDate === dates.endDate)?.id ?? null, ...dates } : ((dateOptionId ? all.find((o) => o.id === dateOptionId) : undefined) ?? all[0]);
+  if (!option && trip?.flexStart && trip.flexEnd) {
+    const room = nightsBetween(trip.flexStart, trip.flexEnd) ?? 0;
+    const wish = Math.round(((trip.nightsMin ?? room) + (trip.nightsMax ?? trip.nightsMin ?? room)) / 2);
+    const nights = Math.max(1, Math.min(room, wish));
+    if (room > 0) option = { id: null, startDate: trip.flexStart, endDate: addDays(trip.flexStart, nights) };
+  }
   return {
     dateOptionId: option?.id ?? null,
     startDate: option?.startDate ?? null,
     endDate: option?.endDate ?? null,
+    window: { flexStart: trip?.flexStart ?? null, flexEnd: trip?.flexEnd ?? null, nightsMin: trip?.nightsMin ?? null, nightsMax: trip?.nightsMax ?? null } as Window,
     adults: trip?.adults ?? null,
     children: trip?.children ?? null,
   };
@@ -145,7 +172,7 @@ export async function tripStay(db: Db, tripId: string, dateOptionId?: string | n
  */
 export async function processImport(
   deps: ImportDeps,
-  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean; /** Which of the trip's periods is asked about; the earliest when left out. */ dateOptionId?: string | null; /** The address the device had open, for diagnosis. */ openedUrl?: string },
+  input: { candidateId: string; listingId: string; sourceId: string; link: LinkInfo; tripId: string; userId: string; html?: string; /** The device opened the page for the trip's own dates and party. */ forTrip?: boolean; /** Which of the trip's periods is asked about; the earliest when left out. */ dateOptionId?: string | null; /** Dates asked about in this one look, inside the trip's window. */ dates?: { startDate: string; endDate: string } | null; /** The address the device had open, for diagnosis. */ openedUrl?: string },
 ): Promise<void> {
   const { db } = deps;
   const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, input.listingId)).orderBy(asc(listingSources.createdAt));
@@ -157,7 +184,13 @@ export async function processImport(
   };
 
   try {
-    const stay = await tripStay(db, input.tripId, input.dateOptionId);
+    let stay = await tripStay(db, input.tripId, input.dateOptionId, input.dates);
+    // The link was shared with dates that fit the trip's window: somebody picked them because the house is free then.
+    // They are what this look is about, unless a period was named.
+    const picked = input.link.stay;
+    if (!input.dates && !input.dateOptionId && !input.link.searchWindow && picked.startDate && picked.endDate && inWindow(stay.window, picked.startDate, picked.endDate)) {
+      stay = await tripStay(db, input.tripId, null, { startDate: picked.startDate, endDate: picked.endDate });
+    }
     const fromDevice = input.html !== undefined;
     let html = input.html ?? "";
     // The device's word only counts where a link can carry the trip's dates; otherwise it opened the undated page.
@@ -335,7 +368,9 @@ export async function processImport(
     // A price belongs to the trip only if it is for one of the trip's periods. A price that merely
     // came along with a shared link for other dates stays unassigned, even when the device sent the page.
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, input.tripId));
-    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate);
+    // With a window of possible dates, a price for any stay inside it is one for the trip: the dates somebody
+    // picked on the platform because the house was free then come along with the shared link.
+    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate) || inWindow(stay.window, price.startDate, price.endDate);
     const totalCents = price.totalEur !== null ? Math.round(price.totalEur * 100) : null;
     const [latest] = await db.select().from(priceSnapshots).where(eq(priceSnapshots.listingSourceId, input.sourceId)).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
     const unchanged =
