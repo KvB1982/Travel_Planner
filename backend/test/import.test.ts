@@ -183,8 +183,10 @@ describe("what real pages taught us", () => {
     const html = `<html><body><img src="${c}/medium/e_v5/aaa.jpg"><p>Villa</p>
       <div id="tp-captured-images" hidden><img src="${c}/medium/e_v5/aaa.jpg"><img src="${c}/large/e_v5/aaa.jpg"><img src="${c}/large/e_v5/bbb.jpg"><img src="${c}/medium/v1/ccc.jpg"><img src="https://bat.bing.com/action/0?ti=1"><img src="${c}/thumb/v1/ccc.jpg"></div></body></html>`;
     const blocks = extractBlocks(html);
-    expect(blocks.photos.map((p) => p.url)).toEqual([`${c}/large/e_v5/aaa.jpg`, `${c}/large/e_v5/bbb.jpg`, `${c}/medium/v1/ccc.jpg`]);
+    expect(blocks.photos.map((p) => p.url)).toEqual([`${c}/large/e_v5/aaa.jpg`, `${c}/large/e_v5/bbb.jpg`, `${c}/large/v1/ccc.jpg`]);
     expect(profileFromBlocks(blocks, "vacation_home").profile.photos[0]!.thumbUrl).toBe(`${c}/medium/e_v5/aaa.jpg`);
+    // The medium size alone is not what the full view gets: the large one exists for every picture.
+    expect(profileFromBlocks(blocks, "vacation_home").profile.photos[2]).toMatchObject({ url: `${c}/large/v1/ccc.jpg`, thumbUrl: `${c}/medium/v1/ccc.jpg` });
   });
 
   it("keeps other adverts' pictures out when the page itself says which ones belong", () => {
