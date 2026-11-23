@@ -477,11 +477,15 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       .orderBy(asc(comments.createdAt));
     // Measured against the trip's must-haves and wishes, criterion by criterion.
     const wanted = await criteriaOf(candidate.tripId);
-    const self = wanted.length ? (await loadCandidates(candidate.tripId, uid)).find((c) => c.entry.id === candidate.id) : undefined;
+    const self = (await loadCandidates(candidate.tripId, uid)).find((c) => c.entry.id === candidate.id);
     return {
       candidate,
       role,
-      criteria: self ? judge(wanted, self, candidate.criteriaChecks) : null,
+      criteria: self && wanted.length ? judge(wanted, self, candidate.criteriaChecks) : null,
+      // The same as in the trip's list: every stay something is known about, which of them leads, and why.
+      stays: self?.entry.stays ?? [],
+      bestStayReason: self?.entry.bestStayReason ?? null,
+      checkWindow: self?.entry.checkWindow ?? false,
       listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
       photos: listing?.profile.photos ?? [],

@@ -974,6 +974,7 @@ describe("every possible stay from one page", () => {
     const [wished] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
     expect(wished.price).toMatchObject({ startDate: "2027-08-10", endDate: "2027-08-22", totalCents: 600000 });
     expect(wished.bestStayReason).toBe("preferred");
+    expect((await t.call("GET", `/candidates/${id}`, owner)).body).toMatchObject({ bestStayReason: "preferred", checkWindow: true, stays: wished.stays });
     await t.call("PATCH", `/trips/${tripId}`, owner, { nightsPreferred: null });
     const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
     // The first of September lies outside the window; the fifth of August takes the cheaper of its two offers.
