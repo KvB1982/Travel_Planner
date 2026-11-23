@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth.js";
 import { bookingRoutes } from "./routes/bookings.js";
 import { checklistRoutes } from "./routes/checklists.js";
 import { ledgerRoutes } from "./routes/ledger.js";
+import { groupRoutes } from "./routes/groups.js";
 import { planRoutes } from "./routes/plans.js";
 import { candidateRoutes } from "./routes/candidates.js";
 import type { AppleKeySource } from "./auth/apple.js";
@@ -73,6 +74,7 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
   bookingRoutes(app, ctx);
   checklistRoutes(app, ctx);
   planRoutes(app, ctx);
+  groupRoutes(app, ctx);
 
   app.addHook("onClose", async () => ctx.queue.idle());
   return { app, ctx };

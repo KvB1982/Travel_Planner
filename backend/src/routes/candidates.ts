@@ -4,8 +4,8 @@ import { z } from "zod";
 import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
-import { processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
-import { analyzeLink, urlForStay } from "../import/url.js";
+import { inWindow, processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
+import { analyzeLink, nightsBetween, urlForStay } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
@@ -94,10 +94,21 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
    * Page content captured on the device, for platforms that refuse the server. With `sourceId`
    * the page belongs to a further source of the advert, otherwise to the link it was shared with.
    */
+  const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  /** Dates named for one look: they have to be one of the trip's periods or lie inside its window. */
+  async function datesFor(tripId: string, named: { startDate?: unknown; endDate?: unknown }) {
+    if (named.startDate === undefined && named.endDate === undefined) return null;
+    const d = parseBody(z.object({ startDate: isoDay, endDate: isoDay }), { startDate: named.startDate, endDate: named.endDate });
+    const stay = await tripStay(db, tripId, null, d);
+    if (stay.dateOptionId === null && !inWindow(stay.window, d.startDate, d.endDate)) throw new HttpError(400, "outside_window", "Dieser Zeitraum liegt außerhalb dessen, was die Reise zulässt.");
+    return d;
+  }
+
   app.post("/candidates/:candidateId/capture", { bodyLimit: MAX_PAGE_BYTES }, async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), dateOptionId: z.string().uuid().optional(), url: z.string().max(4000).optional() }), req.body);
+    const body = parseBody(z.object({ html: z.string().min(500).max(MAX_PAGE_BYTES), sourceId: z.string().uuid().optional(), forTrip: z.boolean().optional(), dateOptionId: z.string().uuid().optional(), startDate: isoDay.optional(), endDate: isoDay.optional(), url: z.string().max(4000).optional() }), req.body);
+    const dates = await datesFor(candidate.tripId, body);
     await spend(uid, "reading");
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
     const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
@@ -107,7 +118,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
     if (source.id === sources[0]!.id) await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
     ctx.queue.push(() =>
-      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip, dateOptionId: body.dateOptionId, openedUrl: body.url }),
+      processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId: candidate.tripId, userId: uid, html: body.html, forTrip: body.forTrip, dateOptionId: body.dateOptionId, dates, openedUrl: body.url }),
     );
     return reply.code(202).send({ candidateId: candidate.id, sourceId: source.id });
   });
@@ -167,8 +178,11 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     // Prices typed in by hand always count: whoever enters one knows what it is for.
     // With several periods to choose from, only the one asked about counts: the chosen one, else the earliest.
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
+    // A trip with a window of possible dates takes any stay inside it, unless one period was asked for.
+    const flexible = !dateOptionId && Boolean(stay.window.flexStart && stay.window.flexEnd);
     const forThisTrip = (p: (typeof prices)[number]) =>
-      p.tripId === tripId && (p.capture === "manual" || !p.startDate || options.length === 0 || (p.startDate === stay.startDate && p.endDate === stay.endDate));
+      p.tripId === tripId &&
+      (p.capture === "manual" || !p.startDate || (options.length === 0 && !flexible) || (p.startDate === stay.startDate && p.endDate === stay.endDate) || (flexible && inWindow(stay.window, p.startDate, p.endDate)));
     const inPeriod = (p: (typeof prices)[number], o: (typeof options)[number]) => p.tripId === tripId && p.startDate === o.startDate && p.endDate === o.endDate;
 
     const partySize = (stay.adults ?? 0) + (stay.children ?? 0);
@@ -183,11 +197,29 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const seenAt = (x: (typeof prices)[number]) => x.confirmedAt ?? x.capturedAt;
       const empty = (x: (typeof prices)[number] | undefined) => x !== undefined && x.totalCents === null && x.available === null;
       const newestForTrip = ownPrices.find(forThisTrip);
-      const price = priced.find(forThisTrip) ?? priced[0] ?? null;
+      // Every stay something is known about: the trip's periods and whatever was looked at inside its window.
+      // The newest look with a result speaks for each.
+      const known = new Map<string, (typeof prices)[number]>();
+      for (const x of ownPrices) {
+        if (x.tripId !== tripId || !x.startDate || !x.endDate || empty(x)) continue;
+        if (!options.some((o) => o.startDate === x.startDate && o.endDate === x.endDate) && !inWindow(stay.window, x.startDate, x.endDate)) continue;
+        const key = `${x.startDate}|${x.endDate}`;
+        if (!known.has(key)) known.set(key, x);
+      }
+      const stays = [...known.values()]
+        .map((x) => {
+          const nights = x.nights ?? nightsBetween(x.startDate, x.endDate);
+          return { row: x, startDate: x.startDate!, endDate: x.endDate!, nights, totalCents: x.available === false ? null : x.totalCents, perNightCents: x.available !== false && x.totalCents !== null && nights ? Math.round(x.totalCents / nights) : null, available: x.available, checkedAt: seenAt(x) };
+        })
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+      // Different lengths compare by the night. Among stays that can be booked the cheapest night wins.
+      const best = flexible ? (stays.filter((x) => x.perNightCents !== null).sort((a, b) => a.perNightCents! - b.perNightCents!)[0] ?? null) : null;
+      const price = best?.row ?? priced.find(forThisTrip) ?? priced[0] ?? null;
       // The latest word on whether the trip's dates can be booked, from whichever source said so last.
-      const said = ownPrices.find((x) => forThisTrip(x) && x.available !== null);
+      // With a window: free as soon as one stay inside it is, gone only when every stay looked at is.
+      const said = best?.row ?? (flexible && stays.some((x) => x.available) ? stays.filter((x) => x.available).sort((a, b) => b.checkedAt.getTime() - a.checkedAt.getTime())[0]!.row : ownPrices.find((x) => forThisTrip(x) && x.available !== null));
       const stale = !said;
-      const availability = stale ? ("unknown" as const) : said.available ? ("available" as const) : ("unavailable" as const);
+      const availability = stale ? ("unknown" as const) : said.available !== false ? ("available" as const) : ("unavailable" as const);
       // The page to open for the trip's dates and party, and whether only the device gets an answer from it.
       const first = own[0];
       const shared = first ? analyzeLink(first.url) : null;
@@ -226,16 +258,20 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           // Hints still shown for this trip; hidden ones are not counted.
           warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
         },
-        price: price && { available: stale ? price.available : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price) },
+        price: price && { available: stale ? price.available : best ? true : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price) },
         // For the trip's dates and party. "unknown" until a reading for those dates said one or the other.
         availability,
         availabilityCheckedAt: stale ? null : seenAt(said),
         // Set when the most recent look for the trip's dates came back without price and without a word on availability.
         emptyCheckAt: empty(newestForTrip) ? seenAt(newestForTrip!) : null,
         needsDevice,
+        // Whether a device has read the page yet. Until then name, pictures and facts are only what the link gave away.
+        deviceRead: first?.fetchNote === "device",
         // false when the advert takes fewer guests than the trip has travellers: platforms then show a hint instead of a price.
         fitsParty: p.maxGuests === null || partySize === 0 ? null : p.maxGuests >= partySize,
         checkUrl: link ? urlForStay(link, stay) : null,
+        // What is known for each stay looked at, by the night, so that different dates and lengths compare. `best` marks the one `price` shows.
+        stays: stays.map(({ row: _r, ...x }) => ({ ...x, best: best !== null && x.startDate === best.startDate && x.endDate === best.endDate })),
         // What is known for each of the trip's periods, so they can be set side by side.
         periods: options.map((o) => {
           const seen = ownPrices.filter((x) => inPeriod(x, o));
@@ -311,6 +347,32 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     return { criteria: await criteriaOf(tripId), measurable: MEASURABLE };
   });
 
+  /**
+   * Adverts in any of the person's trips that only a device can read and that no device has read yet.
+   * The app works through them in the background once someone is signed in.
+   */
+  app.get("/me/pending-readings", async (req) => {
+    const uid = userId(req);
+    const rows = await db
+      .select({ candidateId: tripListings.id, tripId: tripListings.tripId, listingId: tripListings.listingId, title: listings.title, createdAt: tripListings.createdAt })
+      .from(tripListings)
+      .innerJoin(tripMembers, and(eq(tripMembers.tripId, tripListings.tripId), eq(tripMembers.userId, uid)))
+      .innerJoin(listings, eq(listings.id, tripListings.listingId))
+      .where(sql`${tripListings.status} <> 'rejected'`)
+      .orderBy(desc(tripListings.createdAt))
+      .limit(200);
+    const all = rows.length ? await db.select().from(listingSources).where(inArray(listingSources.listingId, rows.map((r) => r.listingId))).orderBy(asc(listingSources.createdAt)) : [];
+    const seen = new Set<string>();
+    const pending = rows.flatMap((r) => {
+      const first = all.find((x) => x.listingId === r.listingId);
+      // One reading serves every trip the advert is in.
+      if (!first || seen.has(r.listingId) || first.fetchNote === "device" || !onlyTheDeviceSeesPrices(first)) return [];
+      seen.add(r.listingId);
+      return [{ candidateId: r.candidateId, tripId: r.tripId, platform: first.platform, title: r.title, url: first.canonicalUrl, addedAt: r.createdAt }];
+    });
+    return { pending: pending.slice(0, 50) };
+  });
+
   app.get("/trips/:tripId/candidates", async (req) => {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);
@@ -330,11 +392,13 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await requireMember(db, tripId, uid, "member");
     // Which period to check: named in the body or the query, else the earliest.
     const named = (req.body as { dateOptionId?: unknown } | null)?.dateOptionId ?? (req.query as { dateOptionId?: string }).dateOptionId;
-    const stay = await tripStay(db, tripId, named ? uuidParam(named) : null);
-    if (named && stay.dateOptionId !== named) throw new HttpError(404, "not_found", "Diesen Zeitraum gibt es in der Reise nicht.");
+    const dates = await datesFor(tripId, { ...(req.query as object), ...((req.body as object | null) ?? {}) });
+    const stay = await tripStay(db, tripId, named ? uuidParam(named) : null, dates);
+    if (named && !dates && stay.dateOptionId !== named) throw new HttpError(404, "not_found", "Diesen Zeitraum gibt es in der Reise nicht.");
     if (!stay.startDate || !stay.endDate) throw new HttpError(409, "no_dates", "Die Reise hat noch keinen Zeitraum. Lege zuerst einen fest.");
     const rows = await db.select().from(tripListings).where(eq(tripListings.tripId, tripId));
-    const open = rows.filter((c) => c.status !== "rejected");
+    const only = (req.body as { candidateId?: unknown } | null)?.candidateId;
+    const open = rows.filter((c) => c.status !== "rejected" && (only === undefined || c.id === only));
     const sources = open.length ? await db.select().from(listingSources).where(inArray(listingSources.listingId, open.map((c) => c.listingId))).orderBy(asc(listingSources.createdAt)) : [];
 
     await spend(uid, "reading");
@@ -350,7 +414,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const justRead = source.lastFetchedAt !== null && Date.now() - source.lastFetchedAt.getTime() < 60_000;
       if (!device && !justRead) {
         await db.update(tripListings).set({ importStatus: "pending", importNote: null }).where(eq(tripListings.id, candidate.id));
-        ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid, dateOptionId: stay.dateOptionId }));
+        ctx.queue.push(() => processImport(importDeps, { candidateId: candidate.id, listingId: candidate.listingId, sourceId: source.id, link, tripId, userId: uid, dateOptionId: stay.dateOptionId, dates }));
       }
       // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
       const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;

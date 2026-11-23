@@ -147,12 +147,16 @@ function analyzeNovasol(url: URL): Partial<LinkInfo> | null {
   const m = /(?:^|-)([a-z]{1,3}\d{3,5})$/i.exec(last);
   if (!m) return null;
   const p = url.searchParams;
+  // The platform's own links carry the arrival as day-month-year and the number of nights.
+  const own = /^(\d{2})-(\d{2})-(\d{4})$/.exec(p.get("start") ?? "");
+  const arrival = own ? `${own[3]}-${own[2]}-${own[1]}` : null;
+  const nights = int(p.get("nights"));
   const stay = withNights({
     ...emptyStay(),
-    startDate: isoDate(p.get("arrival") ?? p.get("startDate")),
-    endDate: isoDate(p.get("departure") ?? p.get("endDate")),
-    adults: int(p.get("adults")),
-    children: int(p.get("children")),
+    startDate: isoDate(p.get("arrival") ?? p.get("startDate")) ?? arrival,
+    endDate: isoDate(p.get("departure") ?? p.get("endDate")) ?? (arrival && nights && nights > 0 && nights < 100 ? new Date(Date.parse(`${arrival}T00:00:00Z`) + nights * 86_400_000).toISOString().slice(0, 10) : null),
+    adults: int(p.get("adults") ?? p.get("adult")),
+    children: int(p.get("children") ?? p.get("child")),
   });
   return { platform: "novasol", externalId: m[1]!.toUpperCase(), canonicalUrl: `https://${url.host}${url.pathname}`, kind: "vacation_home", stay };
 }
