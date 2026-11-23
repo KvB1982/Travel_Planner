@@ -84,7 +84,8 @@ struct CandidateDetailView: View {
         } message: {
             Text(sentNote ?? "")
         }
-        .sheet(item: $mapTarget) { target in
+        // Fills the screen, like the map of the whole trip: on the iPad a sheet is too small to move about in.
+        .fullScreenCover(item: $mapTarget) { target in
             LocationMapView(title: target.title, hint: target.hint, place: target.place)
         }
         .sheet(isPresented: $showStays) {
