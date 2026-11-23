@@ -61,6 +61,26 @@ struct PhaseMenu: View {
 
     private var position: Int { (TripPhase.shown.firstIndex(of: viewed) ?? 0) + 1 }
 
+    private func pill(name: Bool, position showsPosition: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: viewed.symbol)
+            if name { Text(viewed.label).lineLimit(1) }
+            if showsPosition { Text("\(position)/\(TripPhase.shown.count)").font(.caption.weight(.medium)).opacity(0.8).lineLimit(1) }
+            Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .foregroundStyle(.white)
+        .background(Color.accentColor, in: Capsule())
+        .fixedSize()
+        .overlay(alignment: .topTrailing) {
+            // Looking at another phase than the trip is in: a small mark says so.
+            if viewed != trip.activePhase {
+                Circle().fill(.orange).frame(width: 9, height: 9).overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5)).offset(x: 2, y: -2)
+            }
+        }
+    }
+
     var body: some View {
         Menu {
             Section("Ansicht wechseln") {
@@ -76,23 +96,14 @@ struct PhaseMenu: View {
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: viewed.symbol)
-                Text(viewed.label)
-                Text("\(position)/\(TripPhase.shown.count)").font(.caption.weight(.medium)).opacity(0.8)
-                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
-            }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(.white)
-            .background(Color.accentColor, in: Capsule())
-            .overlay(alignment: .topTrailing) {
-                // Looking at another phase than the trip is in: a small mark says so.
-                if viewed != trip.activePhase {
-                    Circle().fill(.orange).frame(width: 9, height: 9).overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5)).offset(x: 2, y: -2)
-                }
+            // Never wraps: with less room it drops the position, then the name, down to the symbol alone.
+            ViewThatFits(in: .horizontal) {
+                pill(name: true, position: true)
+                pill(name: true, position: false)
+                pill(name: false, position: false)
             }
         }
+        .layoutPriority(1)
         .accessibilityLabel("Phase \(viewed.label), \(position) von \(TripPhase.shown.count)\(viewed == trip.activePhase ? "" : ", die Reise steht in \(trip.activePhase.label)")")
     }
 }

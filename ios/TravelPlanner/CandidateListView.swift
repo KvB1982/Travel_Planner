@@ -179,10 +179,18 @@ struct CandidateListView: View {
     private func countryHeader(_ section: CountrySection) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let flag = Format.flag(forCountry: section.country) { Text(flag).font(.title2) }
+            // In a narrow column the name shrinks a little and the rest gives way; nothing wraps.
             Text(section.country ?? "Land unbekannt").font(.title3.weight(.bold)).foregroundStyle(.primary)
-            if section.regions.count == 1, let region = section.regions[0].region { Text(region).font(.subheadline).foregroundStyle(.secondary) }
-            Spacer()
-            Text(section.count == 1 ? "1 Angebot" : "\(section.count) Angebote")
+                .lineLimit(1).minimumScaleFactor(0.7).layoutPriority(2)
+            if section.regions.count == 1, let region = section.regions[0].region {
+                Text(region).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            ViewThatFits(in: .horizontal) {
+                Text(section.count == 1 ? "1 Angebot" : "\(section.count) Angebote").lineLimit(1).fixedSize()
+                Text("\(section.count)").lineLimit(1).fixedSize()
+            }
+                .layoutPriority(1)
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Color.accentColor.opacity(0.15), in: Capsule())
@@ -706,8 +714,8 @@ private struct CompactTripHeader: View {
         } else {
             Button(action: openFrame) {
                 HStack(spacing: 6) {
-                    Text(summary).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 4)
+                    Text(summary).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
