@@ -36,7 +36,17 @@ struct CandidateDetailView: View {
             if let detail {
                 content(detail)
             } else if let error {
-                ContentUnavailableView("Nicht geladen", systemImage: "wifi.exclamationmark", description: Text(error))
+                ContentUnavailableView {
+                    Label("Nicht geladen", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Erneut versuchen") {
+                        self.error = nil
+                        Task { await load() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             } else {
                 ProgressView()
             }
@@ -125,9 +135,17 @@ struct CandidateDetailView: View {
     private func load() async {
         guard !gone, let backend = model.backend else { return }
         do {
-            detail = try await backend.candidate(candidateID)
+            // Fetched apart from the screen's own task: when the system ends that task early, as it sometimes does
+            // while moving from one offer to the next, the answer still arrives and the offer still shows.
+            let id = candidateID
+            var answer = await Task { try await backend.candidate(id) }.result
+            if case .failure(let failure) = answer, failure is CancellationError {
+                answer = await Task { try await backend.candidate(id) }.result
+            }
+            detail = try answer.get()
             error = nil
         } catch is CancellationError {
+            if detail == nil { error = "Das Angebot wurde nicht geladen." }
         } catch let missing as APIError where missing.status == 404 {
             // Deleted or moved elsewhere, perhaps by someone else: it quietly leaves the screen and the list.
             guard !gone else { return }

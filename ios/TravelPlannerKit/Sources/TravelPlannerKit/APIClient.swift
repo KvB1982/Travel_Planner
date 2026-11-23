@@ -181,6 +181,8 @@ public struct APIClient: TravelBackend {
         self.session = session
     }
 
+    static let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
     // MARK: Coding
 
     public static let decoder: JSONDecoder = {
@@ -219,6 +221,8 @@ public struct APIClient: TravelBackend {
         // Reading answers quickly or not at all. Writing may make the server fetch a page first, so it gets longer.
         request.timeoutInterval = method == "GET" ? 15 : 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Lets the server's log tell which build of the app asked.
+        if let build = Self.appBuild { request.setValue(build, forHTTPHeaderField: "X-App-Build") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = try Self.encoder.encode(body)
