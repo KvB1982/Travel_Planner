@@ -977,6 +977,30 @@ describe("groups", () => {
     expect(await titles(anna.token)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
     expect((await t.call("POST", "/invites/redeem", anna.token, { link: tripLink.url })).status).toBe(410);
 
+    // The group has a shelf of its own, apart from each person's. Both see it and put adverts on it.
+    const shelves = async (token: string) => (await t.call("GET", "/trips", token)).body.trips.filter((x: { kind: string }) => x.kind === "watchlist");
+    const mine = await shelves(owner);
+    expect(mine.map((x: { groupId: string | null }) => x.groupId).sort()).toEqual([group.id, null].sort());
+    const shared = mine.find((x: { groupId: string | null }) => x.groupId === group.id);
+    expect(shared).toMatchObject({ title: "Merkliste", groupName: "Familie" });
+    expect((await t.call("GET", "/groups", owner)).body.groups[0].watchlistId).toBe(shared.id);
+    expect((await shelves(anna.token)).some((x: { id: string }) => x.id === shared.id)).toBe(true);
+    expect((await t.call("POST", `/trips/${shared.id}/imports`, anna.token, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).status).toBe(202);
+    await t.ctx.queue.idle();
+    expect((await t.call("GET", `/trips/${shared.id}/candidates`, owner)).body.candidates).toHaveLength(1);
+    expect((await t.call("PATCH", `/trips/${shared.id}`, owner, { title: "x" })).status).toBe(403);
+
+    // Tending the group: a link that went astray is taken back, a name is put right, the administration is shared.
+    const stray = (await t.call("POST", `/groups/${group.id}/invites`, owner, {})).body;
+    const openLinks = (await t.call("GET", `/groups/${group.id}/invites`, owner)).body.invites;
+    expect(openLinks).toHaveLength(1);
+    expect((await t.call("DELETE", `/groups/${group.id}/invites/${openLinks[0].id}`, owner)).status).toBe(204);
+    expect((await t.call("POST", "/invites/redeem", anna.token, { link: stray.url })).status).toBe(410);
+    expect((await t.call("PATCH", "/me", anna.token, { name: "Anna B." })).body.user.name).toBe("Anna B.");
+    const shared2 = await t.call("PATCH", `/groups/${group.id}/members/${anna.user.id}`, owner, { role: "admin" });
+    expect(shared2.body.groups[0].members.map((m: { name: string; role: string }) => [m.name, m.role])).toEqual([["Kristian", "admin"], ["Anna B.", "admin"]]);
+    await t.call("PATCH", `/groups/${group.id}/members/${anna.user.id}`, owner, { role: "member" });
+
     // Only the administration adds people, and the group never loses it.
     expect((await t.call("POST", `/groups/${group.id}/invites`, anna.token, {})).status).toBe(403);
     expect((await t.call("DELETE", `/groups/${group.id}/members/${made.body.groups[0].members[0].id}`, owner)).body.error.code).toBe("last_admin");

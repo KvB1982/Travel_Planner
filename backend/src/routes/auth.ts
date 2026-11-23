@@ -156,6 +156,14 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.get("/me", async (req) => ({ user: await me(userId(req)) }));
 
+  /** The name the others see. */
+  app.patch("/me", async (req) => {
+    const uid = userId(req);
+    const body = parseBody(z.object({ name: z.string().trim().min(1).max(80) }), req.body);
+    await db.update(users).set({ name: body.name }).where(eq(users.id, uid));
+    return { user: await me(uid) };
+  });
+
   app.post("/auth/logout", async (req, reply) => {
     userId(req);
     await db.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.id, req.user!.sessionId));

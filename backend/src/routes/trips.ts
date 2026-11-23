@@ -1,11 +1,11 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
-import { activityEvents, dateOptions, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
+import { activityEvents, dateOptions, groupMembers, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
-import { onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
+import { ensureGroupShelf, onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT");
 const dateOption = z
@@ -117,13 +117,16 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get("/trips", async (req) => {
     const uid = userId(req);
     // Everyone has a shelf of their own for adverts that belong to no trip. It appears with the first look.
-    const [shelf] = await db.select({ id: trips.id }).from(trips).where(and(eq(trips.createdBy, uid), eq(trips.kind, "watchlist"))).limit(1);
+    const [shelf] = await db.select({ id: trips.id }).from(trips).where(and(eq(trips.createdBy, uid), eq(trips.kind, "watchlist"), isNull(trips.groupId))).limit(1);
     if (!shelf) {
       await db.transaction(async (tx) => {
         const [t] = await tx.insert(trips).values({ kind: "watchlist", title: "Merkliste", createdBy: uid }).onConflictDoNothing().returning({ id: trips.id });
         if (t) await tx.insert(tripMembers).values({ tripId: t.id, userId: uid, role: "organizer" });
       });
     }
+    // The same for each group the person is in: one shared shelf.
+    const lacking = await db.select({ groupId: groupMembers.groupId }).from(groupMembers).where(and(eq(groupMembers.userId, uid), sql`not exists (select 1 from ${trips} where ${trips.groupId} = ${groupMembers.groupId} and ${trips.kind} = 'watchlist')`));
+    for (const g of lacking) await ensureGroupShelf(db, g.groupId, uid);
     const rows = await db
       .select({
         trip: trips,

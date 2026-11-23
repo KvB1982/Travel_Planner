@@ -22,6 +22,12 @@ export async function openTripToGroup(tx: Db | Tx, tripId: string, groupId: stri
   if (people.length) await tx.insert(tripMembers).values(people.map((p) => ({ tripId, userId: p.userId, role: "member" as const }))).onConflictDoNothing();
 }
 
+/** Every group has one shelf for adverts that belong to no trip yet. All its members see and tend it. */
+export async function ensureGroupShelf(tx: Db | Tx, groupId: string, uid: string): Promise<void> {
+  const [t] = await tx.insert(trips).values({ kind: "watchlist", title: "Merkliste", groupId, createdBy: uid }).onConflictDoNothing().returning({ id: trips.id });
+  if (t) await openTripToGroup(tx, t.id, groupId);
+}
+
 /** The group a new trip goes into when nothing is said: the only one the person is in. */
 export async function onlyGroupOf(db: Db, uid: string): Promise<string | null> {
   const mine = await db.select({ groupId: groupMembers.groupId }).from(groupMembers).where(eq(groupMembers.userId, uid)).limit(2);
@@ -44,24 +50,32 @@ export function groupRoutes(app: FastifyInstance, ctx: AppContext): void {
     const people = ids.length
       ? await db.select({ groupId: groupMembers.groupId, id: users.id, name: users.name, role: groupMembers.role, joinedAt: groupMembers.joinedAt }).from(groupMembers).innerJoin(users, eq(users.id, groupMembers.userId)).where(inArray(groupMembers.groupId, ids)).orderBy(asc(groupMembers.joinedAt))
       : [];
-    const theirs = ids.length ? await db.select({ id: trips.id, groupId: trips.groupId, title: trips.title }).from(trips).where(inArray(trips.groupId, ids)).orderBy(asc(trips.createdAt)) : [];
+    const theirs = ids.length ? await db.select({ id: trips.id, groupId: trips.groupId, title: trips.title, kind: trips.kind }).from(trips).where(inArray(trips.groupId, ids)).orderBy(asc(trips.createdAt)) : [];
     return own.map(({ group, role }) => ({
       id: group.id,
       name: group.name,
       role,
       createdAt: group.createdAt,
       members: people.filter((p) => p.groupId === group.id).map(({ groupId: _g, ...p }) => p),
-      trips: theirs.filter((t) => t.groupId === group.id).map(({ groupId: _g, ...t }) => t),
+      watchlistId: theirs.find((t) => t.groupId === group.id && t.kind === "watchlist")?.id ?? null,
+      trips: theirs.filter((t) => t.groupId === group.id && t.kind === "trip").map(({ groupId: _g, kind: _k, ...t }) => t),
     }));
   }
 
-  app.get("/groups", async (req) => ({ groups: await mine(userId(req)) }));
+  app.get("/groups", async (req) => {
+    const uid = userId(req);
+    // Groups from before the shared shelf existed get theirs with the first look.
+    const lacking = await db.select({ groupId: groupMembers.groupId }).from(groupMembers).where(and(eq(groupMembers.userId, uid), sql`not exists (select 1 from ${trips} where ${trips.groupId} = ${groupMembers.groupId} and ${trips.kind} = 'watchlist')`));
+    for (const g of lacking) await ensureGroupShelf(db, g.groupId, uid);
+    return { groups: await mine(uid) };
+  });
 
   app.post("/groups", async (req, reply) => {
     const uid = userId(req);
     const body = parseBody(z.object({ name: z.string().trim().min(1).max(80) }), req.body);
     const [group] = await db.insert(groups).values({ name: body.name, createdBy: uid }).returning();
     await joinGroup(db, group!.id, uid, "admin");
+    await ensureGroupShelf(db, group!.id, uid);
     return reply.code(201).send({ groups: await mine(uid) });
   });
 
@@ -84,6 +98,30 @@ export function groupRoutes(app: FastifyInstance, ctx: AppContext): void {
     const expiresAt = new Date(Date.now() + body.expiresInDays * 86_400_000);
     await db.insert(invites).values({ groupId, tokenHash: hashToken(token), role: "member", createdBy: uid, expiresAt, maxUses: body.maxUses });
     return reply.code(201).send({ token, url: `${ctx.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/einladung/${token}`, expiresAt, maxUses: body.maxUses });
+  });
+
+  /** Links that still work, so one that went astray can be taken back. The links themselves are not kept and cannot be shown again. */
+  app.get("/groups/:groupId/invites", async (req) => {
+    const uid = userId(req);
+    const groupId = uuidParam((req.params as { groupId: string }).groupId);
+    await requireGroupMember(db, groupId, uid, true);
+    const open = await db
+      .select({ id: invites.id, createdAt: invites.createdAt, expiresAt: invites.expiresAt, maxUses: invites.maxUses, usedCount: invites.usedCount, createdBy: users.name })
+      .from(invites)
+      .innerJoin(users, eq(users.id, invites.createdBy))
+      .where(and(eq(invites.groupId, groupId), sql`${invites.usedCount} < ${invites.maxUses}`, sql`${invites.expiresAt} > now()`))
+      .orderBy(asc(invites.createdAt));
+    return { invites: open };
+  });
+
+  app.delete("/groups/:groupId/invites/:inviteId", async (req, reply) => {
+    const uid = userId(req);
+    const params = req.params as { groupId: string; inviteId: string };
+    const groupId = uuidParam(params.groupId);
+    await requireGroupMember(db, groupId, uid, true);
+    const gone = await db.delete(invites).where(and(eq(invites.id, uuidParam(params.inviteId)), eq(invites.groupId, groupId))).returning({ id: invites.id });
+    if (!gone.length) throw notFound();
+    return reply.code(204).send();
   });
 
   /** Take someone out of the group, or leave it. Trips they set up themselves stay theirs. */

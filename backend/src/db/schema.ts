@@ -104,7 +104,11 @@ export const trips = pgTable(
     .references(() => users.id),
   createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("trips_watchlist_owner_idx").on(t.createdBy).where(sql`${t.kind} = 'watchlist'`)],
+  (t) => [
+    // One shelf of one's own per person, and one shared shelf per group.
+    uniqueIndex("trips_watchlist_owner_idx").on(t.createdBy).where(sql`${t.kind} = 'watchlist' and ${t.groupId} is null`),
+    uniqueIndex("trips_watchlist_group_idx").on(t.groupId).where(sql`${t.kind} = 'watchlist'`),
+  ],
 );
 
 export const tripMembers = pgTable(
