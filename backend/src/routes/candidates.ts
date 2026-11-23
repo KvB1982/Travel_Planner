@@ -180,6 +180,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const priced = ownPrices.filter((x) => x.totalCents !== null);
       // A look that found nothing at all says nothing: the page may not have finished loading on the device.
       // What an earlier look for the same dates found stays, with its own date, and the empty look is named beside it.
+      const seenAt = (x: (typeof prices)[number]) => x.confirmedAt ?? x.capturedAt;
       const empty = (x: (typeof prices)[number] | undefined) => x !== undefined && x.totalCents === null && x.available === null;
       const newestForTrip = ownPrices.find(forThisTrip);
       const price = priced.find(forThisTrip) ?? priced[0] ?? null;
@@ -225,12 +226,12 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           // Hints still shown for this trip; hidden ones are not counted.
           warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
         },
-        price: price && { available: stale ? price.available : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt },
+        price: price && { available: stale ? price.available : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price) },
         // For the trip's dates and party. "unknown" until a reading for those dates said one or the other.
         availability,
-        availabilityCheckedAt: stale ? null : said.capturedAt,
+        availabilityCheckedAt: stale ? null : seenAt(said),
         // Set when the most recent look for the trip's dates came back without price and without a word on availability.
-        emptyCheckAt: empty(newestForTrip) ? newestForTrip!.capturedAt : null,
+        emptyCheckAt: empty(newestForTrip) ? seenAt(newestForTrip!) : null,
         needsDevice,
         // false when the advert takes fewer guests than the trip has travellers: platforms then show a hint instead of a price.
         fitsParty: p.maxGuests === null || partySize === 0 ? null : p.maxGuests >= partySize,
@@ -251,8 +252,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
             totalCents: amount?.totalCents ?? null,
             kind: amount?.kind ?? null,
             // When what is shown here was read; an empty look afterwards does not move it.
-            checkedAt: told?.capturedAt ?? newest?.capturedAt ?? null,
-            emptyCheckAt: empty(newest) ? newest!.capturedAt : null,
+            checkedAt: told ? seenAt(told) : (newest?.capturedAt ?? null),
+            emptyCheckAt: empty(newest) ? seenAt(newest!) : null,
             checkUrl: link ? urlForStay(link, { ...stay, startDate: o.startDate, endDate: o.endDate }) : null,
           };
         }),
