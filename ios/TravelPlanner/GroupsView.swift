@@ -214,13 +214,14 @@ struct BackgroundReader: ViewModifier {
             .onChange(of: scenePhase) { if scenePhase == .active { start() } }
     }
 
-    /// Offers on any own trip whose cover photo is only a small preview, with the page to read them from. At most twenty.
+    /// Offers on any own trip whose photos are mostly small previews, with the page to read them from. At most twenty.
     private func blurry(_ backend: any TravelBackend) async -> [PendingReading] {
         var found: [PendingReading] = []
         for trip in ((try? await backend.trips()) ?? []) where trip.status != .archived {
-            for offer in ((try? await backend.candidates(tripId: trip.id)) ?? []) where PictureQuality.isSmallCheck24(offer.listing.coverImageUrl) {
+            for offer in ((try? await backend.candidates(tripId: trip.id)) ?? []) where PictureQuality.isSmallCheck24(offer.listing.coverImageUrl, below: 1000) {
                 guard found.count < 20 else { return found }
-                guard let address = try? await backend.candidate(offer.id).sources.first?.url else { continue }
+                guard let detail = try? await backend.candidate(offer.id), PictureQuality.mostlyCheck24Previews((detail.photos ?? []).map { $0.url }),
+                      let address = detail.sources.first?.url else { continue }
                 found.append(PendingReading(candidateId: offer.id, tripId: trip.id, platform: offer.listing.platforms.first, title: offer.listing.title, url: address))
                 sharpening.insert(offer.id)
             }

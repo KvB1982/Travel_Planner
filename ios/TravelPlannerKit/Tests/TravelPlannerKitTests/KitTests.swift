@@ -1225,6 +1225,13 @@ final class PictureQualityTests: XCTestCase {
         XCTAssertTrue(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/size=335c220/source=abc"))
         XCTAssertTrue(PictureQuality.isSmallCheck24("https://cdn2.urlaub.check24.de/x?size=450x&source=abc"))
         XCTAssertFalse(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/size=1920x/di=3/source=abc"))
+        let cover = "https://cdn1.urlaub.check24.de/size=625c440/source=abc"
+        XCTAssertFalse(PictureQuality.isSmallCheck24(cover))
+        XCTAssertTrue(PictureQuality.isSmallCheck24(cover, below: 1000))
+        let small = "https://cdn1.urlaub.check24.de/size=335c220/source=abc", large = "https://cdn1.urlaub.check24.de/size=1920x/source=abc"
+        XCTAssertTrue(PictureQuality.mostlyCheck24Previews([cover, small, small, large]))
+        XCTAssertFalse(PictureQuality.mostlyCheck24Previews([large, large, small]))
+        XCTAssertFalse(PictureQuality.mostlyCheck24Previews([]))
         XCTAssertFalse(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/source=abc"))
         XCTAssertFalse(PictureQuality.isSmallCheck24("https://a0.muscache.com/size=100x/pic.jpg"))
         XCTAssertFalse(PictureQuality.isSmallCheck24(nil))

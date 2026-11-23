@@ -148,12 +148,19 @@ public enum PictureQuality {
 
     /// Whether a picture address of Check24 names only a preview: its `size=` step is narrower than 600.
     /// Check24 signs every size on its own, so a larger version only exists once a device has seen its address.
-    public static func isSmallCheck24(_ address: String?) -> Bool {
+    public static func isSmallCheck24(_ address: String?, below limit: Int = 600) -> Bool {
         guard let address, let parts = URLComponents(string: address), parts.host?.contains("check24") == true else { return false }
         let places = parts.path.split(separator: "/").map(String.init) + (parts.queryItems ?? []).map { "\($0.name)=\($0.value ?? "")" }
         guard let size = places.first(where: { $0.hasPrefix("size=") }) else { return false }
         let digits = size.dropFirst(5).prefix { $0.isNumber }
         guard let width = Int(digits) else { return false }
-        return width < 600
+        return width < limit
+    }
+
+    /// Whether an advert's photos are mostly Check24 previews: more than half of them narrower than 1000.
+    /// The cover alone does not tell: the desktop page shows a 625 wide cover over a gallery of 335 wide previews.
+    public static func mostlyCheck24Previews(_ addresses: [String]) -> Bool {
+        guard !addresses.isEmpty else { return false }
+        return addresses.filter { isSmallCheck24($0, below: 1000) }.count * 2 > addresses.count
     }
 }
