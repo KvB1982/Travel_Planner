@@ -205,6 +205,12 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       checkWindow({ flexStart: now!.flexStart, flexEnd: now!.flexEnd, nightsMin: now!.nightsMin, nightsMax: now!.nightsMax, ...body });
     }
     const { voteDeadline, ...rest } = body;
+    if (rest.status !== undefined) {
+      const [now] = await db.select({ status: trips.status, archivedFrom: trips.archivedFrom }).from(trips).where(eq(trips.id, tripId)).limit(1);
+      // Into the archive: remember where the trip stood. Out of it with "planning": back to where it stood.
+      if (rest.status === "archived" && now!.status !== "archived") Object.assign(rest, { archivedFrom: now!.status });
+      else if (now!.status === "archived" && rest.status !== "archived") Object.assign(rest, { status: rest.status === "planning" ? (now!.archivedFrom ?? "planning") : rest.status, archivedFrom: null });
+    }
     const values = { ...rest, ...(voteDeadline !== undefined ? { voteDeadline: voteDeadline ? new Date(voteDeadline) : null } : {}) };
     if (Object.keys(values).length === 0) throw new HttpError(400, "invalid_request", "Keine Änderung angegeben.");
     const [trip] = await db.update(trips).set(values).where(eq(trips.id, tripId)).returning();

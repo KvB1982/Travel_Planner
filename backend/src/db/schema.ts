@@ -79,6 +79,8 @@ export const trips = pgTable(
   pets: integer("pets").notNull().default(0),
   budgetTotalCents: integer("budget_total_cents"),
   status: tripStatus("status").notNull().default("planning"),
+  /** What the status was before the trip went into the archive, so that it comes back as it was. */
+  archivedFrom: text("archived_from").$type<"planning" | "decided" | "booked">(),
   /** Where the trip stands in its course. Finer than `status`, which older queries still read. */
   phase: text("phase").$type<TripPhase>().notNull().default("research"),
   /** The advert and the period the group settled on. Plain ids: the rows may go, the decision is history. */

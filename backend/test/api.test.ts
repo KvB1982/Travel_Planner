@@ -1024,7 +1024,10 @@ describe("tidying up trips", () => {
     const other = (await s.call("POST", "/trips", s.owner, { title: "Herbst" })).body.trip.id as string;
     expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "Sommer 2027" })).body.error.code).toBe("title_taken");
     expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "herbst" })).status).toBe(200);
+    await s.call("PATCH", `/trips/${other}`, s.owner, { status: "decided" });
     expect((await s.call("PATCH", `/trips/${other}`, s.owner, { status: "archived" })).body.trip.status).toBe("archived");
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { status: "planning" })).body.trip.status).toBe("decided");
+    await s.call("PATCH", `/trips/${other}`, s.owner, { status: "archived" });
 
     const id = (await s.importLink("https://www.novasol.de/ferienhaeuser/CLD520")).body.candidateId as string;
     const member = await s.join("member", "Tante");
