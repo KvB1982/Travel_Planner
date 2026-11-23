@@ -32,6 +32,8 @@ struct CandidateListView: View {
     @State private var rehoming: TripHome?
     /// The phase whose surface is shown; follows the trip until someone picks another.
     @State private var viewedPhase: TripPhase = .research
+    /// The phase shown before the line with the trip's frame was tapped; a second tap on that line goes back there.
+    @State private var phaseBeforeFrame: TripPhase?
     @State private var phasePicked = false
     @AppStorage("offerSort") private var sortRaw = OfferSort.added.rawValue
     @State private var onlyAvailable = false
@@ -262,9 +264,21 @@ struct CandidateListView: View {
                 Section {
                     // Phase and frame of the trip in one line, right under its name.
                     HStack(spacing: 10) {
-                        PhaseMenu(trip: detail.trip, viewed: Binding(get: { viewedPhase }, set: { viewedPhase = $0; phasePicked = true }),
+                        PhaseMenu(trip: detail.trip, viewed: Binding(get: { viewedPhase }, set: { viewedPhase = $0; phasePicked = true; phaseBeforeFrame = nil }),
                                   setPhase: detail.role == .organizer ? { phase in setPhase(phase) } : nil)
-                        CompactTripHeader(detail: detail) { viewedPhase = .framing; phasePicked = true }
+                        // The line with the frame works like a fold: one tap opens the frame, the next returns to where one was.
+                        CompactTripHeader(detail: detail, open: viewedPhase == .framing && phaseBeforeFrame != nil) {
+                            withAnimation {
+                                if viewedPhase == .framing, let back = phaseBeforeFrame {
+                                    viewedPhase = back
+                                    phaseBeforeFrame = nil
+                                } else if viewedPhase != .framing {
+                                    phaseBeforeFrame = viewedPhase
+                                    viewedPhase = .framing
+                                }
+                                phasePicked = true
+                            }
+                        }
                     }
                     .listRowSeparator(.hidden)
                     if viewedPhase == .research, !candidates.isEmpty { controlBar }
@@ -276,7 +290,7 @@ struct CandidateListView: View {
             } else {
             if let detail, detail.trip.isWatchlist {
                 Section {
-                    CompactTripHeader(detail: detail) {}
+                    CompactTripHeader(detail: detail, open: false) {}
                     if !candidates.isEmpty { controlBar }
                 }
                 .listSectionSpacing(.compact)
@@ -754,6 +768,8 @@ private struct Chip: View {
 /// The frame of the trip in one line, so the offers start right below. The details live under "Rahmen".
 private struct CompactTripHeader: View {
     let detail: TripDetail
+    /// The frame is unfolded and a tap folds it away again.
+    let open: Bool
     let openFrame: () -> Void
 
     var body: some View {
@@ -766,12 +782,14 @@ private struct CompactTripHeader: View {
                 HStack(spacing: 6) {
                     Text(summary).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(open ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                        .rotationEffect(.degrees(open ? 90 : 0))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Rahmen der Reise: \(summary)")
+            .accessibilityHint(open ? "Schließt den Rahmen und kehrt zur vorigen Ansicht zurück" : "Öffnet den Rahmen der Reise")
         }
     }
 
