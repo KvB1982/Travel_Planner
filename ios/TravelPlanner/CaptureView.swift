@@ -251,9 +251,41 @@ final class WebPage: NSObject, WKNavigationDelegate {
           return true;
         } catch (e) { return false; }
       }
+      // The sharpest version the page offers for a picture. Shown on a phone-sized page, a picture loads in a small
+      // size; its srcset (or the sources of its <picture>) names the larger ones. Takes the smallest that is at
+      // least 1600 wide, else the largest there is, and falls back to what is on screen.
+      function sharpest(img) {
+        var shown = img.currentSrc || img.src;
+        try {
+          var lists = [img.getAttribute('srcset') || ''];
+          var holder = img.parentElement;
+          if (holder && holder.tagName === 'PICTURE') {
+            var sources = holder.querySelectorAll('source[srcset]');
+            for (var s = 0; s < sources.length; s++) { lists.push(sources[s].getAttribute('srcset') || ''); }
+          }
+          var options = [];
+          for (var l = 0; l < lists.length; l++) {
+            var entries = lists[l].split(/,\\s+/);
+            for (var e = 0; e < entries.length; e++) {
+              var parts = entries[e].trim().split(/\\s+/);
+              if (!parts[0]) { continue; }
+              var mark = parts[1] || '1x', size = parseFloat(mark);
+              if (!(size > 0)) { continue; }
+              // "2x" says nothing about pixels: rank it by what is shown, scaled.
+              var width = /w$/i.test(mark) ? size : size * Math.max(img.naturalWidth || 0, 400);
+              options.push({ url: new URL(parts[0], location.href).href, width: width });
+            }
+          }
+          if (!options.length) { return shown; }
+          options.sort(function (a, b) { return a.width - b.width; });
+          var pick = options[options.length - 1];
+          for (var o = 0; o < options.length; o++) { if (options[o].width >= 1600) { pick = options[o]; break; } }
+          return pick.width > (img.naturalWidth || 0) && pick.url.indexOf('http') === 0 ? pick.url : shown;
+        } catch (e) { return shown; }
+      }
       function note(img) {
         try {
-          var address = img.currentSrc || img.src;
+          var address = sharpest(img);
           if (address && address.indexOf('http') === 0 && img.naturalWidth >= 240 && img.naturalHeight >= 160) {
             seen[address] = seen[address] === true || own(img);
           }
