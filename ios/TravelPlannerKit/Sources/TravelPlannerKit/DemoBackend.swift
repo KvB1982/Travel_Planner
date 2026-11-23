@@ -95,6 +95,12 @@ public actor DemoBackend: TravelBackend {
             var summary = summarize(detail, tripId: tripId)
             summary.criteria = verdict(for: detail, results: false)
             summary.finalist = finalists[tripId]?.contains(detail.candidate.id) ?? false
+            // One sample offer shows what a flexible window brings: several possible stays with their prices.
+            if detail.candidate.id == order.first, tripId == "t-1" {
+                summary.stays = [("2027-05-15", "2027-05-22", 7, 259_000), ("2027-05-17", "2027-05-27", 10, 349_000), ("2027-05-19", "2027-05-29", 10, 362_000),
+                                 ("2027-05-22", "2027-05-29", 7, 271_000), ("2027-05-22", "2027-06-05", 14, 486_000), ("2027-05-24", "2027-06-03", 10, 371_000)]
+                    .map { Stay(startDate: $0.0, endDate: $0.1, nights: $0.2, totalCents: $0.3, perNightCents: $0.3 / $0.2, available: true, best: $0.0 == "2027-05-22" && $0.2 == 14) }
+            }
             return summary
         }
     }

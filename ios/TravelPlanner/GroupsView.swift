@@ -309,6 +309,8 @@ struct StaySheet: View {
 
     @State private var trip: Trip?
     @State private var stays: [Stay] = []
+    /// One page of the platform shows every stay in the window, so single stays need no suggestions.
+    @State private var wholeWindow = false
     @State private var start = Date.now
     @State private var nights = 7
     @State private var note: String?
@@ -349,9 +351,13 @@ struct StaySheet: View {
                         }
                     }
                 } header: {
-                    Text("Geprüfte Aufenthalte")
+                    Text("Mögliche Reisedaten")
+                } footer: {
+                    if wholeWindow {
+                        Text("Diese Plattform zeigt alle Termine im Zeitfenster auf einer Seite. Tippe in der Angebotsliste auf „Preise prüfen“, dann liest die App sie auf einmal.")
+                    }
                 }
-                let open = (trip?.stayVariants ?? []).filter { variant in !stays.contains { $0.id == variant.id } }
+                let open = wholeWindow ? [] : (trip?.stayVariants ?? []).filter { variant in !stays.contains { $0.id == variant.id } }
                 if !open.isEmpty {
                     Section {
                         ForEach(open) { variant in
@@ -398,6 +404,7 @@ struct StaySheet: View {
             let (detail, list) = try await (one, two)
             trip = detail.trip
             stays = (list.first { $0.id == candidateID }?.stays ?? []).sorted { $0.startDate < $1.startDate }
+            wholeWindow = list.first { $0.id == candidateID }?.checkWindow == true
             if !loaded, let window = detail.trip.flexWindow {
                 start = Format.day(window.start) ?? start
                 nights = min(window.nightsMax, max(window.nightsMin, (window.nightsMin + window.nightsMax) / 2))

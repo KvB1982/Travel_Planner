@@ -12,6 +12,9 @@ struct CandidateDetailView: View {
     var onDeleted: () -> Void = {}
 
     @State private var detail: CandidateDetail?
+    /// Every stay known for this offer on a trip with a flexible window, by date.
+    @State private var stays: [Stay] = []
+    @State private var allStays = false
     /// Where the photo strip sits on screen: a swipe that starts on it moves the photos, not the offer.
     @State private var stripFrame: CGRect = .zero
     @State private var error: String?
@@ -146,6 +149,36 @@ struct CandidateDetailView: View {
         }
     }
 
+    /// "Mögliche Reisedaten": each stay in the trip's window with its price, by date, the cheapest per night marked.
+    /// Long lists show the best and the first few; the rest unfolds.
+    @ViewBuilder private var staysSection: some View {
+        let limit = 4
+        let shown = allStays || stays.count <= limit + 1 ? stays : stays.filter { $0.best == true } + stays.filter { $0.best != true }.prefix(limit - 1)
+        Section {
+            ForEach(shown.sorted { $0.startDate < $1.startDate }) { stay in
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Format.dateRange(stay.startDate, stay.endDate) ?? stay.startDate)
+                            .fontWeight(stay.best == true ? .semibold : .regular)
+                        Text([stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" }, stay.available == false ? "belegt" : nil,
+                              stay.best == true ? "günstigster je Nacht" : nil].compactMap { $0 }.joined(separator: " · "))
+                            .font(.footnote).foregroundStyle(stay.available == false ? Color.red : stay.best == true ? Color.green : Color.secondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if let total = stay.totalCents { Text(Format.euro(cents: total)).fontWeight(stay.best == true ? .semibold : .regular) }
+                        if let night = stay.perNightCents { Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary) }
+                    }
+                }
+            }
+            if stays.count > limit + 1 {
+                Button(allStays ? "Weniger zeigen" : "Alle \(stays.count) Termine zeigen") { withAnimation { allStays.toggle() } }.font(.subheadline)
+            }
+        } header: {
+            Text("Mögliche Reisedaten")
+        }
+    }
+
     private func load() async {
         guard !gone, let backend = model.backend else { return }
         do {
@@ -158,6 +191,10 @@ struct CandidateDetailView: View {
             }
             detail = try answer.get()
             error = nil
+            // The possible stays come with the list of the trip, not with the offer itself.
+            if let trip = detail?.candidate.tripId, let list = try? await backend.candidates(tripId: trip) {
+                stays = (list.first { $0.id == id }?.stays ?? []).sorted { $0.startDate < $1.startDate }
+            }
         } catch is CancellationError {
             if detail == nil { error = "Das Angebot wurde nicht geladen." }
         } catch let missing as APIError where missing.status == 404 {
@@ -245,6 +282,7 @@ struct CandidateDetailView: View {
 
             // Right under the title: voting is what the group opens an offer for.
             voteSection(detail)
+            if stays.count > 1 { staysSection }
 
             importSection(detail, canEdit: canEdit)
 

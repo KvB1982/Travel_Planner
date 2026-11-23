@@ -103,7 +103,10 @@ struct FramingSections: View {
                 Text("Zeiträume")
             } footer: {
                 if detail.role.canEdit {
-                    Text("Fester Zeitraum: Anreise und Dauer stehen fest. Flexibles Zeitfenster: frühester Anreisetag, spätester Abreisetag und wie viele Nächte. Tippe auf einen Zeitraum, um ihn zu ändern oder zu entfernen.")
+                    Text(detail.dateOptions.isEmpty || trip.flexWindow == nil
+                         ? "Fester Zeitraum: Anreise und Dauer stehen fest. Flexibles Zeitfenster: frühester Anreisetag, spätester Abreisetag und wie viele Nächte, dann zeigt jedes Angebot seine möglichen Reisedaten. Ein fester Zeitraum hat Vorrang. Tippe auf einen Zeitraum, um ihn zu ändern oder zu entfernen."
+                         : "Solange ein fester Zeitraum eingetragen ist, hat er Vorrang, und das Zeitfenster wirkt nicht. Für mögliche Reisedaten entferne den festen Zeitraum: antippen, dann „Zeitraum entfernen“.")
+                        .foregroundStyle(detail.dateOptions.isEmpty || trip.flexWindow == nil ? Color.secondary : Color.orange)
                 }
             }
             Section {

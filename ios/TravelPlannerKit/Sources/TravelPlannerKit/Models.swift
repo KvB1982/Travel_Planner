@@ -314,6 +314,9 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var fitsParty: Bool?
     /// Every stay something is known about, for trips with a flexible window. `price` shows the best of them.
     public var stays: [Stay]?
+    /// `checkUrl` is one page covering the whole flexible window of the trip: reading it once brings every
+    /// possible stay, so no single stays need to be asked for.
+    public var checkWindow: Bool?
     /// False while the advert still waits for a device to read it.
     public var deviceRead: Bool?
 
@@ -868,6 +871,8 @@ public struct TripCheck: Codable, Hashable, Sendable {
         public var mode: String
         public var needsDevice: Bool?
         public var checkUrl: String?
+        /// The page covers the trip's whole flexible window; it goes to the server without dates of a stay.
+        public var window: Bool?
         public var id: String { candidateId }
 
         public init(candidateId: String, platform: String? = nil, mode: String, needsDevice: Bool? = nil, checkUrl: String? = nil) {

@@ -898,7 +898,28 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return captured
     }
 
+    /// Check24 loads its calendar of prices by date after the page itself. The server reads every possible stay
+    /// from it, so the reading waits until its bars carry prices, at most eight seconds.
+    private func waitForCheck24Calendar() async {
+        let script = """
+        (function () {
+          var bars = document.querySelectorAll('#js-price-calendar .js-price-calendar-bar-ele');
+          for (var i = 0; i < bars.length; i++) {
+            var price = bars[i].querySelector('.js-pc-price');
+            if (price && /\\d/.test(price.textContent || '')) { return true; }
+          }
+          return false;
+        })()
+        """
+        for _ in 0..<16 {
+            if ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true { return }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        Self.log.info("Check24: Sparkalender nach 8 Sekunden ohne Preise")
+    }
+
     private func read(quick: Bool, gallery readGallery: Bool, maxPictures: Int?) async throws -> Captured {
+        if Self.isCheck24(webView.url) { await waitForCheck24Calendar() }
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()

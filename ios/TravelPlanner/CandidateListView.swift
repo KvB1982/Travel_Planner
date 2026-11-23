@@ -937,7 +937,11 @@ private struct CandidateRow: View {
                 }
                 if let price = candidate.price, price.forThisTrip, let nights = price.nights, nights > 0, (candidate.stays?.count ?? 0) > 0 || flexible {
                     // With a flexible window every advert may show another stay: say which, and what a night costs.
-                    Text([Format.dateRange(price.startDate, price.endDate), nights == 1 ? "1 Nacht" : "\(nights) Nächte",
+                    // Several possible stays: their number comes first, where a narrow list does not cut it off.
+                    let several = (candidate.stays?.count ?? 0) > 1
+                    Text([several ? "\(candidate.stays?.count ?? 0) Termine" : nil,
+                          Format.dateRange(price.startDate, price.endDate).map { several ? "bester \($0)" : $0 },
+                          nights == 1 ? "1 Nacht" : "\(nights) Nächte",
                           price.totalCents.map { "\(Format.euro(cents: $0 / nights)) je Nacht" }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
