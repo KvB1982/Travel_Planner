@@ -15,6 +15,9 @@ struct CompareView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var showSelection = false
+    /// How far the table is scrolled sideways and down, so the pinned line of names moves with its columns.
+    @State private var across: CGFloat = 0
+    @State private var pinned = false
     /// Only offers of this country are compared; nil compares those of all countries.
     @State private var country: String?
 
@@ -80,9 +83,6 @@ struct CompareView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Auswahl (\(inCountry.filter { selected.contains($0.id) }.count))", systemImage: "checklist") { showSelection = true }
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Toggle("Nur Unterschiede zeigen", isOn: $onlyDifferences).toggleStyle(.switch)
                 }
             }
             .sheet(isPresented: $showSelection) { selection }
@@ -162,7 +162,15 @@ struct CompareView: View {
         return ScrollView(.vertical) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Color.clear.frame(height: headerHeight)
+                    // The corner above the labels holds the switch, where it covers nothing.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Nur Unterschiede").font(.caption).foregroundStyle(.secondary)
+                        Toggle("Nur Unterschiede zeigen", isOn: $onlyDifferences).labelsHidden()
+                    }
+                    .padding(.leading, 12)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(height: headerHeight, alignment: .topLeading)
                     ForEach(comparison.sections) { section in
                         Text(section.title)
                             .font(.subheadline.weight(.semibold))
@@ -208,6 +216,7 @@ struct CompareView: View {
                         }
                     }
                 }
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, now in across = now }
             }
             if let note = comparison.sections.flatMap(\.rows).compactMap(\.note).first {
                 Text(note).font(.footnote).foregroundStyle(.secondary).padding()
@@ -217,6 +226,40 @@ struct CompareView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .bottom])
+        }
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > headerHeight - 24 } action: { _, now in
+            withAnimation(.easeInOut(duration: 0.15)) { pinned = now }
+        }
+        // Once the pictures and names have scrolled away, a slim line keeps saying which column is which offer.
+        .overlay(alignment: .top) {
+            if pinned {
+                HStack(spacing: 0) {
+                    Text("Angebot").font(.caption).foregroundStyle(.secondary)
+                        .padding(.leading, 12)
+                        .frame(width: labelWidth, alignment: .leading)
+                    // The names take no room of their own: they lie on the space beside the labels and are cut at its edges.
+                    Color.clear
+                        .overlay(alignment: .leading) {
+                            HStack(spacing: 0) {
+                                ForEach(comparison.offers, id: \.candidate.id) { offer in
+                                    Text(offer.listing.title ?? "Angebot")
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(2)
+                                        .padding(.trailing, 12)
+                                        .frame(width: columnWidth, alignment: .leading)
+                                }
+                            }
+                            .fixedSize()
+                            .offset(x: -across)
+                        }
+                        .clipped()
+                }
+                .frame(height: 40)
+                .background(.bar)
+                .overlay(alignment: .bottom) { Divider() }
+                .transition(.opacity)
+                .accessibilityHidden(true)
+            }
         }
     }
 
