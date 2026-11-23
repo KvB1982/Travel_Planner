@@ -39,3 +39,12 @@ it("keeps the reviews an earlier reading found beside those of a thinner one", (
   const old = [{ author: "Jörg", text: "Sehr schönes Haus am Meer" }, { author: "Anna", text: "Tolle Lage" }];
   expect(joinReviews([{ author: "Anna", text: "Tolle  Lage" }, { author: "Tim", text: "Gutes Essen" }], old).map((r) => r.author)).toEqual(["Anna", "Tim", "Jörg"]);
 });
+
+it("ranks a Check24 picture by the smallest size on the way to the original", () => {
+  const b = (t: string) => Buffer.from(t).toString("base64url");
+  const c = "https://cdn1.urlaub.check24.de";
+  const original = "https://i.giatamedia.example/i.php?uid=1&k=abc";
+  const blownUp = `${c}/size=1920x/di=3/source=${b(`https://cdn-cts-1.community.check24.de/size=800c600/source=${b(original)}!x/p.jpg`)}!s1/picture.jpg`;
+  const direct = `${c}/di=3/nfc=200/source=${b(original)}!s2/picture.jpg`;
+  expect(joinPhotos([{ url: blownUp }], [{ url: direct }]).map((p) => p.url)).toEqual([direct]);
+});

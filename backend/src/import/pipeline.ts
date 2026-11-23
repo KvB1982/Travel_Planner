@@ -403,7 +403,10 @@ export async function processImport(
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, input.tripId));
     // With a window of possible dates, a price for any stay inside it is one for the trip: the dates somebody
     // picked on the platform because the house was free then come along with the shared link.
-    const forTrip = priceBelongsToTrip || options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate) || inWindow(stay.window, price.startDate, price.endDate);
+    // Not so for a page that was not opened for the trip and only named a "from" price or a range, or whose link
+    // spans a search window: the dates it stands beside are left over from an earlier look, the amount is not theirs.
+    const loose = !priceBelongsToTrip && (price.kind === "from" || price.kind === "range" || input.link.searchWindow);
+    const forTrip = priceBelongsToTrip || (!loose && (options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate) || inWindow(stay.window, price.startDate, price.endDate)));
     const totalCents = price.totalEur !== null ? Math.round(price.totalEur * 100) : null;
     const [latest] = await db.select().from(priceSnapshots).where(eq(priceSnapshots.listingSourceId, input.sourceId)).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
     const unchanged =

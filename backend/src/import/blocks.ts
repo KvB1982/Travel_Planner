@@ -182,10 +182,9 @@ function photoKey(url: string): { key: string; rank: number } | null {
     return null;
   }
   // Check24 signs each size of a picture separately; what stays the same is the encoded address of the original.
-  const c24 = /check24\./.test(u.hostname) ? /\/source=([^/!]+)/.exec(u.pathname)?.[1] : undefined;
-  if (c24) {
-    const w = Number(/\/size=(\d+)[a-z]\d*\//.exec(u.pathname)?.[1] ?? 0);
-    return { key: `check24:${c24}`, rank: w || 10_000 };
+  if (/check24\./.test(u.hostname) && u.pathname.includes("/source=")) {
+    const { inner, width } = unwrapCheck24(url);
+    return { key: `check24:${inner}`, rank: width || 10_000 };
   }
   // Novasol names the width as a path segment.
   const nova = u.hostname === "image.novasol.com" ? /^\/pic\/(\d+)\/(.+)$/.exec(u.pathname) : null;
@@ -196,6 +195,35 @@ function photoKey(url: string): { key: string; rank: number } | null {
   // Without any hint an address counts as the original.
   const rank = width || (word ? (SIZE_WORDS.indexOf(word) + 1) * 300 : 10_000);
   return { key: `${u.host}${path}`, rank };
+}
+
+/**
+ * Check24's image services are nested, each wrapping the next one's address in `source=`. The picture is the
+ * innermost address, and it is no sharper than the smallest size named on the way there: a "1920x" around
+ * an "800c600" is an enlarged 800.
+ */
+function unwrapCheck24(url: string): { inner: string; width: number } {
+  let inner = url;
+  let width = 0;
+  for (let depth = 0; depth < 4; depth++) {
+    const w = Number(/\/size=(\d+)[a-z]\d*\//.exec(inner)?.[1] ?? 0);
+    if (w && (!width || w < width)) width = w;
+    const wrapped = /\/source=([A-Za-z0-9+/=_-]+)/.exec(inner)?.[1];
+    if (!wrapped) break;
+    let next: string;
+    try {
+      next = Buffer.from(wrapped, "base64").toString("utf8");
+    } catch {
+      break;
+    }
+    if (!/^https?:\/\//.test(next)) {
+      // Not an address after all: the wrapped value itself is what tells pictures apart.
+      if (depth === 0) inner = wrapped;
+      break;
+    }
+    inner = next;
+  }
+  return { inner, width };
 }
 
 /** What a portal's image service wraps: the address behind a Check24 picture, read to tell a map or a guest's snapshot from the advert's pictures. */
@@ -269,7 +297,7 @@ export function joinPhotos<P extends { url: string }>(newer: P[], older: P[], li
   // Check24 previews that no reading found large: beside a gallery of sharp pictures they only look broken.
   // They go before the list is cut to length, or they would take the places of sharp pictures and then vanish.
   const c24 = (p: P) => /check24\./.test(p.url);
-  const sharp = out.filter((p, i) => c24(p) && ranks[i]! >= 1000 && ranks[i]! < 10_000).length;
+  const sharp = out.filter((p, i) => c24(p) && ranks[i]! >= 1000).length;
   return (sharp >= 10 ? out.filter((p, i) => !(c24(p) && ranks[i]! < 600)) : out).slice(0, limit);
 }
 
