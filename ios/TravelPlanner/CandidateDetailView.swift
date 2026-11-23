@@ -19,6 +19,8 @@ struct CandidateDetailView: View {
     @State private var showAddSource = false
     @State private var showMove = false
     @State private var showCorrection = false
+    /// The sections unfolded in full; folded they show only their first lines.
+    @State private var open: Set<String> = []
     /// The server no longer knows this offer; nothing more is asked about it.
     @State private var gone = false
     @State private var showStays = false
@@ -224,18 +226,23 @@ struct CandidateDetailView: View {
                 fact("Art", profile.objectType ?? detail.listing.kind.label, "objectType", profile)
                 number("Gäste", profile.maxGuests, "maxGuests", profile)
                 number("Schlafzimmer", profile.bedrooms, "bedrooms", profile)
-                number("Betten", profile.beds, "beds", profile)
-                number("Schlafplätze", profile.sleepingPlaces, "sleepingPlaces", profile)
                 number("Bäder", profile.bathrooms, "bathrooms", profile)
-                number("Wohnfläche", profile.livingAreaSqm, "livingAreaSqm", profile, unit: " m²")
-                number("Grundstück", profile.plotSqm, "plotSqm", profile, unit: " m²")
-                if detail.reviews?.isEmpty ?? true, let rating = profile.rating, let value = rating.value {
-                    let scale = rating.scale.map { " von \(Format.number($0))" } ?? ""
-                    let count = rating.count.map { " (\(Format.number($0)) Bewertungen)" } ?? ""
-                    LabeledContent("Bewertung", value: "\(Format.number(value))\(scale)\(count)")
+                if open.contains("facts") {
+                    number("Betten", profile.beds, "beds", profile)
+                    number("Schlafplätze", profile.sleepingPlaces, "sleepingPlaces", profile)
+                    number("Wohnfläche", profile.livingAreaSqm, "livingAreaSqm", profile, unit: " m²")
+                    number("Grundstück", profile.plotSqm, "plotSqm", profile, unit: " m²")
+                    if detail.reviews?.isEmpty ?? true, let rating = profile.rating, let value = rating.value {
+                        let scale = rating.scale.map { " von \(Format.number($0))" } ?? ""
+                        let count = rating.count.map { " (\(Format.number($0)) Bewertungen)" } ?? ""
+                        LabeledContent("Bewertung", value: "\(Format.number(value))\(scale)\(count)")
+                    }
+                    ForEach(profile.bedDetails ?? [], id: \.self) { bed in
+                        LabeledContent(bed.room, value: bed.beds)
+                    }
                 }
-                ForEach(profile.bedDetails ?? [], id: \.self) { bed in
-                    LabeledContent(bed.room, value: bed.beds)
+                if profile.beds != nil || profile.sleepingPlaces != nil || profile.livingAreaSqm != nil || profile.plotSqm != nil || !(profile.bedDetails ?? []).isEmpty {
+                    more("facts", "Betten, Flächen und Zimmer")
                 }
             }
 
@@ -252,6 +259,19 @@ struct CandidateDetailView: View {
             }
 
             Section {
+                if !open.contains("amenities") {
+                    // Folded: what is there and what is not, in two lines.
+                    let there = Profile.amenityKeys.filter { profile.amenity($0) == true }.map(Format.amenityName)
+                    let missing = Profile.amenityKeys.filter { profile.amenity($0) == false }.map(Format.amenityName)
+                    if !there.isEmpty {
+                        Label(there.joined(separator: ", "), systemImage: "checkmark.circle.fill").foregroundStyle(.primary, .green)
+                    }
+                    if !missing.isEmpty {
+                        Label(missing.joined(separator: ", "), systemImage: "xmark.circle").foregroundStyle(.secondary, .red).font(.callout)
+                    }
+                    if there.isEmpty && missing.isEmpty { Text("Das Inserat nennt keine Ausstattung.").foregroundStyle(.secondary) }
+                }
+                if open.contains("amenities") {
                 ForEach(Profile.amenityKeys, id: \.self) { key in
                     HStack {
                         Text(Format.amenityName(key))
@@ -267,10 +287,12 @@ struct CandidateDetailView: View {
                 if let other = profile.otherAmenities, !other.isEmpty {
                     Text(other.joined(separator: ", ")).font(.callout).foregroundStyle(.secondary)
                 }
+                }
+                more("amenities", "ganze Liste, auch Unbekanntes")
             } header: {
                 Text("Ausstattung")
             } footer: {
-                Text("„Unbekannt“ heißt: Das Inserat sagt dazu nichts. Es wird nichts geschätzt.")
+                if open.contains("amenities") { Text("„Unbekannt“ heißt: Das Inserat sagt dazu nichts. Es wird nichts geschätzt.") }
             }
 
             if let distances = profile.distances {
@@ -278,23 +300,31 @@ struct CandidateDetailView: View {
                     distance("Strand", distances.beachM, "distances.beachM", profile)
                     distance("Meer", distances.seaM, "distances.seaM", profile)
                     distance("Ort", distances.townM, "distances.townM", profile)
-                    distance("Einkaufen", distances.shopM, "distances.shopM", profile)
-                    distance("Restaurant", distances.restaurantM, "distances.restaurantM", profile)
-                    number("Flughafen", distances.airportKm, "distances.airportKm", profile, unit: " km")
+                    if open.contains("distances") {
+                        distance("Einkaufen", distances.shopM, "distances.shopM", profile)
+                        distance("Restaurant", distances.restaurantM, "distances.restaurantM", profile)
+                        number("Flughafen", distances.airportKm, "distances.airportKm", profile, unit: " km")
+                    }
+                    if distances.shopM != nil || distances.restaurantM != nil || distances.airportKm != nil { more("distances", "Einkaufen, Restaurant, Flughafen") }
                 }
             }
 
             Section("Regeln") {
                 fact("Anreise ab", profile.rules?.checkInFrom, "rules.checkInFrom", profile)
                 fact("Abreise bis", profile.rules?.checkOutUntil, "rules.checkOutUntil", profile)
-                fact("Anreisetage", profile.rules?.arrivalDays, "rules.arrivalDays", profile)
-                number("Mindestaufenthalt", profile.rules?.minNights, "rules.minNights", profile, unit: " Nächte")
-                fact("Rauchen", profile.rules?.smoking, "rules.smoking", profile)
-                if let cancellation = profile.cancellation {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Stornierung").font(.subheadline).foregroundStyle(.secondary)
-                        Text(cancellation)
+                if open.contains("rules") {
+                    fact("Anreisetage", profile.rules?.arrivalDays, "rules.arrivalDays", profile)
+                    number("Mindestaufenthalt", profile.rules?.minNights, "rules.minNights", profile, unit: " Nächte")
+                    fact("Rauchen", profile.rules?.smoking, "rules.smoking", profile)
+                    if let cancellation = profile.cancellation {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Stornierung").font(.subheadline).foregroundStyle(.secondary)
+                            Text(cancellation)
+                        }
                     }
+                }
+                if profile.rules?.arrivalDays != nil || profile.rules?.minNights != nil || profile.rules?.smoking != nil || profile.cancellation != nil {
+                    more("rules", "Anreisetage, Mindestaufenthalt, Stornierung")
                 }
             }
 
@@ -310,7 +340,8 @@ struct CandidateDetailView: View {
                 addLink: { showAddSource = true })
 
             Section("Kommentare") {
-                ForEach(detail.comments) { comment in
+                if detail.comments.count > 3 { more("comments", "\(detail.comments.count - 3) ältere Kommentare") }
+                ForEach(open.contains("comments") ? detail.comments : Array(detail.comments.suffix(3))) { comment in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(comment.name ?? "Jemand") · \(comment.createdAt.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption).foregroundStyle(.secondary)
@@ -351,6 +382,23 @@ struct CandidateDetailView: View {
                 }
             }
         }
+    }
+
+    /// The line that unfolds a section, or folds it again.
+    private func more(_ key: String, _ what: String) -> some View {
+        Button {
+            withAnimation { if open.contains(key) { open.remove(key) } else { open.insert(key) } }
+        } label: {
+            HStack(spacing: 6) {
+                Text(open.contains(key) ? "Weniger zeigen" : "Mehr: \(what)")
+                Image(systemName: open.contains(key) ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
+            }
+            .font(.footnote.weight(.medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
     }
 
     /// Three large buttons to vote with, the own choice filled in, and how the others voted underneath.
