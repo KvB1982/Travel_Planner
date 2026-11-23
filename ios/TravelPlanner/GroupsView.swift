@@ -12,6 +12,9 @@ struct GroupsView: View {
     @State private var naming = false
     @State private var newName = ""
     @State private var leaving: TravelGroup?
+    @State private var removing: (group: TravelGroup, member: TravelGroup.Member)?
+    @State private var renaming: TravelGroup?
+    @State private var renameText = ""
 
     var body: some View {
         NavigationStack {
@@ -48,6 +51,20 @@ struct GroupsView: View {
                     if !name.isEmpty { run { try await $0.createGroup(name: name) } }
                 }
             }
+            .alert("Mitglied entfernen?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { pair in
+                Button("Entfernen", role: .destructive) { run { try await $0.removeGroupMember(groupId: pair.group.id, userId: pair.member.id) } }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { pair in
+                Text("\(pair.member.name) verliert den Zugang zu den Reisen von „\(pair.group.name)“, außer zu selbst angelegten.")
+            }
+            .alert("Gruppe umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { group in
+                TextField("Name der Gruppe", text: $renameText)
+                Button("Abbrechen", role: .cancel) {}
+                Button("Sichern") {
+                    let name = renameText.trimmingCharacters(in: .whitespaces)
+                    if !name.isEmpty { run { try await $0.renameGroup(groupId: group.id, name: name) }; model.dataChanged() }
+                }
+            }
             .alert("Gruppe verlassen?", isPresented: Binding(get: { leaving != nil }, set: { if !$0 { leaving = nil } }), presenting: leaving) { group in
                 Button("Verlassen", role: .destructive) {
                     guard let me = model.user?.id else { return }
@@ -64,25 +81,33 @@ struct GroupsView: View {
     private func section(_ group: TravelGroup) -> some View {
         Section {
             ForEach(group.members) { member in
-                HStack {
-                    Text(member.id == model.user?.id ? "\(member.name) (du)" : member.name)
-                    Spacer()
-                    if member.isAdmin { Text("verwaltet").font(.footnote).foregroundStyle(.secondary) }
-                }
-                .swipeActions {
-                    if group.isAdmin, member.id != model.user?.id {
-                        Button("Entfernen", systemImage: "person.badge.minus", role: .destructive) {
-                            run { try await $0.removeGroupMember(groupId: group.id, userId: member.id) }
-                        }
-                        Button(member.isAdmin ? "Nur Mitglied" : "Verwalten lassen", systemImage: "key") {
+                let me = member.id == model.user?.id
+                if group.isAdmin, !me {
+                    // Everything that can be done with a member, behind one tap on the row.
+                    Menu {
+                        Button(member.isAdmin ? "Verwaltung entziehen" : "Mitverwalten lassen", systemImage: "key") {
                             run { try await $0.setGroupRole(groupId: group.id, userId: member.id, admin: !member.isAdmin) }
                         }
-                        .tint(.indigo)
+                        Button("Aus der Gruppe entfernen", systemImage: "person.badge.minus", role: .destructive) { removing = (group, member) }
+                    } label: {
+                        HStack {
+                            Text(member.name).foregroundStyle(.primary)
+                            Spacer()
+                            Text(member.isAdmin ? "verwaltet" : "Mitglied").font(.footnote).foregroundStyle(.secondary)
+                            Image(systemName: "ellipsis.circle").foregroundStyle(.tint)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text(me ? "\(member.name) (du)" : member.name)
+                        Spacer()
+                        Text(member.isAdmin ? "verwaltet" : "Mitglied").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
             if group.isAdmin {
                 Button("Mitglied hinzufügen", systemImage: "person.badge.plus") { makeInvite(group) }
+                Button("Gruppe umbenennen", systemImage: "pencil") { renameText = group.name; renaming = group }
             }
             if !group.trips.isEmpty {
                 LabeledContent(group.trips.count == 1 ? "1 Reise" : "\(group.trips.count) Reisen", value: group.trips.map(\.title).joined(separator: ", "))
@@ -92,7 +117,7 @@ struct GroupsView: View {
             Text(group.name)
         } footer: {
             if group.isAdmin {
-                Text("„Mitglied hinzufügen“ erzeugt einen Einladungslink für eine Person. Wer verwaltet, kann Mitglieder nach links wischen, um sie zu entfernen oder mitverwalten zu lassen.")
+                Text("„Mitglied hinzufügen“ erzeugt einen Einladungslink für eine Person. Tippe ein Mitglied an, um es mitverwalten zu lassen oder zu entfernen.")
             }
         }
     }

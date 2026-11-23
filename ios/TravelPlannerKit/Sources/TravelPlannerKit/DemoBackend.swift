@@ -468,6 +468,13 @@ public actor DemoBackend: TravelBackend {
         return circles
     }
 
+    public func renameGroup(groupId: String, name: String) async throws -> [TravelGroup] {
+        guard let index = circles.firstIndex(where: { $0.id == groupId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Gruppe gibt es nicht.") }
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Die Gruppe braucht einen Namen.") }
+        circles[index].name = name
+        return circles
+    }
+
     public func createGroupInvite(groupId: String) async throws -> Invite {
         guard circles.contains(where: { $0.id == groupId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Gruppe gibt es nicht.") }
         let token = nextID("gi")

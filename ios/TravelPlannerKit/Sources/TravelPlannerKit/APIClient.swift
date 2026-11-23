@@ -24,6 +24,7 @@ public protocol TravelBackend: Sendable {
     /// The own groups with their members and trips.
     func groups() async throws -> [TravelGroup]
     func createGroup(name: String) async throws -> [TravelGroup]
+    func renameGroup(groupId: String, name: String) async throws -> [TravelGroup]
     /// A link that leads into the group. Admins only; shown once.
     func createGroupInvite(groupId: String) async throws -> Invite
     /// Removes someone, or leaves the group when it is the own id.
@@ -532,6 +533,11 @@ public struct APIClient: TravelBackend {
     public func createGroup(name: String) async throws -> [TravelGroup] {
         struct Body: Encodable { var name: String }
         return try await (send("POST", "/groups", body: Body(name: name)) as GroupsAnswer).groups
+    }
+
+    public func renameGroup(groupId: String, name: String) async throws -> [TravelGroup] {
+        struct Body: Encodable { var name: String }
+        return try await (send("PATCH", "/groups/\(groupId.pathEscaped)", body: Body(name: name)) as GroupsAnswer).groups
     }
 
     public func createGroupInvite(groupId: String) async throws -> Invite {
