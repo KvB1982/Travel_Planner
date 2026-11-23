@@ -201,14 +201,20 @@ function photoKey(url: string): { key: string; rank: number } | null {
 /** What a portal's image service wraps: the address behind a Check24 picture, read to tell a map or a guest's snapshot from the advert's pictures. */
 function notTheAdverts(url: string): boolean {
   if (/images\.ctfassets\.net/.test(url)) return true;
-  const wrapped = /check24\.[^/]+\/.*source=([A-Za-z0-9+/=_-]+)/.exec(url)?.[1];
-  if (!wrapped) return false;
-  try {
-    const inner = Buffer.from(wrapped, "base64").toString("utf8");
-    return /maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner);
-  } catch {
-    return false;
+  if (!/check24\./.test(url)) return false;
+  // The services are nested: each layer wraps the next one's address the same way.
+  let inner = url;
+  for (let depth = 0; depth < 4; depth++) {
+    const wrapped = /source=([A-Za-z0-9+/=_-]+)/.exec(inner)?.[1];
+    if (!wrapped) break;
+    try {
+      inner = Buffer.from(wrapped, "base64").toString("utf8");
+    } catch {
+      break;
+    }
+    if (/maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner)) return true;
   }
+  return false;
 }
 
 function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
