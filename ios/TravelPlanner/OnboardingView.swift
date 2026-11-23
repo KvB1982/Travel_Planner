@@ -22,10 +22,19 @@ struct OnboardingView: View {
                 }
 
                 Section {
-                    TextField("https://…/einladung/…", text: $invite, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
+                    if arrived {
+                        // The link came with the tap that opened the app: nobody needs to see or touch it.
+                        HStack {
+                            Label("Einladung erhalten", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                            Spacer()
+                            Button("Anderen Link eingeben") { arrived = false; invite = "" }.font(.footnote)
+                        }
+                    } else {
+                        TextField("https://…/einladung/…", text: $invite, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
                     Button("Beitreten") {
                         run { try await model.join(inviteText: invite, name: trimmedName) }
                     }
@@ -33,7 +42,7 @@ struct OnboardingView: View {
                 } header: {
                     Text("Mit Einladung beitreten")
                 } footer: {
-                    Text(arrived ? "Deine Einladung ist schon eingetragen. Gib oben deinen Namen ein und tippe auf „Beitreten“."
+                    Text(arrived ? "Gib oben deinen Namen ein und tippe auf „Beitreten“."
                                  : "Den Link bekommst du von der Person, die die Reise organisiert.")
                 }
 

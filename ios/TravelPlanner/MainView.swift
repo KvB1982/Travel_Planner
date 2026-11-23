@@ -54,6 +54,8 @@ struct TripListView: View {
     @State private var showNewTrip = false
     @State private var showSettings = false
     @State private var showRedeem = false
+    /// An invitation the app was opened with while signed in, waiting for a yes.
+    @State private var arrivedInvite: String?
     @State private var showGroups = false
     /// The one group whose members and invites are open.
     @State private var managedGroup: ManagedGroup?
@@ -262,8 +264,18 @@ struct TripListView: View {
         .onChange(of: model.pendingInvite, initial: true) {
             guard let link = model.pendingInvite else { return }
             model.pendingInvite = nil
-            inviteText = link
-            showRedeem = true
+            arrivedInvite = link
+        }
+        // The link itself stays out of sight here: there is nothing in it for a person to read or change.
+        .alert("Einladung annehmen?", isPresented: Binding(get: { arrivedInvite != nil }, set: { if !$0 { arrivedInvite = nil } })) {
+            Button("Abbrechen", role: .cancel) { arrivedInvite = nil }
+            Button("Annehmen") {
+                inviteText = arrivedInvite ?? ""
+                arrivedInvite = nil
+                redeem()
+            }
+        } message: {
+            Text("Du hast einen Einladungslink geöffnet. Mit „Annehmen“ trittst du mit deinem Konto der Reise oder Gruppe bei, zu der er gehört.")
         }
         .alert("Hinweis", isPresented: Binding(get: { redeemNote != nil }, set: { if !$0 { redeemNote = nil } })) {
             Button("OK") {}

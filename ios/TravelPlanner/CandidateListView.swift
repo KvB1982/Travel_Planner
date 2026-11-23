@@ -720,10 +720,12 @@ struct InviteSheet: View {
         NavigationStack {
             VStack(spacing: 20) {
                 Image(systemName: "person.badge.plus").font(.system(size: 44)).foregroundStyle(.tint)
-                Text("Dieser Link gilt 14 Tage und für eine Person. Er wird nur jetzt angezeigt.")
+                Text("Die Einladung gilt 14 Tage und für eine Person. Sie wird nur jetzt angezeigt. Ein Tipp auf den Link öffnet beim Empfänger die App.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                Text(invite.url).font(.callout.monospaced()).textSelection(.enabled).multilineTextAlignment(.center)
+                // The address is long and tells a person nothing; it stays one quiet line, the buttons do the work.
+                Text(invite.url).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                    .accessibilityHidden(true)
                 HStack(spacing: 12) {
                     Button(copied ? "Kopiert" : "Link kopieren", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         UIPasteboard.general.string = invite.url
@@ -731,7 +733,7 @@ struct InviteSheet: View {
                     }
                     .buttonStyle(.bordered)
                     if let url = URL(string: invite.url) {
-                        ShareLink("Einladung senden", item: url).buttonStyle(.borderedProminent)
+                        InviteShareButton(url: url).buttonStyle(.borderedProminent)
                     }
                 }
                 Spacer()
