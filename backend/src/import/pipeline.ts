@@ -265,7 +265,15 @@ export async function processImport(
       console.info(`import ${input.link.platform}/${input.link.externalId}: no price and no availability for the trip, reading once more`);
       const second = await read();
       if (second.profile.price.totalEur !== null || second.profile.price.available !== null) ({ profile: extracted, note } = second);
+    } else if (priceBelongsToTrip && extracted.price.available === false) {
+      // "Not to be had" takes an advert out of the running, and pages that list several offers have been read
+      // as sold out when only one of them was. It counts only when a second reading says the same.
+      console.info(`import ${input.link.platform}/${input.link.externalId}: read as not available for the trip, reading once more`);
+      const second = await read();
+      if (second.profile.price.available !== false) ({ profile: extracted, note } = second);
     }
+    // A total on a page that was opened for the trip's dates is an offer for them, even where nothing says so in words.
+    if (priceBelongsToTrip && extracted.price.available === null && extracted.price.totalEur !== null && extracted.price.kind === "total") extracted.price.available = true;
 
     const [current] = await db.select().from(listings).where(eq(listings.id, input.listingId)).limit(1);
     const before = current?.profile ?? emptyProfile(input.link.kind);
