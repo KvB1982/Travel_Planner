@@ -49,8 +49,19 @@ public struct GroupInvite: Decodable, Identifiable, Hashable, Sendable {
     public var expiresAt: Date?
     public var maxUses: Int?
     public var usedCount: Int?
-    public init(id: String, createdAt: Date? = nil, expiresAt: Date? = nil, maxUses: Int? = nil, usedCount: Int? = nil) {
-        self.id = id; self.createdAt = createdAt; self.expiresAt = expiresAt; self.maxUses = maxUses; self.usedCount = usedCount
+    /// For an invite to a trip: the role it grants ("member" or "guest").
+    public var role: String?
+    public init(id: String, createdAt: Date? = nil, expiresAt: Date? = nil, maxUses: Int? = nil, usedCount: Int? = nil, role: String? = nil) {
+        self.id = id; self.createdAt = createdAt; self.expiresAt = expiresAt; self.maxUses = maxUses; self.usedCount = usedCount; self.role = role
+    }
+
+    /// "gültig bis 7. Dez. · 0 von 1 genutzt", for lists of open invites.
+    public var summary: String {
+        var parts: [String] = []
+        if let expiresAt { parts.append("gültig bis \(expiresAt.formatted(.dateTime.day().month().locale(Locale(identifier: "de_DE"))))") }
+        if let maxUses { parts.append("\(usedCount ?? 0) von \(maxUses) genutzt") }
+        if role == "guest" { parts.append("als Gast") }
+        return parts.joined(separator: " · ")
     }
 }
 

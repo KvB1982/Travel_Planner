@@ -79,7 +79,15 @@ public actor DemoBackend: TravelBackend {
     }
 
     public func createInvite(tripId: String, role: MemberRole) async throws -> Invite {
-        Invite(token: "demo", url: "https://reisen.example/einladung/demo", role: role, expiresAt: nil, maxUses: 1)
+        let token = nextID("ti")
+        openInvites["trip:" + tripId, default: []].append(GroupInvite(id: token, createdAt: .now, expiresAt: .now.addingTimeInterval(14 * 86_400), maxUses: 1, usedCount: 0, role: role.rawValue))
+        return Invite(token: token, url: "https://reisen.example/einladung/\(token)", role: role, expiresAt: nil, maxUses: 1)
+    }
+
+    public func tripInvites(tripId: String) async throws -> [GroupInvite] { openInvites["trip:" + tripId] ?? [] }
+
+    public func revokeTripInvite(tripId: String, inviteId: String) async throws {
+        openInvites["trip:" + tripId]?.removeAll { $0.id == inviteId }
     }
 
     public func candidates(tripId: String, dateOptionId: String?) async throws -> [CandidateSummary] {

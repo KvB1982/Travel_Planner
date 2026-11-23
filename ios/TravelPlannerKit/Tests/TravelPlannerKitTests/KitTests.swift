@@ -1179,3 +1179,17 @@ final class TripUpkeepTests: XCTestCase {
         } catch let error as APIError { XCTAssertEqual(error.code, "watchlist") }
     }
 }
+
+final class TripInviteTests: XCTestCase {
+    func testOpenTripInvitesCanBeRevoked() async throws {
+        let demo = DemoBackend()
+        _ = try await demo.createInvite(tripId: "t-1", role: .guest)
+        var open = try await demo.tripInvites(tripId: "t-1")
+        XCTAssertEqual(open.count, 1)
+        XCTAssertTrue(open[0].summary.contains("0 von 1 genutzt"))
+        XCTAssertTrue(open[0].summary.hasSuffix("als Gast"))
+        try await demo.revokeTripInvite(tripId: "t-1", inviteId: open[0].id)
+        open = try await demo.tripInvites(tripId: "t-1")
+        XCTAssertTrue(open.isEmpty)
+    }
+}

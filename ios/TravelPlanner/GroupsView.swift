@@ -118,9 +118,7 @@ struct GroupsView: View {
                         Image(systemName: "envelope").foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Offene Einladung")
-                            Text([open.expiresAt.map { "gültig bis \($0.formatted(.dateTime.day().month().locale(Locale(identifier: "de_DE"))))" },
-                                  open.maxUses.map { "\(open.usedCount ?? 0) von \($0) genutzt" }].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text(open.summary).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button("Zurückziehen", role: .destructive) { revoke(open, in: group) }.buttonStyle(.borderless).font(.footnote)

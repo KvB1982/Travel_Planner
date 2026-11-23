@@ -16,6 +16,8 @@ struct FramingSections: View {
     @Binding var rehoming: TripHome?
     @State private var events: [ActivityEvent] = []
     @State private var groups: [TravelGroup] = []
+    /// Invite links to the trip that can still be used. Only organisers get to see them.
+    @State private var openInvites: [GroupInvite] = []
     @State private var allEvents = false
 
     private var trip: Trip { detail.trip }
@@ -81,6 +83,21 @@ struct FramingSections: View {
                 if detail.role == .organizer {
                     Button("Jemanden einladen", systemImage: "person.badge.plus", action: invite)
                 }
+                ForEach(openInvites) { open in
+                    HStack {
+                        Image(systemName: "envelope").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Offene Einladung")
+                            Text(open.summary).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Zurückziehen", role: .destructive) { revoke(open) }.buttonStyle(.borderless).font(.footnote)
+                    }
+                }
+                if !openInvites.isEmpty {
+                    Text("Wer einen offenen Link hat, kann der Reise beitreten. Ziehe Links zurück, die du nicht mehr brauchst.")
+                        .font(.footnote).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                }
             } header: {
                 Text("Wer ist dabei")
             }
@@ -114,6 +131,15 @@ struct FramingSections: View {
             // The chronicle is an extra: when it cannot be read, the frame still shows.
             if let list = try? await model.backend?.activity(tripId: trip.id) { events = list }
             groups = (try? await model.backend?.groups()) ?? []
+            if detail.role == .organizer { openInvites = (try? await model.backend?.tripInvites(tripId: trip.id)) ?? [] }
+        }
+    }
+
+    private func revoke(_ open: GroupInvite) {
+        guard let backend = model.backend else { return }
+        Task {
+            try? await backend.revokeTripInvite(tripId: trip.id, inviteId: open.id)
+            openInvites = (try? await backend.tripInvites(tripId: trip.id)) ?? []
         }
     }
 

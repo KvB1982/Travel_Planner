@@ -21,6 +21,9 @@ public protocol TravelBackend: Sendable {
     func trip(_ id: String) async throws -> TripDetail
     func createTrip(_ trip: NewTrip) async throws -> Trip
     func createInvite(tripId: String, role: MemberRole) async throws -> Invite
+    /// Invite links to the trip that are still open. Organisers only.
+    func tripInvites(tripId: String) async throws -> [GroupInvite]
+    func revokeTripInvite(tripId: String, inviteId: String) async throws
     /// The own groups with their members and trips.
     func groups() async throws -> [TravelGroup]
     func createGroup(name: String) async throws -> [TravelGroup]
@@ -586,6 +589,15 @@ public struct APIClient: TravelBackend {
     public func createGroup(name: String) async throws -> [TravelGroup] {
         struct Body: Encodable { var name: String }
         return try await (send("POST", "/groups", body: Body(name: name)) as GroupsAnswer).groups
+    }
+
+    public func tripInvites(tripId: String) async throws -> [GroupInvite] {
+        struct Answer: Decodable { var invites: [GroupInvite] }
+        return try await (send("GET", "/trips/\(tripId.pathEscaped)/invites") as Answer).invites
+    }
+
+    public func revokeTripInvite(tripId: String, inviteId: String) async throws {
+        _ = try await data("DELETE", "/trips/\(tripId.pathEscaped)/invites/\(inviteId.pathEscaped)")
     }
 
     public func groupInvites(groupId: String) async throws -> [GroupInvite] {

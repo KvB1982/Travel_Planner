@@ -557,7 +557,11 @@ struct CandidateListView: View {
     private func createInvite() {
         guard let backend = model.backend else { return }
         Task {
-            do { invite = try await backend.createInvite(tripId: tripID, role: .member) } catch { notice = model.message(for: error) }
+            do {
+                invite = try await backend.createInvite(tripId: tripID, role: .member)
+                // So the new link shows among the open invites.
+                model.dataChanged()
+            } catch { notice = model.message(for: error) }
         }
     }
 }
