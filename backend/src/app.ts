@@ -37,11 +37,13 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
     logger: options.logger
       ? {
           serializers: {
-            req: (req: { method: string; url: string; hostname?: string; ip?: string }) => ({
+            req: (req: { method: string; url: string; hostname?: string; ip?: string; headers?: Record<string, unknown> }) => ({
               method: req.method,
               url: req.url.replace(/(\/auth\/invites\/)[^/?]+/, "$1…"),
               hostname: req.hostname,
               remoteAddress: req.ip,
+              // Which build of the app asked, so a fault can be tied to a version.
+              appBuild: typeof req.headers?.["x-app-build"] === "string" ? (req.headers["x-app-build"] as string).slice(0, 20) : undefined,
             }),
           },
         }
