@@ -63,6 +63,13 @@ export async function settleSource<S extends { id: string; listingId: string; pl
   }
 }
 
+/** The reviews of two readings of one source, each once: the newer reading leads. */
+export function joinReviews<R extends { text?: string | null; author?: string | null }>(newer: R[], older: R[], limit = 200): R[] {
+  const key = (r: R) => `${(r.author ?? "").trim().toLowerCase()}|${(r.text ?? "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80)}`;
+  const seen = new Set(newer.map(key));
+  return [...newer, ...older.filter((r) => !seen.has(key(r)) && seen.add(key(r)))].slice(0, limit);
+}
+
 function seedProfile(link: LinkInfo): Profile {
   const profile = emptyProfile(link.kind);
   const s = link.stay;
@@ -346,7 +353,8 @@ export async function processImport(
     const own = {
       title: checkOnly ? (earlier?.title ?? extracted.title) : extracted.title,
       rating: checkOnly ? (earlier?.rating ?? extracted.rating) : extracted.rating,
-      reviews: extracted.reviews.length ? extracted.reviews : (earlier?.reviews ?? []),
+      // Nor must a thinner reading: what an earlier one found and this one did not stays as well.
+      reviews: joinReviews(extracted.reviews, earlier?.reviews ?? []),
       // A summary resting on fewer reviews than the one before (a quick look at the page) does not replace it.
       reviewSummary:
         extracted.reviewSummary.summary && (extracted.reviewSummary.basedOn ?? 0) >= (earlier?.reviewSummary.summary ? (earlier.reviewSummary.basedOn ?? 0) : 0)

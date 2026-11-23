@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { joinReviews } from "../src/import/pipeline.js";
 import { extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
 it("tells a guest's snapshot from a hotel picture through the nested Check24 image services, and keeps the widest size", () => {
   const b = (t: string) => Buffer.from(t).toString("base64url");
@@ -23,4 +24,18 @@ it("drops Check24 previews once a gallery of sharp pictures is there", () => {
   const small = [{ url: `${c}/size=335c220/di=3/source=old1!a/picture.jpg` }, { url: `${c}/size=800x/di=3/source=mid1!a/picture.jpg` }];
   expect(joinPhotos(sharp, small).map((p) => p.url)).toEqual([...sharp.map((p) => p.url), small[1]!.url]);
   expect(joinPhotos(sharp.slice(0, 3), small)).toHaveLength(5);
+});
+
+it("does not let a reading full of previews push sharp pictures out", () => {
+  const c = "https://cdn1.urlaub.check24.de";
+  const previews = Array.from({ length: 80 }, (_, i) => ({ url: `${c}/size=335c220/di=3/source=p${i}!a/picture.jpg` }));
+  const sharp = Array.from({ length: 80 }, (_, i) => ({ url: `${c}/size=1920x/di=3/source=p${i + 45}!b/picture.jpg` }));
+  const joined = joinPhotos(previews, sharp);
+  expect(joined).toHaveLength(80);
+  expect(joined.every((p) => p.url.includes("size=1920x"))).toBe(true);
+});
+
+it("keeps the reviews an earlier reading found beside those of a thinner one", () => {
+  const old = [{ author: "Jörg", text: "Sehr schönes Haus am Meer" }, { author: "Anna", text: "Tolle Lage" }];
+  expect(joinReviews([{ author: "Anna", text: "Tolle  Lage" }, { author: "Tim", text: "Gutes Essen" }], old).map((r) => r.author)).toEqual(["Anna", "Tim", "Jörg"]);
 });

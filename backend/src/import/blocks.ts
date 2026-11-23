@@ -262,16 +262,15 @@ export function joinPhotos<P extends { url: string }>(newer: P[], older: P[], li
       }
       continue;
     }
-    if (out.length >= limit) continue;
     at.set(k.key, out.length);
     ranks.push(k.rank);
     out.push(photo);
   }
-  // Check24 previews an earlier reading left behind and no later one found large: beside a gallery of
-  // sharp pictures they only look broken.
-  const preview = (p: P, i: number) => /check24\./.test(p.url) && ranks[i]! < 600;
-  const sharp = out.filter((p, i) => /check24\./.test(p.url) && ranks[i]! >= 1000 && ranks[i]! < 10_000).length;
-  return sharp >= 10 ? out.filter((p, i) => !preview(p, i)) : out;
+  // Check24 previews that no reading found large: beside a gallery of sharp pictures they only look broken.
+  // They go before the list is cut to length, or they would take the places of sharp pictures and then vanish.
+  const c24 = (p: P) => /check24\./.test(p.url);
+  const sharp = out.filter((p, i) => c24(p) && ranks[i]! >= 1000 && ranks[i]! < 10_000).length;
+  return (sharp >= 10 ? out.filter((p, i) => !(c24(p) && ranks[i]! < 600)) : out).slice(0, limit);
 }
 
 /** The rendition of this picture that a list holds, which may be a larger one. */
