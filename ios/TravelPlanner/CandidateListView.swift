@@ -726,16 +726,17 @@ struct InviteSheet: View {
                 // The address is long and tells a person nothing; it stays one quiet line, the buttons do the work.
                 Text(invite.url).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                     .accessibilityHidden(true)
-                HStack(spacing: 12) {
-                    Button(copied ? "Kopiert" : "Link kopieren", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                        UIPasteboard.general.string = invite.url
-                        copied = true
-                    }
-                    .buttonStyle(.bordered)
-                    if let url = URL(string: invite.url) {
+                if let url = URL(string: invite.url) {
+                    HStack(spacing: 12) {
+                        InviteMailButton(url: url).buttonStyle(.borderedProminent)
                         InviteShareButton(url: url).buttonStyle(.borderedProminent)
                     }
                 }
+                Button(copied ? "Kopiert" : "Link kopieren", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                    UIPasteboard.general.string = invite.url
+                    copied = true
+                }
+                .buttonStyle(.bordered)
                 Spacer()
             }
             .padding()
