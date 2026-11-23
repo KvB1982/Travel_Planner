@@ -967,6 +967,12 @@ describe("groups", () => {
     expect(await titles(owner)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
     expect(await titles(anna.token)).toEqual(["Pfingsten", "Vor der Gruppe"]);
 
+    // Made private after all, the trip closes to those who were in it through the group, and opens again when it returns.
+    await t.call("PATCH", `/trips/${first.id}`, owner, { groupId: null });
+    expect(await titles(anna.token)).toEqual(["Pfingsten"]);
+    await t.call("PATCH", `/trips/${first.id}`, owner, { groupId: group.id });
+    expect(await titles(anna.token)).toEqual(["Pfingsten", "Vor der Gruppe"]);
+
     // A link to a single trip, pasted by someone who is signed in already.
     const solo = (await t.call("GET", "/trips", owner)).body.trips.find((x: { title: string }) => x.title === "Nur ich");
     const tripLink = (await t.call("POST", `/trips/${solo.id}/invites`, owner, {})).body;
@@ -1008,6 +1014,33 @@ describe("groups", () => {
     await t.call("DELETE", `/groups/${group.id}/members/${anna.user.id}`, anna.token);
     expect(await titles(anna.token)).toEqual(["Nur ich", "Pfingsten"]);
     expect((await t.call("GET", "/groups", anna.token)).body.groups).toEqual([]);
+  });
+});
+
+describe("tidying up trips", () => {
+  it("keeps names apart, archives, and deletes a trip while its adverts move on", async () => {
+    const s = await setup();
+    expect((await s.call("POST", "/trips", s.owner, { title: " sommer 2027 " })).body.error.code).toBe("title_taken");
+    const other = (await s.call("POST", "/trips", s.owner, { title: "Herbst" })).body.trip.id as string;
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "Sommer 2027" })).body.error.code).toBe("title_taken");
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { title: "herbst" })).status).toBe(200);
+    await s.call("PATCH", `/trips/${other}`, s.owner, { status: "decided" });
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { status: "archived" })).body.trip.status).toBe("archived");
+    expect((await s.call("PATCH", `/trips/${other}`, s.owner, { status: "planning" })).body.trip.status).toBe("decided");
+    await s.call("PATCH", `/trips/${other}`, s.owner, { status: "archived" });
+
+    const id = (await s.importLink("https://www.novasol.de/ferienhaeuser/CLD520")).body.candidateId as string;
+    const member = await s.join("member", "Tante");
+    expect((await s.call("DELETE", `/trips/${s.tripId}`, member)).status).toBe(403);
+    const shelf = (await s.call("GET", "/trips", s.owner)).body.trips.find((x: { kind: string }) => x.kind === "watchlist").id as string;
+    expect((await s.call("DELETE", `/trips/${shelf}`, s.owner)).body.error.code).toBe("watchlist");
+    expect((await s.call("DELETE", `/trips/${s.tripId}?moveCandidatesTo=${other}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/trips/${s.tripId}`, s.owner)).status).toBe(404);
+    expect((await s.call("GET", `/trips/${other}/candidates`, s.owner)).body.candidates.map((c: { id: string; status: string }) => [c.id, c.status])).toEqual([[id, "new"]]);
+    expect((await s.call("DELETE", `/trips/${other}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/candidates/${id}`, s.owner)).status).toBe(404);
+    // The name is free again.
+    expect((await s.call("POST", "/trips", s.owner, { title: "Sommer 2027" })).status).toBe(201);
   });
 });
 
