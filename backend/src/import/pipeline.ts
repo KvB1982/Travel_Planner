@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { dateOptions, listings, listingSources, priceSnapshots, tripListings, trips } from "../db/schema.js";
-import { extractBlocks, profileFromBlocks } from "./blocks.js";
+import { extractBlocks, joinPhotos, profileFromBlocks, sameIn } from "./blocks.js";
 import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { looksBlocked, UnsafeUrlError, type PageFetcher } from "./fetch.js";
@@ -283,8 +283,14 @@ export async function processImport(
       profile = mergeProfiles(before, extracted, true);
       // How many pictures a reading brings depends on how far the gallery was opened on the device.
       // A thinner reading must not shrink what an earlier one collected.
-      if (before.photos.length > profile.photos.length) {
-        console.info(`import ${input.link.platform}/${input.link.externalId}: kept ${before.photos.length} earlier photos over ${profile.photos.length} new ones`);
+      // So the two are put together: sharper renditions and newly seen pictures come in, nothing is lost.
+      if (before.photos.length && profile.photos.length) {
+        const joined = joinPhotos(profile.photos, before.photos);
+        console.info(`import ${input.link.platform}/${input.link.externalId}: ${profile.photos.length} new and ${before.photos.length} earlier photos make ${joined.length}`);
+        profile.photos = joined;
+        const cover = profile.coverImageUrl ?? before.coverImageUrl;
+        profile.coverImageUrl = (cover && sameIn(cover, joined)) || joined[0]?.url || cover;
+      } else if (before.photos.length) {
         profile.photos = before.photos;
         profile.coverImageUrl = before.coverImageUrl ?? profile.coverImageUrl;
       }

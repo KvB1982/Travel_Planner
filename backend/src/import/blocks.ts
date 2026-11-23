@@ -115,7 +115,7 @@ export interface PagePhoto {
 }
 
 const IMAGE_KEYS = /^(images?|photos?|pictures?|gallery|galleryImages|media|mediaItems|imageUrls?|photoUrls?|imageList|photoList)$/i;
-const NOT_A_PHOTO = /bat\.bing\.|maps\.googleapis\.|maps\.gstatic\.|\/staticmap|mapbox\.com|doubleclick|google-analytics|googletagmanager|googleadservices|facebook\.com\/tr|\/collect\?|\/pixel|beacon|logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
+const NOT_A_PHOTO = /bat\.bing\.|maps\.googleapis\.|maps\.gstatic\.|\/staticmap|mapbox\.com|doubleclick|google-analytics|googletagmanager|googleadservices|facebook\.com\/tr|\/collect\?|\/pixel|beacon|logo|icon|sprite|avatar|flag|badge|pixel|tracking|placeholder|blank|spacer|profile_pic|user_profile|freisteller|\/users?\/|\.svg(\?|$)|\.gif(\?|$)|^data:/i;
 const IMAGE_EXT = /\.(jpe?g|png|webp|avif|heic)(\?|$)/i;
 /** Preferred key when one picture comes in several sizes. */
 const SIZE_KEYS = ["original", "originalUrl", "full", "fullUrl", "xxl", "xl", "large", "largeUrl", "big", "url", "baseUrl", "src", "href", "contentUrl", "uri", "path", "medium"];
@@ -240,6 +240,40 @@ function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
     out.push(photo);
   }
   return out;
+}
+
+/**
+ * Two readings of one advert put together: the newer one leads, the older one adds what the newer did not see.
+ * Of a picture both know the larger rendition stays, and what no longer counts as the advert's picture drops out.
+ */
+export function joinPhotos<P extends { url: string }>(newer: P[], older: P[], limit = 80): P[] {
+  const out: P[] = [];
+  const at = new Map<string, number>();
+  const ranks: number[] = [];
+  for (const photo of [...newer, ...older]) {
+    if (NOT_A_PHOTO.test(photo.url) || notTheAdverts(photo.url)) continue;
+    const k = photoKey(photo.url);
+    if (!k) continue;
+    const i = at.get(k.key);
+    if (i !== undefined) {
+      if (k.rank > ranks[i]!) {
+        out[i] = photo;
+        ranks[i] = k.rank;
+      }
+      continue;
+    }
+    if (out.length >= limit) continue;
+    at.set(k.key, out.length);
+    ranks.push(k.rank);
+    out.push(photo);
+  }
+  return out;
+}
+
+/** The rendition of this picture that a list holds, which may be a larger one. */
+export function sameIn<P extends { url: string }>(url: string, photos: P[]): string | null {
+  const key = photoKey(url)?.key;
+  return (key && photos.find((p) => photoKey(p.url)?.key === key)?.url) || null;
 }
 
 /** Mobile pages load reduced renditions; where the image service's scheme is known, ask for the original. */

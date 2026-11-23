@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { extractBlocks } from "../src/import/blocks.js";
+import { extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
 it("tells a guest's snapshot from a hotel picture through the nested Check24 image services, and keeps the widest size", () => {
   const b = (t: string) => Buffer.from(t).toString("base64url");
   const c = "https://cdn1.urlaub.check24.de";
@@ -8,4 +8,11 @@ it("tells a guest's snapshot from a hotel picture through the nested Check24 ima
   const state = { hotel: { images: [`${c}/size=450x/di=3/source=${room}!s1/picture.jpg`, `${c}/size=1920x/di=3/source=${room}!s2/picture.jpg`, `${c}/size=1920x/di=3/source=${guest}!s3/picture.jpg`] } };
   const blocks = extractBlocks(`<html><body><script id="js-hotel-data" type="application/json">${JSON.stringify(state)}</script></body></html>`);
   expect(blocks.photos.map((p) => p.url)).toEqual([`${c}/size=1920x/di=3/source=${room}!s2/picture.jpg`]);
+});
+
+it("puts two readings together: the newer leads, the larger rendition stays, old extras remain", () => {
+  const c = "https://image.novasol.com/pic";
+  const joined = joinPhotos([{ url: `${c}/2048/a.jpg` }, { url: `${c}/600/b.jpg` }], [{ url: `${c}/600/a.jpg` }, { url: `${c}/1024/b.jpg` }, { url: `${c}/600/c.jpg` }, { url: "https://images.ctfassets.net/news.jpg" }]);
+  expect(joined.map((p) => p.url)).toEqual([`${c}/2048/a.jpg`, `${c}/1024/b.jpg`, `${c}/600/c.jpg`]);
+  expect(sameIn(`${c}/600/a.jpg`, joined)).toBe(`${c}/2048/a.jpg`);
 });
