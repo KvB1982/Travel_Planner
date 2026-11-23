@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
-import { inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
+import { chooseStay, inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
 import { analyzeLink, nightsBetween, urlForStay, urlForWindow } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
@@ -216,7 +216,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         })
         .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
       // Different lengths compare by the night. Among stays that can be booked the cheapest night wins.
-      const best = flexible ? (stays.filter((x) => x.perNightCents !== null).sort((a, b) => a.perNightCents! - b.perNightCents!)[0] ?? null) : null;
+      // With a wish for a length, the stay of that length leads; see `chooseStay`.
+      const choice = flexible ? chooseStay(stays.filter((x) => x.perNightCents !== null), (x) => x.nights, (x) => x.perNightCents!, stay.window.nightsPreferred) : null;
+      const best = choice?.stay ?? null;
       const price = best?.row ?? priced.find(forThisTrip) ?? priced[0] ?? null;
       // The latest word on whether the trip's dates can be booked, from whichever source said so last.
       // With a window: free as soon as one stay inside it is, gone only when every stay looked at is.
@@ -276,6 +278,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         // One page for the whole window: a single look brings every possible stay, the single stays need none of their own.
         checkWindow: Boolean(link && flexible && options.length === 0 && urlForWindow(link, stay.window)),
         // What is known for each stay looked at, by the night, so that different dates and lengths compare. `best` marks the one `price` shows.
+        // Why that stay leads: "cheapest" by the night, the "preferred" length, a "cheaper_longer" one, or the "nearest" length to be had.
+        bestStayReason: choice?.why ?? null,
         stays: stays.map(({ row: _r, ...x }) => ({ ...x, best: best !== null && x.startDate === best.startDate && x.endDate === best.endDate })),
         // What is known for each of the trip's periods, so they can be set side by side.
         periods: options.map((o) => {

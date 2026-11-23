@@ -968,6 +968,13 @@ describe("every possible stay from one page", () => {
 
     await t.call("POST", `/candidates/${id}/capture`, owner, { html: hotel, forTrip: true, url: one.checkUrl });
     await t.ctx.queue.idle();
+    // A wish for twelve nights puts the stay of that length first; outside the shortest and longest it is refused.
+    expect((await t.call("PATCH", `/trips/${tripId}`, owner, { nightsPreferred: 14 })).status).toBe(400);
+    expect((await t.call("PATCH", `/trips/${tripId}`, owner, { nightsPreferred: 12 })).body.trip.nightsPreferred).toBe(12);
+    const [wished] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    expect(wished.price).toMatchObject({ startDate: "2027-08-10", endDate: "2027-08-22", totalCents: 600000 });
+    expect(wished.bestStayReason).toBe("preferred");
+    await t.call("PATCH", `/trips/${tripId}`, owner, { nightsPreferred: null });
     const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
     // The first of September lies outside the window; the fifth of August takes the cheaper of its two offers.
     expect(c.stays.map((x: { startDate: string; endDate: string; totalCents: number; best: boolean }) => [x.startDate, x.endDate, x.totalCents, x.best])).toEqual([

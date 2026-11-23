@@ -99,6 +99,8 @@ export const trips = pgTable(
   flexEnd: date("flex_end"),
   nightsMin: integer("nights_min"),
   nightsMax: integer("nights_max"),
+  /** The length the group would like best, between the shortest and the longest. */
+  nightsPreferred: integer("nights_preferred"),
   /** The group this trip belongs to; its members are members of the trip. Plain id, the table comes further down. */
   groupId: uuid("group_id"),
   createdBy: uuid("created_by")

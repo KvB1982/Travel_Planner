@@ -26,6 +26,7 @@ const tripFields = {
   flexEnd: isoDate.nullish(),
   nightsMin: z.number().int().min(1).max(60).nullish(),
   nightsMax: z.number().int().min(1).max(60).nullish(),
+  nightsPreferred: z.number().int().min(1).max(60).nullish(),
 };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -35,23 +36,24 @@ const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00
  * start of the window, the same at its end, and the shortest stay in the middle. Each look costs the
  * device a page load, so there are few.
  */
-export function stayVariants(w: { flexStart: string | null; flexEnd: string | null; nightsMin: number | null; nightsMax: number | null }): { startDate: string; endDate: string; nights: number }[] {
+export function stayVariants(w: { flexStart: string | null; flexEnd: string | null; nightsMin: number | null; nightsMax: number | null; nightsPreferred?: number | null }): { startDate: string; endDate: string; nights: number }[] {
   if (!w.flexStart || !w.flexEnd) return [];
   const room = Math.round((Date.parse(w.flexEnd) - Date.parse(w.flexStart)) / 86_400_000);
   if (room < 1) return [];
   const min = Math.min(room, w.nightsMin ?? room);
   const max = Math.min(room, w.nightsMax ?? room);
-  const mid = Math.max(min, Math.min(max, Math.round((min + max) / 2)));
+  const mid = Math.max(min, Math.min(max, w.nightsPreferred ?? Math.round((min + max) / 2)));
   const at = (start: number, nights: number) => ({ startDate: addDays(w.flexStart!, start), endDate: addDays(w.flexStart!, start + nights), nights });
   const all = [at(0, mid), at(room - mid, mid), at(Math.floor((room - min) / 2), min)];
   return all.filter((v, i) => all.findIndex((x) => x.startDate === v.startDate && x.endDate === v.endDate) === i);
 }
 
 /** A window needs both ends in order, and a shortest stay no longer than the longest. */
-function checkWindow(w: { flexStart?: string | null; flexEnd?: string | null; nightsMin?: number | null; nightsMax?: number | null }) {
+function checkWindow(w: { flexStart?: string | null; flexEnd?: string | null; nightsMin?: number | null; nightsMax?: number | null; nightsPreferred?: number | null }) {
   if (Boolean(w.flexStart) !== Boolean(w.flexEnd)) throw new HttpError(400, "invalid_request", "Das Zeitfenster braucht einen frühesten Anreisetag und einen spätesten Abreisetag.");
   if (w.flexStart && w.flexEnd && w.flexEnd <= w.flexStart) throw new HttpError(400, "invalid_request", "Der späteste Abreisetag muss nach dem frühesten Anreisetag liegen.");
   if (w.nightsMin && w.nightsMax && w.nightsMin > w.nightsMax) throw new HttpError(400, "invalid_request", "Die kürzeste Dauer darf nicht länger sein als die längste.");
+  if (w.nightsPreferred && ((w.nightsMin && w.nightsPreferred < w.nightsMin) || (w.nightsMax && w.nightsPreferred > w.nightsMax))) throw new HttpError(400, "invalid_request", "Die bevorzugte Dauer muss zwischen der kürzesten und der längsten liegen.");
 }
 
 /**
@@ -114,6 +116,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
           flexEnd: body.flexEnd ?? null,
           nightsMin: body.nightsMin ?? null,
           nightsMax: body.nightsMax ?? null,
+          nightsPreferred: body.nightsPreferred ?? null,
           groupId,
           createdBy: uid,
         })
@@ -201,9 +204,9 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       // Into a group: everyone in it joins the trip.
       if (body.groupId) await openTripToGroup(db, tripId, body.groupId);
     }
-    if (["flexStart", "flexEnd", "nightsMin", "nightsMax"].some((k) => k in body)) {
+    if (["flexStart", "flexEnd", "nightsMin", "nightsMax", "nightsPreferred"].some((k) => k in body)) {
       const [now] = await db.select().from(trips).where(eq(trips.id, tripId)).limit(1);
-      checkWindow({ flexStart: now!.flexStart, flexEnd: now!.flexEnd, nightsMin: now!.nightsMin, nightsMax: now!.nightsMax, ...body });
+      checkWindow({ flexStart: now!.flexStart, flexEnd: now!.flexEnd, nightsMin: now!.nightsMin, nightsMax: now!.nightsMax, nightsPreferred: now!.nightsPreferred, ...body });
     }
     const { voteDeadline, ...rest } = body;
     if (rest.status !== undefined) {

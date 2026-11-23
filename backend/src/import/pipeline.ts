@@ -156,6 +156,28 @@ export interface Window {
   flexEnd: string | null;
   nightsMin: number | null;
   nightsMax: number | null;
+  /** The length the group would like best. */
+  nightsPreferred?: number | null;
+}
+
+/**
+ * Which of several bookable stays speaks for an advert. Without a wish for a length the cheapest night wins.
+ * With one, the cheapest stay of that length does, unless a longer one costs at least a tenth less by the night.
+ * Where the wished length is not to be had, the nearest length is taken: the platform sells only weeks, or asks for more nights.
+ */
+export function chooseStay<S>(stays: S[], nightsOf: (s: S) => number | null, perNightOf: (s: S) => number, preferred: number | null | undefined): { stay: S; why: "cheapest" | "preferred" | "cheaper_longer" | "nearest" } | null {
+  const usable = stays.filter((s) => nightsOf(s) !== null);
+  const cheapest = (list: S[]) => [...list].sort((a, b) => perNightOf(a) - perNightOf(b))[0];
+  if (!usable.length) return null;
+  if (!preferred) return { stay: cheapest(usable)!, why: "cheapest" };
+  const wished = cheapest(usable.filter((s) => nightsOf(s) === preferred));
+  if (wished) {
+    const longer = cheapest(usable.filter((s) => nightsOf(s)! > preferred));
+    if (longer && perNightOf(longer) <= 0.9 * perNightOf(wished)) return { stay: longer, why: "cheaper_longer" };
+    return { stay: wished, why: "preferred" };
+  }
+  const gap = Math.min(...usable.map((s) => Math.abs(nightsOf(s)! - preferred)));
+  return { stay: cheapest(usable.filter((s) => Math.abs(nightsOf(s)! - preferred) === gap))!, why: "nearest" };
 }
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -178,7 +200,7 @@ export async function tripStay(db: Db, tripId: string, dateOptionId?: string | n
   let option: { id: string | null; startDate: string; endDate: string } | undefined = dates ? { id: all.find((o) => o.startDate === dates.startDate && o.endDate === dates.endDate)?.id ?? null, ...dates } : ((dateOptionId ? all.find((o) => o.id === dateOptionId) : undefined) ?? all[0]);
   if (!option && trip?.flexStart && trip.flexEnd) {
     const room = nightsBetween(trip.flexStart, trip.flexEnd) ?? 0;
-    const wish = Math.round(((trip.nightsMin ?? room) + (trip.nightsMax ?? trip.nightsMin ?? room)) / 2);
+    const wish = trip.nightsPreferred ?? Math.round(((trip.nightsMin ?? room) + (trip.nightsMax ?? trip.nightsMin ?? room)) / 2);
     const nights = Math.max(1, Math.min(room, wish));
     if (room > 0) option = { id: null, startDate: trip.flexStart, endDate: addDays(trip.flexStart, nights) };
   }
@@ -186,7 +208,7 @@ export async function tripStay(db: Db, tripId: string, dateOptionId?: string | n
     dateOptionId: option?.id ?? null,
     startDate: option?.startDate ?? null,
     endDate: option?.endDate ?? null,
-    window: { flexStart: trip?.flexStart ?? null, flexEnd: trip?.flexEnd ?? null, nightsMin: trip?.nightsMin ?? null, nightsMax: trip?.nightsMax ?? null } as Window,
+    window: { flexStart: trip?.flexStart ?? null, flexEnd: trip?.flexEnd ?? null, nightsMin: trip?.nightsMin ?? null, nightsMax: trip?.nightsMax ?? null, nightsPreferred: trip?.nightsPreferred ?? null } as Window,
     adults: trip?.adults ?? null,
     children: trip?.children ?? null,
   };
@@ -274,8 +296,8 @@ export async function processImport(
         }
       };
       spansWindow = !fromDevice || (input.openedUrl !== undefined && same(input.openedUrl));
-      // By the night, as stays of different length compare; the cheapest is the one the advert shows.
-      fixed = [...inside].sort((a, b) => perNight(a) - perNight(b))[0] ?? null;
+      // By the night, as stays of different length compare; the length the group wishes for comes first.
+      fixed = chooseStay(inside, (o) => nightsBetween(o.startDate, o.endDate), perNight, stay.window.nightsPreferred)?.stay ?? null;
       if (fixed) stay = await tripStay(db, input.tripId, null, { startDate: fixed.startDate, endDate: fixed.endDate });
     } else if (priceBelongsToTrip) {
       fixed = (blocks.offers ?? []).find((o) => o.startDate === stay.startDate && o.endDate === stay.endDate) ?? null;

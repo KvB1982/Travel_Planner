@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { joinReviews } from "../src/import/pipeline.js";
+import { chooseStay, joinReviews } from "../src/import/pipeline.js";
 import { extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
 it("tells a guest's snapshot from a hotel picture through the nested Check24 image services, and keeps the widest size", () => {
   const b = (t: string) => Buffer.from(t).toString("base64url");
@@ -47,4 +47,19 @@ it("ranks a Check24 picture by the smallest size on the way to the original", ()
   const blownUp = `${c}/size=1920x/di=3/source=${b(`https://cdn-cts-1.community.check24.de/size=800c600/source=${b(original)}!x/p.jpg`)}!s1/picture.jpg`;
   const direct = `${c}/di=3/nfc=200/source=${b(original)}!s2/picture.jpg`;
   expect(joinPhotos([{ url: blownUp }], [{ url: direct }]).map((p) => p.url)).toEqual([direct]);
+});
+
+it("lets the wished length lead, a clearly cheaper longer stay pass it, and takes the nearest where it is not to be had", () => {
+  const s = (nights: number, total: number) => ({ nights, total });
+  const pick = (list: { nights: number; total: number }[], wish: number | null) => {
+    const c = chooseStay(list, (x) => x.nights, (x) => x.total / x.nights, wish);
+    return c && [c.stay.nights, c.why];
+  };
+  expect(pick([s(7, 2100), s(10, 3500), s(14, 4760)], null)).toEqual([7, "cheapest"]);
+  expect(pick([s(7, 2100), s(10, 3500), s(14, 4760)], 10)).toEqual([10, "preferred"]);
+  // Fourteen nights at a tenth less by the night than the ten wished for.
+  expect(pick([s(10, 3500), s(14, 4200)], 10)).toEqual([14, "cheaper_longer"]);
+  // Only whole weeks to be had.
+  expect(pick([s(7, 2100), s(14, 4760)], 12)).toEqual([14, "nearest"]);
+  expect(pick([], 10)).toBeNull();
 });
