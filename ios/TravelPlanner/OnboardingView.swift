@@ -6,8 +6,6 @@ struct OnboardingView: View {
 
     @State private var invite = ""
     @State private var name = ""
-    @State private var server = ""
-    @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
     /// The invitation came with the link the app was opened by, so nobody had to paste it.
@@ -50,22 +48,6 @@ struct OnboardingView: View {
                     Text("Wenn du deine Apple-ID auf einem anderen Gerät in den Einstellungen verknüpft hast, öffnet sie hier dasselbe Konto. Ein neues Konto entsteht so nicht.")
                 }
 
-                Section {
-                    DisclosureGroup("Neuen Server einrichten") {
-                        TextField("Serveradresse", text: $server)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                        SecureField("Einrichtungsschlüssel", text: $secret)
-                        Button("Erstes Konto anlegen") {
-                            run { try await model.bootstrap(server: server, secret: secret, name: trimmedName) }
-                        }
-                        .disabled(busy || trimmedName.isEmpty || server.isEmpty || secret.isEmpty)
-                    }
-                } footer: {
-                    Text("Nur einmal nötig, für das allererste Konto. Der Schlüssel steht in der Konfiguration des Servers.")
-                }
-
                 if let error {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -78,7 +60,6 @@ struct OnboardingView: View {
                 }
             }
             .navigationTitle("Travel Planner")
-            .onAppear { if server.isEmpty { server = (model.serverURL ?? ServerDefaults.url).absoluteString } }
             .onChange(of: model.pendingInvite, initial: true) {
                 guard let link = model.pendingInvite else { return }
                 invite = link
