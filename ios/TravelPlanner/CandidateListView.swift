@@ -948,8 +948,10 @@ private struct CandidateRow: View {
                           price.totalCents.map { "\(Format.euro(cents: $0 / nights)) je Nacht" }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if let price = candidate.price, price.forThisTrip, let asked = price.persons, let persons, asked != persons {
+                if let price = candidate.price, price.forThisTrip, let asked = price.persons, let persons,
+                   candidate.share.partyMismatch(asked: asked, persons: persons) {
                     // Some platforms keep the party of the shared link: the price is real, but for fewer or more people.
+                    // A price asked for one household of several is no mismatch: it shows as the share per household.
                     Label("Preis für \(asked == 1 ? "1 Person" : "\(asked) Personen"), nicht für \(persons)", systemImage: "person.2")
                         .font(.caption).foregroundStyle(.orange)
                 }

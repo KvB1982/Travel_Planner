@@ -24,6 +24,15 @@ public struct PriceShare: Equatable, Sendable {
         cents.map { perHousehold ? $0 : Int((Double($0) / Double(households)).rounded()) }
     }
 
+    /// Whether a price asked for `asked` people fits neither the whole party nor one household of it, so it is
+    /// worth a warning. A price per household for about a household's share of the travellers is as expected.
+    public func partyMismatch(asked: Int?, persons: Int?) -> Bool {
+        guard let asked, let persons, asked != persons else { return false }
+        guard perHousehold else { return true }
+        let expected = Double(persons) / Double(households)
+        return abs(Double(asked) - expected) > 1
+    }
+
     /// A few words on where the group's price comes from.
     public var note: String {
         perHousehold ? "hochgerechnet aus dem Preis je Haushalt, mal \(households)" : "Preis für die ganze Gruppe, je Haushalt geteilt durch \(households)"

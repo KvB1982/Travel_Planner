@@ -1295,4 +1295,21 @@ final class Check24PictureTests: XCTestCase {
         // One picture in three versions: the one asking for 1920 really holds 800, so the plain 1200 wins.
         XCTAssertEqual(PictureQuality.check24Selection([direct450, nested, direct1200, other], limit: 10), [direct1200, other])
     }
+
+    func testPriceForAHouseholdIsNoMismatch() {
+        let two = PriceShare(basis: "household", households: 2)
+        XCTAssertFalse(two.partyMismatch(asked: 4, persons: 8))
+        XCTAssertFalse(two.partyMismatch(asked: 5, persons: 8))
+        XCTAssertTrue(two.partyMismatch(asked: 2, persons: 8))
+        XCTAssertEqual(two.group(243_000), 486_000)
+        XCTAssertEqual(two.household(243_000), 243_000)
+        let group = PriceShare(basis: "group", households: 2)
+        XCTAssertTrue(group.partyMismatch(asked: 4, persons: 8))
+        XCTAssertFalse(group.partyMismatch(asked: 8, persons: 8))
+        XCTAssertEqual(group.household(486_000), 243_000)
+        let one = PriceShare(basis: "household", households: 1)
+        XCTAssertTrue(one.partyMismatch(asked: 4, persons: 8))
+        XCTAssertEqual(one.group(100), 100)
+        XCTAssertFalse(one.partyMismatch(asked: nil, persons: 8))
+    }
 }
