@@ -7,7 +7,8 @@ public struct TravelGroup: Decodable, Identifiable, Hashable, Sendable {
         public var name: String
         /// "admin" or "member".
         public var role: String
-        public init(id: String, name: String, role: String = "member") { self.id = id; self.name = name; self.role = role }
+        public var joinedAt: Date?
+        public init(id: String, name: String, role: String = "member", joinedAt: Date? = nil) { self.id = id; self.name = name; self.role = role; self.joinedAt = joinedAt }
         public var isAdmin: Bool { role == "admin" }
     }
     public struct TripRef: Decodable, Identifiable, Hashable, Sendable {
@@ -21,13 +22,15 @@ public struct TravelGroup: Decodable, Identifiable, Hashable, Sendable {
     public var role: String
     public var members: [Member]
     public var trips: [TripRef]
+    /// The watchlist all members of the group see and keep.
+    public var watchlistId: String?
     public var isAdmin: Bool { role == "admin" }
 
-    public init(id: String, name: String, role: String = "member", members: [Member] = [], trips: [TripRef] = []) {
-        self.id = id; self.name = name; self.role = role; self.members = members; self.trips = trips
+    public init(id: String, name: String, role: String = "member", members: [Member] = [], trips: [TripRef] = [], watchlistId: String? = nil) {
+        self.id = id; self.name = name; self.role = role; self.members = members; self.trips = trips; self.watchlistId = watchlistId
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, role, members, trips }
+    enum CodingKeys: String, CodingKey { case id, name, role, members, trips, watchlistId }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -35,6 +38,55 @@ public struct TravelGroup: Decodable, Identifiable, Hashable, Sendable {
         role = (try? c.decodeIfPresent(String.self, forKey: .role)) ?? "member"
         members = (try? c.decodeIfPresent([Member].self, forKey: .members)) ?? []
         trips = (try? c.decodeIfPresent([TripRef].self, forKey: .trips)) ?? []
+        watchlistId = try? c.decodeIfPresent(String.self, forKey: .watchlistId)
+    }
+}
+
+/// An invite link into a group that has not been used up. The link itself is shown only once, when it is made.
+public struct GroupInvite: Decodable, Identifiable, Hashable, Sendable {
+    public var id: String
+    public var createdAt: Date?
+    public var expiresAt: Date?
+    public var maxUses: Int?
+    public var usedCount: Int?
+    public init(id: String, createdAt: Date? = nil, expiresAt: Date? = nil, maxUses: Int? = nil, usedCount: Int? = nil) {
+        self.id = id; self.createdAt = createdAt; self.expiresAt = expiresAt; self.maxUses = maxUses; self.usedCount = usedCount
+    }
+}
+
+/// How trips are laid out wherever one is picked: every group with its trips and its watchlist, then what is private.
+public struct TripShelf: Hashable, Sendable {
+    public struct Section: Identifiable, Hashable, Sendable {
+        /// The group's id, or "private".
+        public var id: String
+        public var title: String
+        public var group: TravelGroup?
+        public var trips: [Trip]
+        public var watchlist: Trip?
+    }
+    public var sections: [Section]
+    public var archived: [Trip]
+
+    /// `includeArchived: false` leaves the archive out, for lists of destinations.
+    public init(trips: [Trip], groups: [TravelGroup]) {
+        let live = trips.filter { $0.status != .archived || $0.isWatchlist }
+        var sections: [Section] = []
+        // Groups the server lists, then groups only known from their trips (an older server, or a list not loaded yet).
+        var known = groups.map { ($0.id, $0.name, Optional($0)) }
+        for trip in live {
+            if let id = trip.groupId, !known.contains(where: { $0.0 == id }) { known.append((id, trip.groupName ?? "Gruppe", nil)) }
+        }
+        for (id, name, group) in known {
+            let own = live.filter { $0.groupId == id }
+            sections.append(Section(id: id, title: name, group: group, trips: own.filter { !$0.isWatchlist }, watchlist: own.first(where: \.isWatchlist)))
+        }
+        let personal = live.filter { $0.groupId == nil }
+        if !personal.isEmpty || sections.isEmpty {
+            sections.append(Section(id: "private", title: sections.isEmpty ? "Reisen" : "Privat", group: nil,
+                                    trips: personal.filter { !$0.isWatchlist }, watchlist: personal.first(where: \.isWatchlist)))
+        }
+        self.sections = sections
+        self.archived = trips.filter { $0.status == .archived && !$0.isWatchlist }
     }
 }
 

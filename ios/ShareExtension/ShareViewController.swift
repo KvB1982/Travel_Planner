@@ -128,21 +128,31 @@ struct ShareView: View {
                     ProgressView()
                 case .choose:
                     List {
-                        Section {
-                            ForEach(model.trips) { trip in
-                                Button {
-                                    Task { await model.send(to: trip) }
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(trip.title).font(.headline).foregroundStyle(.primary)
-                                        if let region = trip.region, !region.isEmpty {
-                                            Text(region).font(.subheadline).foregroundStyle(.secondary)
+                        let shelf = TripShelf(trips: model.trips, groups: [])
+                        ForEach(shelf.sections) { section in
+                            Section {
+                                ForEach(section.trips + (section.watchlist.map { [$0] } ?? [])) { trip in
+                                    Button {
+                                        Task { await model.send(to: trip) }
+                                    } label: {
+                                        Label {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(trip.isWatchlist ? (section.id == "private" ? "Meine Merkliste" : "Merkliste der Gruppe") : trip.title)
+                                                    .font(.headline).foregroundStyle(.primary)
+                                                if let region = trip.region, !region.isEmpty {
+                                                    Text(region).font(.subheadline).foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        } icon: {
+                                            Image(systemName: trip.isWatchlist ? "bookmark" : "suitcase")
                                         }
                                     }
                                 }
+                            } header: {
+                                Text(shelf.sections.count > 1 ? section.title : "Wohin?")
                             }
-                        } header: {
-                            Text("In welche Reise?")
+                        }
+                        Section {
                         } footer: {
                             if let host = model.page?.url.host() { Text(host) }
                         }

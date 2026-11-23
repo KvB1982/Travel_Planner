@@ -1075,3 +1075,28 @@ final class GroupAndFlexTests: XCTestCase {
         XCTAssertEqual(stays.first?.best, true)
     }
 }
+
+final class ShelfTests: XCTestCase {
+    func testShelfGroupsTripsAndWatchlists() async throws {
+        let demo = DemoBackend()
+        let shelf = TripShelf(trips: try await demo.trips(), groups: try await demo.groups())
+        XCTAssertEqual(shelf.sections.map(\.title), ["Unsere Gruppe", "Privat"])
+        XCTAssertEqual(shelf.sections[0].trips.map(\.id), ["t-1", "t-2"])
+        XCTAssertEqual(shelf.sections[0].watchlist?.id, "t-gw")
+        XCTAssertEqual(shelf.sections[1].watchlist?.id, "t-w")
+        XCTAssertTrue(shelf.sections[1].trips.isEmpty)
+    }
+
+    func testShelfWithoutGroupsAndWithUnknownGroup() {
+        let plain = TripShelf(trips: [Trip(id: "a", title: "A")], groups: [])
+        XCTAssertEqual(plain.sections.map(\.title), ["Reisen"])
+        var other = Trip(id: "b", title: "B")
+        other.groupId = "x"; other.groupName = "Skifreunde"
+        var old = Trip(id: "c", title: "C", status: .archived)
+        old.groupId = "x"
+        let shelf = TripShelf(trips: [other, old], groups: [])
+        XCTAssertEqual(shelf.sections.map(\.title), ["Skifreunde"])
+        XCTAssertEqual(shelf.sections[0].trips.map(\.id), ["b"])
+        XCTAssertEqual(shelf.archived.map(\.id), ["c"])
+    }
+}

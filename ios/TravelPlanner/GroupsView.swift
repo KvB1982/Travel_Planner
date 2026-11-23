@@ -15,6 +15,8 @@ struct GroupsView: View {
     @State private var removing: (group: TravelGroup, member: TravelGroup.Member)?
     @State private var renaming: TravelGroup?
     @State private var renameText = ""
+    /// Open invite links by group, for those who manage it.
+    @State private var invites: [String: [GroupInvite]] = [:]
 
     var body: some View {
         NavigationStack {
@@ -55,7 +57,7 @@ struct GroupsView: View {
                 Button("Entfernen", role: .destructive) { run { try await $0.removeGroupMember(groupId: pair.group.id, userId: pair.member.id) } }
                 Button("Abbrechen", role: .cancel) {}
             } message: { pair in
-                Text("\(pair.member.name) verliert den Zugang zu den Reisen von „\(pair.group.name)“, außer zu selbst angelegten.")
+                Text("\(pair.member.name) verliert sofort den Zugang zu allen Reisen und zur Merkliste von „\(pair.group.name)“, außer zu selbst angelegten Reisen. Stimmen und Kommentare bleiben stehen.")
             }
             .alert("Gruppe umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { group in
                 TextField("Name der Gruppe", text: $renameText)
@@ -91,7 +93,10 @@ struct GroupsView: View {
                         Button("Aus der Gruppe entfernen", systemImage: "person.badge.minus", role: .destructive) { removing = (group, member) }
                     } label: {
                         HStack {
-                            Text(member.name).foregroundStyle(.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(member.name).foregroundStyle(.primary)
+                                if let joined = member.joinedAt { Text("dabei seit \(joined.formatted(.dateTime.day().month().year().locale(Locale(identifier: "de_DE"))))").font(.caption).foregroundStyle(.secondary) }
+                            }
                             Spacer()
                             Text(member.isAdmin ? "verwaltet" : "Mitglied").font(.footnote).foregroundStyle(.secondary)
                             Image(systemName: "ellipsis.circle").foregroundStyle(.tint)
@@ -108,6 +113,19 @@ struct GroupsView: View {
             if group.isAdmin {
                 Button("Mitglied hinzufügen", systemImage: "person.badge.plus") { makeInvite(group) }
                 Button("Gruppe umbenennen", systemImage: "pencil") { renameText = group.name; renaming = group }
+                ForEach(invites[group.id] ?? []) { open in
+                    HStack {
+                        Image(systemName: "envelope").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Offene Einladung")
+                            Text([open.expiresAt.map { "gültig bis \($0.formatted(.dateTime.day().month().locale(Locale(identifier: "de_DE"))))" },
+                                  open.maxUses.map { "\(open.usedCount ?? 0) von \($0) genutzt" }].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Zurückziehen", role: .destructive) { revoke(open, in: group) }.buttonStyle(.borderless).font(.footnote)
+                    }
+                }
             }
             if !group.trips.isEmpty {
                 LabeledContent(group.trips.count == 1 ? "1 Reise" : "\(group.trips.count) Reisen", value: group.trips.map(\.title).joined(separator: ", "))
@@ -126,6 +144,22 @@ struct GroupsView: View {
         guard let backend = model.backend else { return }
         Task {
             do { invite = try await backend.createGroupInvite(groupId: group.id); error = nil } catch { self.error = model.message(for: error) }
+            await loadInvites()
+        }
+    }
+
+    private func revoke(_ open: GroupInvite, in group: TravelGroup) {
+        guard let backend = model.backend else { return }
+        Task {
+            do { try await backend.revokeGroupInvite(groupId: group.id, inviteId: open.id); error = nil } catch { self.error = model.message(for: error) }
+            await loadInvites()
+        }
+    }
+
+    private func loadInvites() async {
+        guard let backend = model.backend else { return }
+        for group in groups ?? [] where group.isAdmin {
+            if let open = try? await backend.groupInvites(groupId: group.id) { invites[group.id] = open }
         }
     }
 
@@ -135,6 +169,7 @@ struct GroupsView: View {
             do {
                 groups = try await action(backend)
                 error = nil
+                await loadInvites()
             } catch let error as APIError where error.status == 404 && groups == nil {
                 self.error = "Der Server kennt noch keine Gruppen. Das kommt mit seinem nächsten Update."
             } catch {

@@ -40,6 +40,11 @@ struct TripListView: View {
     @State private var showSettings = false
     @State private var showRedeem = false
     @State private var showGroups = false
+    @State private var groups: [TravelGroup] = []
+    /// The group a new trip was asked for from its section; nil when asked for from the plus.
+    @State private var newTripGroup: String?
+    /// The group of the trip opened last, as the likely home of the next new trip.
+    @AppStorage("lastGroup") private var lastGroup = ""
     @State private var inviteText = ""
     @State private var redeemNote: String?
 
@@ -57,32 +62,46 @@ struct TripListView: View {
                     Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.red)
                 }
             }
-            Section {
-                ForEach(trips.filter { $0.status != .archived && !$0.isWatchlist }) { trip in
-                    TripRow(trip: trip).tag(trip.id)
-                }
-            }
-            let watchlists = trips.filter(\.isWatchlist)
-            if !watchlists.isEmpty {
+            let shelf = TripShelf(trips: trips, groups: groups)
+            ForEach(shelf.sections) { section in
                 Section {
-                    ForEach(watchlists) { trip in
+                    ForEach(section.trips) { trip in TripRow(trip: trip).tag(trip.id) }
+                    if let list = section.watchlist {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(trip.title).font(.headline)
-                                Text((trip.candidateCount ?? 0) == 1 ? "1 Angebot" : "\(trip.candidateCount ?? 0) Angebote")
+                                Text(section.group == nil && section.id == "private" ? "Meine Merkliste" : "Merkliste der Gruppe").font(.headline)
+                                Text((list.candidateCount ?? 0) == 1 ? "1 Angebot" : "\(list.candidateCount ?? 0) Angebote")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         } icon: {
                             Image(systemName: "bookmark")
                         }
-                        .tag(trip.id)
+                        .tag(list.id)
                     }
+                    if section.trips.isEmpty && section.watchlist == nil {
+                        Text("Noch keine Reise.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    HStack {
+                        Label(section.title, systemImage: section.id == "private" ? "person" : "person.3")
+                        Spacer()
+                        if section.id != "private" {
+                            Menu {
+                                Button("Mitglieder und Einladungen", systemImage: "person.2") { showGroups = true }
+                                Button("Neue Reise in dieser Gruppe", systemImage: "suitcase") { newTripGroup = section.id; showNewTrip = true }
+                            } label: {
+                                Image(systemName: "ellipsis.circle").accessibilityLabel("\(section.title) verwalten")
+                            }
+                        }
+                    }
+                    .textCase(nil)
                 }
             }
-            let archived = trips.filter { $0.status == .archived && !$0.isWatchlist }
-            if !archived.isEmpty {
+            if !shelf.archived.isEmpty {
                 Section("Archiv") {
-                    ForEach(archived) { trip in TripRow(trip: trip).tag(trip.id) }
+                    DisclosureGroup(shelf.archived.count == 1 ? "1 abgeschlossene Reise" : "\(shelf.archived.count) abgeschlossene Reisen") {
+                        ForEach(shelf.archived) { trip in TripRow(trip: trip).tag(trip.id) }
+                    }
                 }
             }
         }
@@ -101,7 +120,7 @@ struct TripListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("Reise anlegen", systemImage: "suitcase") { showNewTrip = true }
+                    Button("Reise anlegen", systemImage: "suitcase") { newTripGroup = nil; showNewTrip = true }
                     Button("Einladung einlösen", systemImage: "envelope.open") { showRedeem = true }
                     Button("Gruppen", systemImage: "person.3") { showGroups = true }
                 } label: {
@@ -130,13 +149,16 @@ struct TripListView: View {
             Text(redeemNote ?? "")
         }
         .sheet(isPresented: $showNewTrip) {
-            NewTripView { trip in
+            NewTripView(groups: groups, preselected: newTripGroup ?? lastGroup) { trip in
                 model.dataChanged()
                 selection = trip.id
             }
         }
         .refreshable { await load() }
         .task(id: model.revision) { await load() }
+        .onChange(of: selection) {
+            if let trip = trips.first(where: { $0.id == selection }) { lastGroup = trip.groupId ?? "private" }
+        }
     }
 
     private func redeem() {
@@ -158,6 +180,8 @@ struct TripListView: View {
         guard let backend = model.backend else { return }
         do {
             trips = try await backend.trips()
+            // Groups are an extra: a server without them still shows the trips.
+            groups = (try? await backend.groups()) ?? []
             error = nil
         } catch is CancellationError {
         } catch {
@@ -190,7 +214,6 @@ private struct TripRow: View {
         var parts = [count == 1 ? "1 Angebot" : "\(count) Angebote"]
         if favorites > 0 { parts.append(favorites == 1 ? "1 Favorit" : "\(favorites) Favoriten") }
         parts.append("\(trip.persons) Personen")
-        if let group = trip.groupName, !group.isEmpty { parts.append(group) }
         return parts.joined(separator: " · ")
     }
 }

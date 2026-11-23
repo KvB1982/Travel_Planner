@@ -25,6 +25,11 @@ public protocol TravelBackend: Sendable {
     func groups() async throws -> [TravelGroup]
     func createGroup(name: String) async throws -> [TravelGroup]
     func renameGroup(groupId: String, name: String) async throws -> [TravelGroup]
+    /// Invite links into the group that are still open. Admins only.
+    func groupInvites(groupId: String) async throws -> [GroupInvite]
+    func revokeGroupInvite(groupId: String, inviteId: String) async throws
+    /// Changes the own name, as the others see it.
+    func rename(name: String) async throws -> User
     /// A link that leads into the group. Admins only; shown once.
     func createGroupInvite(groupId: String) async throws -> Invite
     /// Removes someone, or leaves the group when it is the own id.
@@ -533,6 +538,21 @@ public struct APIClient: TravelBackend {
     public func createGroup(name: String) async throws -> [TravelGroup] {
         struct Body: Encodable { var name: String }
         return try await (send("POST", "/groups", body: Body(name: name)) as GroupsAnswer).groups
+    }
+
+    public func groupInvites(groupId: String) async throws -> [GroupInvite] {
+        struct Answer: Decodable { var invites: [GroupInvite] }
+        return try await (send("GET", "/groups/\(groupId.pathEscaped)/invites") as Answer).invites
+    }
+
+    public func revokeGroupInvite(groupId: String, inviteId: String) async throws {
+        _ = try await data("DELETE", "/groups/\(groupId.pathEscaped)/invites/\(inviteId.pathEscaped)")
+    }
+
+    public func rename(name: String) async throws -> User {
+        struct Body: Encodable { var name: String }
+        struct Answer: Decodable { var user: User }
+        return try await (send("PATCH", "/me", body: Body(name: name)) as Answer).user
     }
 
     public func renameGroup(groupId: String, name: String) async throws -> [TravelGroup] {

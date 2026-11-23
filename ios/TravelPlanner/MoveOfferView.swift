@@ -13,6 +13,7 @@ struct MoveOfferView: View {
     var onMoved: (Trip) -> Void
 
     @State private var trips: [Trip] = []
+    @State private var groups: [TravelGroup] = []
     @State private var loaded = false
     @State private var busy = false
     @State private var error: String?
@@ -27,23 +28,23 @@ struct MoveOfferView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
-                let lists = destinations.filter(\.isWatchlist)
-                if !lists.isEmpty {
-                    Section {
-                        ForEach(lists) { trip in row(trip, symbol: "bookmark") }
-                    } footer: {
-                        Text("Auf der Merkliste bleibt das Angebot für später erhalten, ohne zu einer Reise zu gehören.")
+                let shelf = TripShelf(trips: destinations, groups: groups)
+                ForEach(shelf.sections) { section in
+                    if !section.trips.isEmpty || section.watchlist != nil {
+                        Section(section.title) {
+                            ForEach(section.trips) { trip in row(trip, symbol: "suitcase") }
+                            if let list = section.watchlist {
+                                row(list, symbol: "bookmark", title: section.id == "private" ? "Meine Merkliste" : "Merkliste der Gruppe")
+                            }
+                        }
                     }
                 }
-                Section("Reisen") {
-                    ForEach(destinations.filter { !$0.isWatchlist }) { trip in row(trip, symbol: "suitcase") }
-                    if loaded && destinations.filter({ !$0.isWatchlist }).isEmpty {
-                        Text("Es gibt keine andere Reise, in die du Angebote legen kannst.").foregroundStyle(.secondary)
-                    }
+                if loaded && destinations.isEmpty {
+                    Section { Text("Es gibt kein anderes Ziel, in das du Angebote legen kannst.").foregroundStyle(.secondary) }
                 }
                 Section {
                 } footer: {
-                    Text("Kommentare, Notizen, Bilder und Bewertungen ziehen mit um. Stimmen und der für diese Reise abgefragte Preis bleiben zurück, weil sie für die neue Reise nicht gelten.")
+                    Text("Auf einer Merkliste bleibt das Angebot für später erhalten, ohne zu einer Reise zu gehören; die Merkliste der Gruppe sehen und pflegen alle Mitglieder. Kommentare, Notizen, Bilder und Bewertungen ziehen mit um. Stimmen und der für diese Reise abgefragte Preis bleiben zurück, weil sie für die neue Reise nicht gelten.")
                 }
             }
             .overlay { if !loaded || busy { ProgressView() } }
@@ -54,17 +55,18 @@ struct MoveOfferView: View {
         .presentationDetents([.medium, .large])
         .task {
             do { trips = try await model.backend?.trips() ?? [] } catch { self.error = model.message(for: error) }
+            groups = (try? await model.backend?.groups()) ?? []
             loaded = true
         }
     }
 
-    private func row(_ trip: Trip, symbol: String) -> some View {
+    private func row(_ trip: Trip, symbol: String, title: String? = nil) -> some View {
         Button {
             move(to: trip)
         } label: {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(trip.title).foregroundStyle(.primary)
+                    Text(title ?? trip.title).foregroundStyle(.primary)
                     if let region = trip.region, !region.isEmpty { Text(region).font(.caption).foregroundStyle(.secondary) }
                 }
             } icon: {

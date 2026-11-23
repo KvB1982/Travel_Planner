@@ -14,7 +14,11 @@ public actor DemoBackend: TravelBackend {
         let trip2 = Trip(id: "t-2", title: "Sommerurlaub 2027", region: "Dänemark, Nordsee", adults: 6, children: 5, pets: 1, role: .member)
         var watchlist = Trip(id: "t-w", title: "Merkliste", adults: 2, role: .organizer)
         watchlist.kind = "watchlist"
-        trips = [trip1, trip2, watchlist]
+        var shared = Trip(id: "t-gw", title: "Merkliste", adults: 2, role: .member)
+        shared.kind = "watchlist"
+        var grouped = [trip1, trip2, shared]
+        for index in grouped.indices { grouped[index].groupId = "g-1"; grouped[index].groupName = "Unsere Gruppe" }
+        trips = grouped + [watchlist]
         let samples = DemoBackend.samples()
         details = Dictionary(uniqueKeysWithValues: samples.map { ($0.candidate.id, $0) })
         order = samples.map(\.candidate.id)
@@ -458,7 +462,8 @@ public actor DemoBackend: TravelBackend {
 
     private var circles: [TravelGroup] = [TravelGroup(id: "g-1", name: "Unsere Gruppe", role: "admin",
         members: [.init(id: "u-1", name: "Du", role: "admin"), .init(id: "u-2", name: "Anna"), .init(id: "u-3", name: "Jonas")],
-        trips: [.init(id: "t-1", title: "Pfingstferien 2027"), .init(id: "t-2", title: "Sommerurlaub 2027")])]
+        trips: [.init(id: "t-1", title: "Pfingstferien 2027"), .init(id: "t-2", title: "Sommerurlaub 2027")], watchlistId: "t-gw")]
+    private var openInvites: [String: [GroupInvite]] = [:]
 
     public func groups() async throws -> [TravelGroup] { circles }
 
@@ -466,6 +471,17 @@ public actor DemoBackend: TravelBackend {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Die Gruppe braucht einen Namen.") }
         circles.append(TravelGroup(id: nextID("g"), name: name, role: "admin", members: [.init(id: user.id, name: user.name, role: "admin")]))
         return circles
+    }
+
+    public func groupInvites(groupId: String) async throws -> [GroupInvite] { openInvites[groupId] ?? [] }
+
+    public func revokeGroupInvite(groupId: String, inviteId: String) async throws {
+        openInvites[groupId]?.removeAll { $0.id == inviteId }
+    }
+
+    public func rename(name: String) async throws -> User {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(status: 400, code: "invalid_request", message: "Der Name darf nicht leer sein.") }
+        return User(id: user.id, name: name)
     }
 
     public func renameGroup(groupId: String, name: String) async throws -> [TravelGroup] {
@@ -478,6 +494,7 @@ public actor DemoBackend: TravelBackend {
     public func createGroupInvite(groupId: String) async throws -> Invite {
         guard circles.contains(where: { $0.id == groupId }) else { throw APIError(status: 404, code: "not_found", message: "Diese Gruppe gibt es nicht.") }
         let token = nextID("gi")
+        openInvites[groupId, default: []].append(GroupInvite(id: token, createdAt: .now, expiresAt: .now.addingTimeInterval(14 * 86_400), maxUses: 1, usedCount: 0))
         return Invite(token: token, url: "https://beispiel.invalid/einladung/\(token)", role: .member, maxUses: 1)
     }
 

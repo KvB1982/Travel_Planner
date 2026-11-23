@@ -4,6 +4,10 @@ import TravelPlannerKit
 struct NewTripView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    /// The own groups, to choose where the trip belongs.
+    var groups: [TravelGroup] = []
+    /// A group's id, or "private"; empty lets the form decide.
+    var preselected = ""
     var onCreated: (Trip) -> Void
 
     @State private var title = ""
@@ -15,6 +19,7 @@ struct NewTripView: View {
     @State private var start = Calendar.current.date(byAdding: .month, value: 6, to: .now) ?? .now
     @State private var nights = 14
     @State private var budget = ""
+    @State private var home = ""
     @State private var busy = false
     @State private var error: String?
 
@@ -24,6 +29,17 @@ struct NewTripView: View {
                 Section {
                     TextField("Titel, zum Beispiel „Sommerurlaub 2027“", text: $title)
                     TextField("Region (optional)", text: $region)
+                }
+                if !groups.isEmpty {
+                    Section {
+                        Picker("Gehört zu", selection: $home) {
+                            ForEach(groups) { Text($0.name).tag($0.id) }
+                            Text("Privat, nur für mich").tag("private")
+                        }
+                    } footer: {
+                        Text(home == "private" ? "Nur du siehst die Reise, bis du jemanden einlädst."
+                                               : "Alle Mitglieder der Gruppe sehen die Reise und können mitmachen.")
+                    }
                 }
                 Section("Wer fährt mit?") {
                     Stepper("Erwachsene: \(adults)", value: $adults, in: 1...40)
@@ -47,6 +63,10 @@ struct NewTripView: View {
                 }
             }
             .navigationTitle("Neue Reise")
+            .onAppear {
+                guard home.isEmpty else { return }
+                home = groups.contains { $0.id == preselected } || preselected == "private" ? preselected : (groups.first?.id ?? "private")
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
@@ -70,7 +90,13 @@ struct NewTripView: View {
         busy = true
         Task {
             do {
-                let created = try await backend.createTrip(trip)
+                var created = try await backend.createTrip(trip)
+                // The server puts a new trip into the group when there is exactly one; anything else is set here.
+                let wanted = groups.isEmpty ? created.groupId : (home == "private" ? nil : home)
+                if wanted != created.groupId {
+                    try await backend.setTripGroup(tripId: created.id, groupId: wanted)
+                    created.groupId = wanted
+                }
                 onCreated(created)
                 dismiss()
             } catch {

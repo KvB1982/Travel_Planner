@@ -600,13 +600,17 @@ private struct TripHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let group = detail.trip.groupName, !group.isEmpty {
+                Label(detail.trip.isWatchlist ? "Merkliste von „\(group)“" : group, systemImage: "person.3")
+            }
             ForEach(detail.dateOptions) { option in
                 if let range = Format.dateRange(option.startDate, option.endDate) {
                     Label(option.label.map { "\($0): \(range)" } ?? range, systemImage: "calendar")
                 }
             }
             if detail.trip.isWatchlist {
-                Text("Angebote für später, die zu keiner Reise gehören. Wische eines nach links, um es in eine Reise zu verschieben.")
+                Text(detail.trip.groupId == nil ? "Angebote für später, die zu keiner Reise gehören. Wische eines nach links, um es in eine Reise zu verschieben."
+                                                : "Angebote für später, die alle Mitglieder der Gruppe sehen und pflegen. Wische eines nach links, um es in eine Reise zu verschieben.")
             } else {
                 Label(people, systemImage: "person.2")
             }

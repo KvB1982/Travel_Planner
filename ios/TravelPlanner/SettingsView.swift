@@ -16,6 +16,8 @@ struct SettingsView: View {
     @AppStorage(Settings.showWarnings) private var showWarnings = false
     @State private var confirmSignOut = false
     @State private var appleError: String?
+    @State private var renaming = false
+    @State private var newName = ""
 
     var body: some View {
         NavigationStack {
@@ -41,6 +43,7 @@ struct SettingsView: View {
                         LabeledContent("Modus", value: "Beispieldaten")
                     } else {
                         if let user = model.user { LabeledContent("Angemeldet als", value: user.name) }
+                        Button("Namen ändern", systemImage: "pencil") { newName = model.user?.name ?? ""; renaming = true }
                         if let host = model.serverURL?.host() { LabeledContent("Server", value: host) }
                     }
                     Button(model.isDemo ? "Beispieldaten verlassen" : "Abmelden", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
@@ -76,6 +79,16 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Einstellungen")
+            .alert("Dein Name", isPresented: $renaming) {
+                TextField("Name", text: $newName)
+                Button("Abbrechen", role: .cancel) {}
+                Button("Sichern") {
+                    let name = newName.trimmingCharacters(in: .whitespaces)
+                    if !name.isEmpty { Task { do { try await model.rename(name); appleError = nil } catch { appleError = model.message(for: error) } } }
+                }
+            } message: {
+                Text("So sehen dich die anderen bei Stimmen, Kommentaren und in der Gruppe.")
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
             .alert(model.isDemo ? "Beispieldaten verlassen?" : "Wirklich abmelden?", isPresented: $confirmSignOut) {

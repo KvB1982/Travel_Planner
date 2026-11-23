@@ -115,6 +115,13 @@ final class AppModel {
         user = try await client.linkApple(identityToken: identityToken, nonce: nonce)
     }
 
+    /// Changes the own name, as the others see it.
+    func rename(_ name: String) async throws {
+        guard let backend else { return }
+        user = try await backend.rename(name: name)
+        dataChanged()
+    }
+
     func unlinkApple() async throws {
         guard let client = backend as? APIClient else { return }
         try await client.unlinkApple()
