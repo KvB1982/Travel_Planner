@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -76,6 +77,12 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
     reply.type("application/json").send({ applinks: { details: [{ appIDs: [deps.config.APPLE_APP_ID], components: [{ "/": "/einladung/*" }] }] } }),
   );
 
+  // The app's symbol, for the card a messenger shows for an invitation link and for the home screen.
+  for (const name of ["app-icon.png", "apple-touch-icon.png"]) {
+    const file = readFileSync(new URL(`../assets/${name}`, import.meta.url));
+    app.get(`/${name}`, async (_req, reply) => reply.type("image/png").header("cache-control", "public, max-age=86400").send(file));
+  }
+
   /**
    * What the browser shows where the app did not open by itself. The page says nothing about the invitation:
    * the token is neither looked up nor used here, redeeming stays with the app.
@@ -106,7 +113,8 @@ export async function buildApp(deps: Omit<AppContext, "queue">, options: { logge
 const esc = (v: string) => v.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 function invitePage(token: string | null, base: string, testflight: string | undefined): string {
-  const open = token ? `reiseplaner://einladung/${token}?server=${encodeURIComponent(base.replace(/\/$/, ""))}` : null;
+  const root = base.replace(/\/$/, "");
+  const open = token ? `reiseplaner://einladung/${token}?server=${encodeURIComponent(root)}` : null;
   const getIt = testflight
     ? `<p>Du hast die App noch nicht? Sie kommt über TestFlight: <a href="${esc(testflight)}">Reiseplaner laden</a>. Tippe danach noch einmal auf den Einladungslink.</p>`
     : `<p>Du hast die App noch nicht? Sie kommt über TestFlight; den Zugang bekommst du von der Person, die dich eingeladen hat. Tippe danach noch einmal auf den Einladungslink.</p>`;
@@ -117,6 +125,15 @@ function invitePage(token: string | null, base: string, testflight: string | und
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Einladung zum Reiseplaner</title>
+<meta property="og:title" content="Einladung zum Reiseplaner">
+<meta property="og:description" content="Tippe hier, um der Reiseplanung beizutreten.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Reiseplaner">
+<meta property="og:image" content="${esc(root)}/app-icon.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta name="twitter:card" content="summary">
+<link rel="apple-touch-icon" href="${esc(root)}/apple-touch-icon.png">
 <style>
   :root { color-scheme: light dark; }
   body { margin: 0; font: 17px/1.5 -apple-system, system-ui, sans-serif; background: #f4f1ea; color: #1d2a26; }

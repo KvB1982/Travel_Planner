@@ -982,6 +982,11 @@ describe("invitation links in the browser", () => {
     expect(page.statusCode).toBe(200);
     expect(page.headers["content-type"]).toMatch(/^text\/html/);
     expect(page.body).toContain("Einladung zum Reiseplaner");
+    // The card a messenger shows: a title, a line and the app's symbol, never the token.
+    expect(page.body).toContain('<meta property="og:image" content="https://reisen.example.test/app-icon.png">');
+    expect(page.body.match(/abcDEF123456_-xyz/g)).toHaveLength(1);
+    const icon = await t.app.inject({ method: "GET", url: "/app-icon.png" });
+    expect([icon.statusCode, icon.headers["content-type"]]).toEqual([200, "image/png"]);
     expect(page.body).toContain('href="reiseplaner://einladung/abcDEF123456_-xyz?server=https%3A%2F%2Freisen.example.test"');
     expect((await t.app.inject({ method: "GET", url: "/einladung/%3Cscript%3E" })).statusCode).toBe(404);
   });

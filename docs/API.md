@@ -504,7 +504,7 @@ Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfüg
 Zwei öffentliche Antworten ohne Anmeldung, damit ein Tipp auf den Link die App öffnet:
 
 - `GET /.well-known/apple-app-site-association`: `application/json`, `applinks` für `/einladung/*` und die App aus `APPLE_APP_ID` (Vorgabe `AX2SZQVU9L.com.von-bleichert.travelplanner`).
-- `GET /einladung/:token`: kleine deutsche Seite mit dem Knopf „In der App öffnen" (`reiseplaner://einladung/<token>?server=<PUBLIC_BASE_URL>`). Der Token wird weder geprüft noch verbraucht, die Seite sieht für gültige und ungültige gleich aus. Mit `TESTFLIGHT_URL` in der Umgebung nennt sie den Link zum Laden der App. Der Token steht nicht im Protokoll.
+- `GET /einladung/:token`: kleine deutsche Seite mit dem Knopf „In der App öffnen" (`reiseplaner://einladung/<token>?server=<PUBLIC_BASE_URL>`). Der Token wird weder geprüft noch verbraucht, die Seite sieht für gültige und ungültige gleich aus. Mit `TESTFLIGHT_URL` in der Umgebung nennt sie den Link zum Laden der App. Im Kopf stehen `og:title`, `og:description`, `og:image` (`/app-icon.png`, 512 Pixel) und `apple-touch-icon`, damit Nachrichten-Apps eine Karte zeigen. Der Token steht nicht im Protokoll.
 
 Eingelöst wird weiter nur über die API.
 
