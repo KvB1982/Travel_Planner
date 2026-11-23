@@ -14,24 +14,16 @@ extension Photo {
 }
 
 /// The pictures of an offer as a strip to swipe through. A tap opens the picture full screen.
-/// Lets the strip run as far as the swipe carries it, and brings it to rest on the leading edge of a photo.
-private struct PhotoSnap: ScrollTargetBehavior {
-    /// Where each photo begins, from the start of the strip.
-    let edges: [CGFloat]
-
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        let limit = max(0, context.contentSize.width - context.containerSize.width)
-        // Near the end the strip simply rests at its end, so the last photo is never cut off.
-        guard target.rect.minX < limit - 1, let nearest = edges.min(by: { abs($0 - target.rect.minX) < abs($1 - target.rect.minX) }) else { return }
-        target.rect.origin.x = min(nearest, limit)
-    }
-}
-
+/// The strip runs freely with the swipe's own momentum and comes to rest wherever it stops, like any list.
 struct PhotoStrip: View {
     @Environment(AppModel.self) private var model
     let photos: [Photo]
 
-    @State private var position: String?
+    /// The photo at the leading edge of the strip, counted from 0. Only read off the scrolling, never set on it:
+    /// a position tied to the strip made it stop at the next photo instead of running on with the swipe.
+    @State private var index = 0
+    /// A photo to bring to the front, after the full-screen view closed on it.
+    @State private var jump: String?
     @State private var viewer: ViewerStart?
 
     private struct ViewerStart: Identifiable {
@@ -39,43 +31,53 @@ struct PhotoStrip: View {
     }
 
     private let height: CGFloat = 240
+    private let spacing: CGFloat = 6
 
-    /// Where each photo begins in the strip, for settling after a swipe.
-    private var edges: [CGFloat] {
+    /// Which photo sits at the given distance from the start of the strip.
+    private func index(at offset: CGFloat) -> Int {
         var x: CGFloat = 0
-        return photos.map { photo in
-            defer { x += width(of: photo) + 6 }
-            return x
+        for (number, photo) in photos.enumerated() {
+            let width = width(of: photo) + spacing
+            if offset < x + width / 2 { return number }
+            x += width
         }
+        return max(0, photos.count - 1)
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 6) {
-                ForEach(photos) { photo in
-                    Button {
-                        viewer = ViewerStart(id: photo.id)
-                    } label: {
-                        RemoteImage(address: photo.stripAddress, maxPixel: PhotoSize.strip)
-                            .frame(width: width(of: photo), height: height)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .contentShape(Rectangle())
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: spacing) {
+                    ForEach(photos) { photo in
+                        Button {
+                            viewer = ViewerStart(id: photo.id)
+                        } label: {
+                            RemoteImage(address: photo.stripAddress, maxPixel: PhotoSize.strip)
+                                .frame(width: width(of: photo), height: height)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(label(for: photo))
+                        .id(photo.id)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(label(for: photo))
-                    .id(photo.id)
                 }
             }
-            .scrollTargetLayout()
+            .onScrollGeometryChange(for: Int.self) { geometry in
+                index(at: geometry.contentOffset.x + geometry.contentInsets.leading)
+            } action: { _, now in
+                index = now
+            }
+            .onChange(of: jump) {
+                guard let target = jump else { return }
+                proxy.scrollTo(target, anchor: .leading)
+                jump = nil
+            }
         }
-        // A strong swipe carries on over several photos with its own momentum and then settles on the edge of one.
-        // The system's own snapping stops at the next photo, however hard the swipe.
-        .scrollTargetBehavior(PhotoSnap(edges: edges))
-        .scrollPosition(id: $position)
         .frame(height: height)
         .overlay(alignment: .bottomTrailing) {
             if photos.count > 1 {
-                Label("\(currentIndex + 1) / \(photos.count)", systemImage: "photo.on.rectangle")
+                Label("\(index + 1) / \(photos.count)", systemImage: "photo.on.rectangle")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
@@ -84,17 +86,13 @@ struct PhotoStrip: View {
                     .allowsHitTesting(false)
             }
         }
-        .onChange(of: position) { preloadAround(currentIndex) }
+        .onChange(of: index) { preloadAround(index) }
         .onAppear { preloadAround(0) }
         .fullScreenCover(item: $viewer) { start in
             PhotoViewer(photos: photos, startID: start.id) { last in
-                position = last
+                jump = last
             }
         }
-    }
-
-    private var currentIndex: Int {
-        photos.firstIndex { $0.id == position } ?? 0
     }
 
     private func width(of photo: Photo) -> CGFloat {
