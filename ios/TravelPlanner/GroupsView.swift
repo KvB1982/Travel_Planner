@@ -257,6 +257,11 @@ struct BackgroundReader: ViewModifier {
                     WebPage.log.info("Neues Inserat \(platform, privacy: .public): Sicherheitsabfrage, bleibt für die Person")
                     continue
                 }
+                if await page.isConsentWall() {
+                    WebPage.log.info("Hintergrund \(platform, privacy: .public): Cookie-Abfrage vor dem Inserat, nichts gesendet")
+                    model.askForConsent(platform: advert.platform)
+                    continue
+                }
                 guard let captured = try? await page.capture(maxPictures: WebPage.usualPictures), captured.html.count >= 500 else { continue }
                 if await page.isChallenge() { continue }
                 // A reading only for sharper photos is worth sending when it brought photos; a page behind a

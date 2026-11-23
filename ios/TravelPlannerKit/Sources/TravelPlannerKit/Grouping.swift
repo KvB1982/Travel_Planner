@@ -89,6 +89,63 @@ public extension Format {
 }
 
 public enum PictureQuality {
+    /// What a Check24 picture address shows, told from the address packed into its `source=` part.
+    public enum Check24Kind: Equatable, Sendable { case hotel, guest, map }
+
+    /// The `source=` part of a Check24 picture address: the same picture carries the same one in every size.
+    public static func check24Source(_ address: String) -> String? {
+        guard let parts = URLComponents(string: address), parts.host?.contains("check24") == true else { return nil }
+        return packedSource(in: parts.path)
+    }
+
+    /// The Base64 text after `/source=`. It ends at the `!` that starts the signature (which differs from size
+    /// to size), or at the next `/`.
+    private static func packedSource(in text: String) -> String? {
+        guard let start = text.range(of: "/source=") else { return nil }
+        let packed = text[start.upperBound...].prefix { $0 != "!" && $0 != "/" && $0 != "?" }
+        return packed.isEmpty ? nil : String(packed)
+    }
+
+    /// The width a Check24 address asks for (`size=1920x`), or 0.
+    public static func check24Width(_ address: String) -> Int {
+        guard let parts = URLComponents(string: address) else { return 0 }
+        guard let size = parts.path.split(separator: "/").map(String.init).first(where: { $0.hasPrefix("size=") }) else { return 0 }
+        return Int(size.dropFirst(5).prefix { $0.isNumber }) ?? 0
+    }
+
+    public static func check24Kind(_ address: String) -> Check24Kind? {
+        guard var packed = check24Source(address) else { return nil }
+        // The source is an address in Base64, which may pack another one inside: unpack up to three times.
+        var seen = ""
+        for _ in 0..<3 {
+            var padded = packed.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            while padded.count % 4 != 0 { padded += "=" }
+            guard let data = Data(base64Encoded: padded), let text = String(data: data, encoding: .utf8) else { break }
+            seen += " " + text
+            guard let inner = packedSource(in: text) else { break }
+            packed = inner
+        }
+        let all = seen.lowercased()
+        if all.contains("maps.google") || all.contains("staticmap") { return .map }
+        if all.contains("cts-ratings") || all.contains("travellerpictures") { return .guest }
+        return .hotel
+    }
+
+    /// From everything collected on a Check24 page: the hotel's own pictures only, each once in its widest
+    /// version, in the order they came, at most `limit`. Guest photos and maps are left out.
+    public static func check24Selection(_ addresses: [String], limit: Int) -> [String] {
+        var order: [String] = [], best: [String: String] = [:]
+        for address in addresses {
+            guard let source = check24Source(address), check24Kind(address) == .hotel else { continue }
+            if let known = best[source] {
+                if check24Width(address) > check24Width(known) { best[source] = address }
+            } else {
+                order.append(source); best[source] = address
+            }
+        }
+        return order.prefix(limit).compactMap { best[$0] }
+    }
+
     /// Whether a picture address of Check24 names only a preview: its `size=` step is narrower than 600.
     /// Check24 signs every size on its own, so a larger version only exists once a device has seen its address.
     public static func isSmallCheck24(_ address: String?) -> Bool {

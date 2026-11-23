@@ -37,6 +37,17 @@ final class AppModel {
 
     func dataChanged() { revision += 1 }
 
+    /// A platform whose pages show a cookie question on this device, so nothing can be read out of sight until a
+    /// person has answered it once on a visible page. Shown as a hint above the trips.
+    private(set) var consentHint: String?
+
+    func askForConsent(platform: String?) {
+        let name = platform.map(Format.platformName) ?? "Eine Plattform"
+        consentHint = "\(name) zeigt auf diesem Gerät zuerst eine Cookie-Abfrage. Öffne einmal ein Inserat von dort, tippe unten auf „Auf diesem Gerät aktualisieren“ und beantworte die Abfrage. Danach liest die App diese Inserate wieder von selbst."
+    }
+
+    func dismissConsentHint() { consentHint = nil }
+
     private func loadUser() async {
         user = try? await backend?.me()
     }

@@ -1230,3 +1230,28 @@ final class PictureQualityTests: XCTestCase {
         XCTAssertFalse(PictureQuality.isSmallCheck24(nil))
     }
 }
+
+final class Check24PictureTests: XCTestCase {
+    private func address(_ inner: String, size: String) -> String {
+        // As Check24 writes it: URL-safe Base64, then "!" and a signature that differs from size to size.
+        let packed = Data(inner.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+        return "https://cdn1.urlaub.check24.de/size=\(size)/di=3/source=\(packed)!\(size.hashValue.magnitude % 9999)/picture.jpg?cts_do=webapp"
+    }
+
+    func testKindsAndSelection() {
+        let hotel1 = "https://i.travelapi.com/lodging/1/a.jpg", hotel2 = "https://i.travelapi.com/lodging/1/b.jpg"
+        let nested = "https://cdn-cts-1.community.check24.de/size=800c600/source=" + Data(hotel2.utf8).base64EncodedString() + "!3e2751/picture.jpg"
+        let guest = "https://cts-ratings.check24.de/travellerpictures/9.jpg"
+        let map = "https://maps.googleapis.com/maps/api/staticmap?center=1,2"
+        XCTAssertEqual(PictureQuality.check24Kind(address(hotel1, size: "450x")), .hotel)
+        XCTAssertEqual(PictureQuality.check24Kind(address(nested, size: "1920x")), .hotel)
+        XCTAssertEqual(PictureQuality.check24Kind(address(guest, size: "1920x")), .guest)
+        XCTAssertEqual(PictureQuality.check24Kind(address(map, size: "800x")), .map)
+        XCTAssertNil(PictureQuality.check24Kind("https://a0.muscache.com/pic.jpg"))
+        XCTAssertEqual(PictureQuality.check24Width(address(hotel1, size: "1920x")), 1920)
+        let picked = PictureQuality.check24Selection([address(hotel1, size: "450x"), address(guest, size: "1920x"), address(hotel1, size: "1920x"),
+                                                     address(map, size: "800x"), address(nested, size: "1600x"), address(hotel1, size: "800x")], limit: 60)
+        XCTAssertEqual(picked, [address(hotel1, size: "1920x"), address(nested, size: "1600x")])
+        XCTAssertEqual(PictureQuality.check24Selection([address(hotel1, size: "450x"), address(nested, size: "450x")], limit: 1).count, 1)
+    }
+}

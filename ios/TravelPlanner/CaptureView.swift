@@ -146,6 +146,10 @@ struct CaptureView: View {
                     gate = true
                     throw APIError(status: 0, code: "challenge", message: "Die Seite zeigt eine Sicherheitsabfrage statt des Inserats. Bitte beantworte sie hier und tippe danach auf „Übernehmen“. Oder brich ab, dann wird dieses Angebot nicht geprüft.")
                 }
+                if await page.isConsentWall() {
+                    gate = true
+                    throw APIError(status: 0, code: "consent", message: "Die Seite zeigt zuerst eine Cookie-Abfrage, das Inserat dahinter ist noch nicht geladen. Bitte beantworte sie hier auf der Seite und tippe danach auf „Übernehmen“. Die Antwort merkt sich die Plattform auf diesem Gerät.")
+                }
                 if automatic { await page.waitForPrice() }
                 if forTrip, await page.lacksDates() {
                     gate = true
@@ -204,6 +208,8 @@ struct CaptureView: View {
 final class WebPage: NSObject, WKNavigationDelegate {
     /// How many photos of a gallery are read without being asked for more.
     static let usualPictures = 30
+    /// On Check24 up to this many of the hotel's own pictures go to the server.
+    static let check24Pictures = 60
 
     static let log = Logger(subsystem: "com.von-bleichert.travelplanner", category: "Auslesen")
     let webView: WKWebView
@@ -662,6 +668,22 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
     }
 
+    /// The page shows a cookie or consent question in front of an advert that has not loaded behind it: a few lines
+    /// of text about cookies and next to no pictures. Such a page is not the advert and must not be sent as one.
+    /// The app does not answer the question; the person does, on a page they can see.
+    func isConsentWall() async -> Bool {
+        let script = """
+        (function () {
+          var text = (document.body ? document.body.innerText : '').trim();
+          var about = /cookie/i.test(text) && /(akzeptieren|zustimmen|einverstanden|geht klar|alle annehmen|nur notwendige|accept|agree|ablehnen|reject)/i.test(text);
+          var real = 0;
+          for (var i = 0; i < document.images.length; i++) { if (document.images[i].naturalWidth >= 240) { real++; } }
+          return about && text.length < 4000 && real < 3;
+        })()
+        """
+        return ((try? await webView.evaluateJavaScript(script) as? Bool) ?? false) == true
+    }
+
     /// The page asks to pick dates first: it was opened without the dates of the trip, so whatever price
     /// it shows says nothing about the trip.
     func lacksDates() async -> Bool {
@@ -804,10 +826,22 @@ final class WebPage: NSObject, WKNavigationDelegate {
         }
 
         progress = "Blättere die Bildergalerie durch …"
-        _ = try? await webView.evaluateJavaScript("window.__tpMax = \(maxPictures ?? 100_000); true")
+        // On Check24 the browsing goes on further: its gallery repeats every picture in several sizes, and the
+        // hotel's own pictures are sorted out afterwards.
+        let onCheck24 = (webView.url?.host() ?? "").contains("check24")
+        _ = try? await webView.evaluateJavaScript("window.__tpMax = \(maxPictures.map { onCheck24 ? max($0, 260) : $0 } ?? 100_000); true")
         let gallery = await run(Self.browseGallery)
         merge(gallery.pictures, into: &photos)
-        if let maxPictures {
+        if (webView.url?.host() ?? "").contains("check24") {
+            // Check24 mixes hundreds of guest photos and maps into its gallery, each in several sizes: only the
+            // hotel's own pictures go on, each once in its widest version.
+            let limit = maxPictures == nil ? 80 : Self.check24Pictures
+            let chosen = PictureQuality.check24Selection(photos.map(\.url), limit: limit)
+            if !chosen.isEmpty {
+                Self.log.info("Check24: \(photos.count) Bildadressen gesehen, \(chosen.count) Hotelbilder gewählt")
+                photos = chosen.map { Picture(url: $0, gallery: true) }
+            }
+        } else if let maxPictures {
             // The browsing stops a little late; what goes to the server is cut to the limit, the advert's own first.
             var kept = 0
             photos = photos.filter { photo in

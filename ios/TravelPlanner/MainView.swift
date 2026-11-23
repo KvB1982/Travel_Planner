@@ -148,6 +148,14 @@ struct TripListView: View {
 
     var body: some View {
         List(selection: $selection) {
+            if let hint = model.consentHint {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(hint, systemImage: "hand.raised").font(.footnote)
+                        Button("Verstanden") { model.dismissConsentHint() }.font(.footnote.weight(.semibold)).buttonStyle(.borderless)
+                    }
+                }
+            }
             if model.isDemo {
                 Section {
                     Label("Beispieldaten. Nichts davon wird gespeichert.", systemImage: "theatermasks")

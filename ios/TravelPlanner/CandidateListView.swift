@@ -579,6 +579,11 @@ struct CandidateListView: View {
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): Sicherheitsabfrage")
                 needsPerson.append(check); evaluating[check.candidateId] = nil; continue
             }
+            if await hiddenPage.isConsentWall() {
+                // A question only a person may answer: the advert is shown to them afterwards, like a security check.
+                WebPage.log.info("Prüflauf \(platform, privacy: .public): Cookie-Abfrage vor dem Inserat")
+                needsPerson.append(check); evaluating[check.candidateId] = nil; continue
+            }
             await hiddenPage.waitForPrice()
             if await hiddenPage.lacksDates() {
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): Seite ohne Zeitraum")
@@ -608,8 +613,8 @@ struct CandidateListView: View {
         if failed > 0 { parts.append(failed == 1 ? "1 ließ sich nicht lesen" : "\(failed) ließen sich nicht lesen") }
         var text = parts.joined(separator: ", ") + ". Die Ergebnisse erscheinen in der Liste, sobald der Server sie ausgewertet hat."
         if !needsPerson.isEmpty {
-            text += needsPerson.count == 1 ? " 1 Inserat zeigt eine Sicherheitsabfrage und wird dir jetzt angezeigt."
-                                           : " \(needsPerson.count) Inserate zeigen eine Sicherheitsabfrage und werden dir jetzt angezeigt."
+            text += needsPerson.count == 1 ? " 1 Inserat zeigt eine Sicherheits- oder Cookie-Abfrage und wird dir jetzt angezeigt."
+                                           : " \(needsPerson.count) Inserate zeigen eine Sicherheits- oder Cookie-Abfrage und werden dir jetzt angezeigt."
             pendingVisible = needsPerson
         }
         notice = text
