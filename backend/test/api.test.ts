@@ -908,6 +908,11 @@ describe("a window of possible dates", () => {
     expect((await t.call("POST", "/trips", owner, { title: "x", flexStart: "2027-05-14" })).status).toBe(400);
     const tripId = (await t.call("POST", "/trips", owner, { title: "Pfingsten", adults: 4, flexStart: "2027-05-14", flexEnd: "2027-05-30", nightsMin: 7, nightsMax: 14 })).body.trip.id as string;
     const list = async () => (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    expect((await t.call("GET", `/trips/${tripId}`, owner)).body.trip.stayVariants).toEqual([
+      { startDate: "2027-05-14", endDate: "2027-05-25", nights: 11 },
+      { startDate: "2027-05-19", endDate: "2027-05-30", nights: 11 },
+      { startDate: "2027-05-18", endDate: "2027-05-25", nights: 7 },
+    ]);
 
     // Shared with dates that fit: they are the stay this advert is looked at for.
     const id = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520?start=15-05-2027&nights=10&adult=4", html: fixture("novasol.html") })).body.candidateId as string;

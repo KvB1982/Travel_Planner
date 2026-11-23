@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
-import { activityEvents, dateOptions, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
+import { activityEvents, dateOptions, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
 import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
 import { onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
@@ -25,6 +25,25 @@ const tripFields = {
   nightsMin: z.number().int().min(1).max(60).nullish(),
   nightsMax: z.number().int().min(1).max(60).nullish(),
 };
+
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Up to three stays worth asking every advert about when the dates are open: the middle length at the
+ * start of the window, the same at its end, and the shortest stay in the middle. Each look costs the
+ * device a page load, so there are few.
+ */
+export function stayVariants(w: { flexStart: string | null; flexEnd: string | null; nightsMin: number | null; nightsMax: number | null }): { startDate: string; endDate: string; nights: number }[] {
+  if (!w.flexStart || !w.flexEnd) return [];
+  const room = Math.round((Date.parse(w.flexEnd) - Date.parse(w.flexStart)) / 86_400_000);
+  if (room < 1) return [];
+  const min = Math.min(room, w.nightsMin ?? room);
+  const max = Math.min(room, w.nightsMax ?? room);
+  const mid = Math.max(min, Math.min(max, Math.round((min + max) / 2)));
+  const at = (start: number, nights: number) => ({ startDate: addDays(w.flexStart!, start), endDate: addDays(w.flexStart!, start + nights), nights });
+  const all = [at(0, mid), at(room - mid, mid), at(Math.floor((room - min) / 2), min)];
+  return all.filter((v, i) => all.findIndex((x) => x.startDate === v.startDate && x.endDate === v.endDate) === i);
+}
 
 /** A window needs both ends in order, and a shortest stay no longer than the longest. */
 function checkWindow(w: { flexStart?: string | null; flexEnd?: string | null; nightsMin?: number | null; nightsMax?: number | null }) {
@@ -122,7 +141,9 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       const o = own.find((p) => p.id === t.decidedDateOptionId) ?? own[0];
       return { startDate: o?.startDate ?? null, endDate: o?.endDate ?? null };
     };
-    return { trips: rows.map((r) => ({ ...r.trip, currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
+    const named = await db.select({ id: groups.id, name: groups.name }).from(groups);
+    const groupName = (id: string | null) => named.find((g) => g.id === id)?.name ?? null;
+    return { trips: rows.map((r) => ({ ...r.trip, groupName: groupName(r.trip.groupId), currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
   });
 
   app.get("/trips/:tripId", async (req) => {
@@ -138,7 +159,8 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       .orderBy(asc(tripMembers.joinedAt));
     const options = await db.select().from(dateOptions).where(eq(dateOptions.tripId, tripId)).orderBy(asc(dateOptions.startDate));
     const chosen = options.find((o) => o.id === trip!.decidedDateOptionId) ?? options[0];
-    return { trip: { ...trip!, currentPhase: currentPhase(trip!.phase, { startDate: chosen?.startDate ?? null, endDate: chosen?.endDate ?? null }) }, role, members, dateOptions: options };
+    const [group] = trip!.groupId ? await db.select({ name: groups.name }).from(groups).where(eq(groups.id, trip!.groupId)).limit(1) : [];
+    return { trip: { ...trip!, groupName: group?.name ?? null, stayVariants: stayVariants(trip!), currentPhase: currentPhase(trip!.phase, { startDate: chosen?.startDate ?? null, endDate: chosen?.endDate ?? null }) }, role, members, dateOptions: options };
   });
 
   app.patch("/trips/:tripId", async (req) => {
