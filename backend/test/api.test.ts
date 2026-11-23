@@ -1,5 +1,5 @@
-import { desc } from "drizzle-orm";
-import { listingSources, priceSnapshots } from "../src/db/schema.js";
+import { desc, eq } from "drizzle-orm";
+import { listings, listingSources, priceSnapshots, tripListings } from "../src/db/schema.js";
 import { describe, expect, it } from "vitest";
 import { emptyProfile } from "../src/import/profile.js";
 import type { Extractor } from "../src/import/extract.js";
@@ -1019,9 +1019,17 @@ describe("every possible stay from one page", () => {
     expect((await t.call("PATCH", `/trips/${tripId}`, owner, { adults: 4, children: 4, households: 2 })).body.trip.households).toBe(2);
     const list = async () => (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates[0];
     expect(await list()).toMatchObject({ priceBasis: "household", priceBasisSet: null, households: 2, price: { totalCents: 540000, basis: "household", groupTotalCents: 1080000, householdTotalCents: 540000 } });
+    // A hint on headcount is beside the point for a household's price, and back when the price is the group's.
+    const [row] = await t.db.select().from(tripListings).where(eq(tripListings.id, id));
+    const [l] = await t.db.select().from(listings).where(eq(listings.id, row!.listingId));
+    await t.db.update(listings).set({ profile: { ...l!.profile, warnings: ["Der Preis gilt für 2 Erwachsene und 2 Kinder, nicht für 8 Personen.", "Kein Aufzug."] } }).where(eq(listings.id, l!.id));
+    const hints = async () => (await t.call("GET", `/candidates/${id}`, owner)).body.warnings.map((w: { text: string }) => w.text);
+    expect(await hints()).toEqual(["Kein Aufzug."]);
+    expect((await list()).listing.warningCount).toBe(1);
     // A member says otherwise for this advert.
     await t.call("PATCH", `/candidates/${id}`, owner, { priceBasis: "group" });
     expect(await list()).toMatchObject({ priceBasis: "group", priceBasisSet: "group", price: { groupTotalCents: 540000, householdTotalCents: 270000 } });
+    expect(await hints()).toHaveLength(2);
   });
 });
 

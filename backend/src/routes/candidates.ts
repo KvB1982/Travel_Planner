@@ -53,8 +53,15 @@ function onlyTheDeviceSeesPrices(source: { platform: string; fetchNote: string |
 }
 
 /** The advert's hints with the trip's choice to hide them; hidden ones stay retrievable. */
-function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: string[]) {
-  return (listing?.profile.warnings ?? []).map((text) => ({ text, hidden: hidden.includes(text) }));
+/**
+ * A hint that the price is for fewer people than travel. Right for a house; beside the point where the trip
+ * counts households and the price is one household's: there the list says so itself and reckons the group's.
+ */
+export const aboutHeadcount = (hint: string) => /preis/i.test(hint) && /\d+\s*(Erwachsene|Personen|Kinder|Gäste|Reisende)/i.test(hint);
+const hintsFor = (warnings: string[], basis: "group" | "household") => (basis === "household" ? warnings.filter((w) => !aboutHeadcount(w)) : warnings);
+
+function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: string[], basis: "group" | "household" = "group") {
+  return hintsFor(listing?.profile.warnings ?? [], basis).map((text) => ({ text, hidden: hidden.includes(text) }));
 }
 
 export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -269,7 +276,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           rating: p.rating,
           platforms: own.map((s) => s.platform),
           // Hints still shown for this trip; hidden ones are not counted.
-          warningCount: p.warnings.filter((w) => !candidate.hiddenWarnings.includes(w)).length,
+          warningCount: hintsFor(p.warnings, basis).filter((w) => !candidate.hiddenWarnings.includes(w)).length,
         },
         price: price && { available: stale ? price.available : best ? true : said.available, totalCents: price.totalCents, rangeMaxCents: price.rangeMaxCents, kind: price.kind, nights: price.nights, persons: price.persons, startDate: price.startDate, endDate: price.endDate, forThisTrip: forThisTrip(price), capturedAt: price.capturedAt, checkedAt: seenAt(price), basis, groupTotalCents: forGroup(price.totalCents), householdTotalCents: forHousehold(price.totalCents) },
         // "group" or "household": whom `price.totalCents` and the stays' totals are for. `priceBasisSet` is what a member chose, null while the server decides.
@@ -502,13 +509,14 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       households: self?.entry.households ?? 1,
       price: self?.entry.price ?? null,
       checkWindow: self?.entry.checkWindow ?? false,
-      listing,
+      // Without the hints on headcount where the price is one household's; see `warnings`.
+      listing: listing && self?.entry.priceBasis === "household" ? { ...listing, profile: { ...listing.profile, warnings: hintsFor(listing.profile.warnings, "household") } } : listing,
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
       photos: listing?.profile.photos ?? [],
       // What guests say: the model's summary and the single reviews, newest first where the page dates them.
       reviews: reviewsFor(listing, sources[0]?.platform ?? null),
       // Every hint with whether this trip hid it. `listing.profile.warnings` stays the full, unfiltered list.
-      warnings: warningsFor(listing, candidate.hiddenWarnings),
+      warnings: warningsFor(listing, candidate.hiddenWarnings, self?.entry.priceBasis ?? "group"),
       // First is the link the advert was shared with. `read` says whether its page has been read at all,
       // `needsDevice` that the platform refused the server and the app should capture the page.
       sources: sources.map((s, i) => ({
@@ -871,7 +879,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         // What speaks for and against it, for the paper the decision rests on.
         summary: c.profile.summary,
         highlights: c.profile.highlights,
-        warnings: c.profile.warnings.filter((w) => !c.hiddenWarnings.includes(w)),
+        warnings: hintsFor(c.profile.warnings, c.entry.priceBasis).filter((w) => !c.hiddenWarnings.includes(w)),
         reviewSummary: c.profile.reviewSummary.summary ? { summary: c.profile.reviewSummary.summary, positives: c.profile.reviewSummary.positives, negatives: c.profile.reviewSummary.negatives } : null,
       }))
       // Most points first; a veto puts an advert behind those without one, and first places break a tie.
