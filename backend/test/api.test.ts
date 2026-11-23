@@ -138,7 +138,7 @@ describe("import", () => {
     const s = await setup({ fetcher: async () => page(fixture("novasol.html")) });
     const res = await s.importLink("https://urlaub.check24.de/suche/angebot?days=11-25&departureDate=2027-08-06&pageArea=package&returnDate=2027-08-30&roomAllocation=A-A-7-11&hotelId=12912");
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
-    expect(new URL(s.requested.at(-1)!).searchParams.get("days")).toBe("7");
+    expect(new URL(s.requested.at(-1)!).searchParams.get("days")).toBe("8");
     expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 4 });
     // The window of the shared link is beside the point once the page was read for the trip.
     expect(detail.body.listing.profile.warnings.join(" ")).not.toMatch(/11 bis 25 Tagen/);
@@ -948,6 +948,59 @@ describe("a window of possible dates", () => {
   });
 });
 
+describe("every possible stay from one page", () => {
+  const bar = (day: string, price: string, days: number) => `<div class="js-price-calendar-bar-ele" data-departure-date="${day}" data-price=""><div class="tooltip"><span class="js-pc-price">${price} € </span><span class="js-pc-duration">${days} Tage</span><span class="js-pc-airport">ab München (MUC)</span></div></div>`;
+  const offer = (from: string, to: string, total: number) => `<li class="js-offer-box" data-offer-id="x" data-total-price="${total}"><div class="departure"><span class="flight-date-ele"><strong>${from}</strong></span></div><div class="return"><span class="flight-date-ele"><strong>${to}</strong></span></div><button>Zur Buchung</button><button>ausgebucht</button></li>`;
+  const hotel = `<html><head><title>Hotel</title></head><body><div id="js-price-calendar">${bar("2027-08-02", "4.400", 11)}${bar("2027-08-05", "5.455", 11)}${bar("2027-08-10", "6.000", 13)}${bar("2027-09-01", "3.000", 11)}<div class="js-price-calendar-bar-ele" data-departure-date="2027-08-06"></div></div><ul>${offer("Do, 05.08.2027", "So, 15.08.2027", 5600)}${offer("Do, 05.08.2027", "So, 15.08.2027", 5400)}</ul>${"<p>Die Verfügbarkeitsprüfung konnte nicht durchgeführt werden.</p>".repeat(10)}</body></html>`;
+
+  it("asks Check24 for the whole window and keeps each stay it lists", async () => {
+    // What the model makes of the page does not matter where the page says it in fixed places.
+    const extractor: Extractor = async ({ baseline }) => ({ profile: { ...baseline, title: "Hotel", price: { ...baseline.price, totalEur: 9999, kind: "from", available: false } }, note: null });
+    const t = await testApp({ extractor, fetcher: async () => page("", { blocked: true, status: 403 }) });
+    const owner = await t.bootstrap();
+    const tripId = (await t.call("POST", "/trips", owner, { title: "Sommer", adults: 2, children: 2, flexStart: "2027-08-01", flexEnd: "2027-08-22", nightsMin: 10, nightsMax: 12 })).body.trip.id as string;
+    const id = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://urlaub.check24.de/suche/hotelinformation?hotelId=12912&departureDate=2027-08-06&returnDate=2027-08-30&days=11-25&roomAllocation=A-A-7-11&pageArea=package", html: hotel })).body.candidateId as string;
+    await t.ctx.queue.idle();
+    const check = await t.call("POST", `/trips/${tripId}/check`, owner, {});
+    const [one] = check.body.checks;
+    expect(one.window).toBe(true);
+    expect(Object.fromEntries(new URL(one.checkUrl).searchParams)).toMatchObject({ departureDate: "2027-08-01", returnDate: "2027-08-22", days: "11-13", roomAllocation: "A-A-7-11" });
+
+    await t.call("POST", `/candidates/${id}/capture`, owner, { html: hotel, forTrip: true, url: one.checkUrl });
+    await t.ctx.queue.idle();
+    const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    // The first of September lies outside the window; the fifth of August takes the cheaper of its two offers.
+    expect(c.stays.map((x: { startDate: string; endDate: string; totalCents: number; best: boolean }) => [x.startDate, x.endDate, x.totalCents, x.best])).toEqual([
+      ["2027-08-02", "2027-08-12", 440000, true],
+      ["2027-08-05", "2027-08-15", 540000, false],
+      ["2027-08-10", "2027-08-22", 600000, false],
+    ]);
+    expect(c.price).toMatchObject({ startDate: "2027-08-02", endDate: "2027-08-12", totalCents: 440000, available: true, persons: 4, forThisTrip: true });
+    expect(c.checkWindow).toBe(true);
+
+    // The same page again adds nothing.
+    await t.call("POST", `/candidates/${id}/capture`, owner, { html: hotel, forTrip: true, url: one.checkUrl });
+    await t.ctx.queue.idle();
+    const detail = await t.call("GET", `/candidates/${id}`, owner);
+    expect(detail.body.prices.filter((p: { tripId: string | null }) => p.tripId === tripId)).toHaveLength(3);
+  });
+
+  it("takes the price of a fixed period from the offer with those very dates", async () => {
+    const extractor: Extractor = async ({ baseline }) => ({ profile: { ...baseline, title: "Hotel", price: { ...baseline.price, totalEur: null, kind: null, available: false } }, note: null });
+    const t = await testApp({ extractor, fetcher: async () => page("", { blocked: true, status: 403 }) });
+    const owner = await t.bootstrap();
+    const tripId = (await t.call("POST", "/trips", owner, { title: "Sommer", adults: 2, children: 2 })).body.trip.id as string;
+    await t.call("POST", `/trips/${tripId}/date-options`, owner, { startDate: "2027-08-05", endDate: "2027-08-15" });
+    const id = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://urlaub.check24.de/suche/hotelinformation?hotelId=12912&roomAllocation=A-A-7-11&pageArea=package", html: hotel })).body.candidateId as string;
+    await t.ctx.queue.idle();
+    await t.call("POST", `/candidates/${id}/capture`, owner, { html: hotel, forTrip: true });
+    await t.ctx.queue.idle();
+    const [c] = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    expect(c.price).toMatchObject({ startDate: "2027-08-05", endDate: "2027-08-15", totalCents: 540000, available: true });
+    expect(c.availability).toBe("available");
+  });
+});
+
 describe("short links of a portal", () => {
   it("gives a source its platform once its short link resolves", async () => {
     const short = "https://c.24.de/pr/AbC123";
@@ -963,7 +1016,7 @@ describe("short links of a portal", () => {
     const [one] = check.body.checks;
     expect(one).toMatchObject({ platform: "check24", needsDevice: true, mode: "device" });
     const asked = new URL(one.checkUrl).searchParams;
-    expect(Object.fromEntries(asked)).toMatchObject({ hotelId: "5429", departureDate: "2027-08-21", returnDate: "2027-08-28", days: "7", roomAllocation: "A-A-7-11" });
+    expect(Object.fromEntries(asked)).toMatchObject({ hotelId: "5429", departureDate: "2027-08-21", returnDate: "2027-08-28", days: "8", roomAllocation: "A-A-7-11" });
     const detail = await s.call("GET", `/candidates/${first.body.candidateId}`, s.owner);
     expect(detail.body.sources[0]).toMatchObject({ platform: "check24" });
   });

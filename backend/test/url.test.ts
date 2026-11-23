@@ -79,7 +79,7 @@ describe("urlForStay", () => {
   it("turns a Check24 search window into the trip's fixed stay", () => {
     const link = analyzeLink(CHECK24);
     const url = new URL(urlForStay(link, { startDate: "2027-05-15", endDate: "2027-05-29", adults: 4, children: 2 }));
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({ hotelId: "12912", departureDate: "2027-05-15", returnDate: "2027-05-29", days: "14", roomAllocation: "A-A-7-11", pageArea: "package" });
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ hotelId: "12912", departureDate: "2027-05-15", returnDate: "2027-05-29", days: "15", roomAllocation: "A-A-7-11", pageArea: "package" });
     // The rooms of the shared link stay: a hotel has no room for the whole party, and the price is for those in the link.
     expect(personsAsked(link, { adults: 4, children: 4 })).toBe(4);
     // Without rooms in the link the trip's party is asked; the children's ages are not known.

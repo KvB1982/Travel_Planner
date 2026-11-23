@@ -1,12 +1,12 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { dateOptions, listings, listingSources, priceSnapshots, tripListings, trips } from "../db/schema.js";
-import { extractBlocks, joinPhotos, profileFromBlocks, sameIn } from "./blocks.js";
+import { extractBlocks, joinPhotos, profileFromBlocks, sameIn, type PageOffer } from "./blocks.js";
 import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { looksBlocked, UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
-import { analyzeLink, embeddedTarget, nightsBetween, personsAsked, urlForStay, type LinkInfo } from "./url.js";
+import { analyzeLink, embeddedTarget, nightsBetween, personsAsked, urlForStay, urlForWindow, type LinkInfo } from "./url.js";
 
 const APPROXIMATE_POSITION = new Set(["airbnb", "vrbo"]);
 /** A title a security check left behind in place of the advert's own. */
@@ -214,7 +214,9 @@ export async function processImport(
     // The link was shared with dates that fit the trip's window: somebody picked them because the house is free then.
     // They are what this look is about, unless a period was named.
     const picked = input.link.stay;
-    if (!input.dates && !input.dateOptionId && !input.link.searchWindow && picked.startDate && picked.endDate && inWindow(stay.window, picked.startDate, picked.endDate)) {
+    // A trip with only a window, and a platform that shows every stay inside it on one page: that page is the look.
+    const windowUrl = !input.dates && !input.dateOptionId && stay.dateOptionId === null ? urlForWindow(input.link, stay.window) : null;
+    if (!windowUrl && !input.dates && !input.dateOptionId && !input.link.searchWindow && picked.startDate && picked.endDate && inWindow(stay.window, picked.startDate, picked.endDate)) {
       stay = await tripStay(db, input.tripId, null, { startDate: picked.startDate, endDate: picked.endDate });
     }
     const fromDevice = input.html !== undefined;
@@ -225,7 +227,7 @@ export async function processImport(
 
     if (!fromDevice) {
       // Ask for the trip's dates and party, so the price on the page is the one that matters.
-      const target = urlForStay(input.link, stay);
+      const target = windowUrl ?? urlForStay(input.link, stay);
       priceBelongsToTrip = target !== input.link.canonicalUrl;
       const page = await deps.fetcher(target);
       const refused = page.blocked || page.status >= 400 || page.html.length < 500;
@@ -256,12 +258,47 @@ export async function processImport(
     console.info(
       `import ${input.link.platform}/${input.link.externalId}${secondary ? " (further source)" : ""}: ${fromDevice ? "device" : "server"} html ${html.length} bytes, json-ld ${blocks.jsonLd.length}, state [${Object.keys(blocks.state).join(",")}], text ${blocks.text.length}, photos ${blocks.photos.length}, reviews ${blocks.reviews.length}, captured ${blocks.captured.total} marked ${blocks.captured.marked}, review blocks ${blocks.capturedReviews.length}`,
     );
+    // Stays the page lists itself, with dates and total, need no reading between the lines.
+    const inside = priceBelongsToTrip ? (blocks.offers ?? []).filter((o) => inWindow(stay.window, o.startDate, o.endDate)) : [];
+    const perNight = (o: PageOffer) => o.totalEur / (nightsBetween(o.startDate, o.endDate) ?? 1);
+    let fixed: PageOffer | null = null;
+    // Whether the page spans the whole window, so that no single price on it is the one for the stay asked about.
+    let spansWindow = false;
+    if (windowUrl) {
+      const same = (opened: string) => {
+        try {
+          const [a, b] = [new URL(opened).searchParams, new URL(windowUrl).searchParams];
+          return ["departureDate", "returnDate", "days"].every((k) => a.get(k) === b.get(k));
+        } catch {
+          return false;
+        }
+      };
+      spansWindow = !fromDevice || (input.openedUrl !== undefined && same(input.openedUrl));
+      // By the night, as stays of different length compare; the cheapest is the one the advert shows.
+      fixed = [...inside].sort((a, b) => perNight(a) - perNight(b))[0] ?? null;
+      if (fixed) stay = await tripStay(db, input.tripId, null, { startDate: fixed.startDate, endDate: fixed.endDate });
+    } else if (priceBelongsToTrip) {
+      fixed = (blocks.offers ?? []).find((o) => o.startDate === stay.startDate && o.endDate === stay.endDate) ?? null;
+    }
+    const others = inside.filter((o) => o.startDate !== stay.startDate || o.endDate !== stay.endDate);
+    if (blocks.offers?.length) console.info(`import ${input.link.platform}/${input.link.externalId}: page lists ${blocks.offers.length} dated stays, ${inside.length} inside the trip's window${fixed ? ", one taken as the price" : ""}`);
     const { profile: baseline, provenance } = profileFromBlocks(blocks, input.link.kind);
     const read = () => deps.extractor({ blocks, link: input.link, baseline, ...(priceBelongsToTrip ? { requestedFor: stay } : {}) });
     let { profile: extracted, note } = await read();
     // The same page has been seen to give a price on one reading and nothing on the next.
     // A look for the trip that comes back empty is therefore read once more before it counts as empty.
-    if (priceBelongsToTrip && extracted.price.totalEur === null && extracted.price.available === null) {
+    if (fixed) {
+      extracted.price.totalEur = fixed.totalEur;
+      extracted.price.kind = "total";
+      extracted.price.rangeMaxEur = null;
+      extracted.price.available = true;
+    } else if (spansWindow && priceBelongsToTrip) {
+      // A page over the whole window with no stay to be made out: whatever amount was read belongs to no stay.
+      extracted.price.totalEur = null;
+      extracted.price.kind = null;
+      extracted.price.rangeMaxEur = null;
+      extracted.price.available = null;
+    } else if (priceBelongsToTrip && extracted.price.totalEur === null && extracted.price.available === null) {
       console.info(`import ${input.link.platform}/${input.link.externalId}: no price and no availability for the trip, reading once more`);
       const second = await read();
       if (second.profile.price.totalEur !== null || second.profile.price.available !== null) ({ profile: extracted, note } = second);
@@ -416,6 +453,20 @@ export async function processImport(
     const loose = !priceBelongsToTrip && (price.kind === "from" || price.kind === "range" || input.link.searchWindow);
     const forTrip = priceBelongsToTrip || (!loose && (options.some((o) => o.startDate === price.startDate && o.endDate === price.endDate) || inWindow(stay.window, price.startDate, price.endDate)));
     const totalCents = price.totalEur !== null ? Math.round(price.totalEur * 100) : null;
+    if (others.length) {
+      // Every further stay the page listed inside the window is known for the trip as well, each as a price of its own.
+      const seen = await db.select().from(priceSnapshots).where(and(eq(priceSnapshots.listingSourceId, input.sourceId), eq(priceSnapshots.tripId, input.tripId))).orderBy(desc(priceSnapshots.capturedAt));
+      const fresh = [];
+      const again: string[] = [];
+      for (const o of others) {
+        const last = seen.find((x) => x.startDate === o.startDate && x.endDate === o.endDate);
+        const cents = Math.round(o.totalEur * 100);
+        if (last && last.totalCents === cents && last.available === true && last.kind === "total") again.push(last.id);
+        else fresh.push({ listingSourceId: input.sourceId, tripId: input.tripId, startDate: o.startDate, endDate: o.endDate, nights: nightsBetween(o.startDate, o.endDate), persons: personsAsked(input.link, stay), totalCents: cents, kind: "total" as const, available: true, capture: fromDevice ? ("device" as const) : ("import" as const), capturedBy: input.userId });
+      }
+      if (fresh.length) await db.insert(priceSnapshots).values(fresh);
+      if (again.length) await db.update(priceSnapshots).set({ confirmedAt: new Date() }).where(inArray(priceSnapshots.id, again));
+    }
     const [latest] = await db.select().from(priceSnapshots).where(eq(priceSnapshots.listingSourceId, input.sourceId)).orderBy(desc(priceSnapshots.capturedAt)).limit(1);
     const unchanged =
       latest !== undefined &&

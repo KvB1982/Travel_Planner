@@ -182,7 +182,9 @@ function analyzeCheck24(url: URL): Partial<LinkInfo> | null {
     // The dates are a search window, not a stay.
     warnings.push(`Der Link enthält eine Spanne von ${days.replace("-", " bis ")} Tagen statt eines festen Zeitraums. Es gibt deshalb keinen einzelnen Preis.`);
   } else if (days) {
-    stay.nights = int(days);
+    // The platform counts days, the day of return included: eleven days are ten nights.
+    const n = int(days);
+    stay.nights = nightsBetween(stay.startDate, stay.endDate) ?? (n ? n - 1 : null);
   }
   const keep = new URLSearchParams();
   for (const k of ["hotelId", "departureDate", "returnDate", "days", "roomAllocation", "transportType", "pageArea"]) {
@@ -297,6 +299,24 @@ export function personsAsked(info: LinkInfo, stay: Pick<Stay, "adults" | "childr
 }
 
 /**
+ * A link that asks for every stay inside a window of possible dates at once, where the platform has such a page.
+ * Null where it has none: then each stay needs a page of its own.
+ */
+export function urlForWindow(info: LinkInfo, w: { flexStart: string | null; flexEnd: string | null; nightsMin: number | null; nightsMax: number | null }): string | null {
+  if (info.platform !== "check24" || !w.flexStart || !w.flexEnd) return null;
+  const room = nightsBetween(w.flexStart, w.flexEnd);
+  if (!room || room < 1) return null;
+  const min = Math.max(1, Math.min(room, w.nightsMin ?? w.nightsMax ?? room));
+  const max = Math.max(min, Math.min(room, w.nightsMax ?? w.nightsMin ?? room));
+  const url = new URL(info.canonicalUrl);
+  url.searchParams.set("departureDate", w.flexStart);
+  url.searchParams.set("returnDate", w.flexEnd);
+  // Days as the platform counts them, the day of return included.
+  url.searchParams.set("days", min === max ? String(min + 1) : `${min + 1}-${max + 1}`);
+  return url.toString();
+}
+
+/**
  * Rebuild a link with the dates and party of the trip, so the price read from
  * the page belongs to the trip and not to whatever the sharer had selected.
  */
@@ -327,7 +347,8 @@ export function urlForStay(info: LinkInfo, stay: Pick<Stay, "startDate" | "endDa
       const nights = nightsBetween(stay.startDate, stay.endDate);
       p.set("departureDate", stay.startDate);
       p.set("returnDate", stay.endDate);
-      if (nights) p.set("days", String(nights));
+      // Days as the platform counts them, the day of return included.
+      if (nights) p.set("days", String(nights + 1));
       // A hotel sells rooms, not the house: the rooms the sharer chose stay as they are, and the price is theirs.
       if (stay.adults !== null && !p.get("roomAllocation")) {
         // The link wants every child's age. Those of the shared link serve where the number fits; otherwise a school child.

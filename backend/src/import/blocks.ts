@@ -18,6 +18,61 @@ export interface PageBlocks {
   captured: { total: number; marked: number };
   /** Review blocks the app collected from the opened page, as running text: name, date, stars and all. */
   capturedReviews: string[];
+  /** Stays the page itself lists with dates and a total, where it does: a hotel's offers and its price calendar. */
+  offers?: PageOffer[];
+}
+
+/** One stay a page offers: arrival, departure and what it costs in all. */
+export interface PageOffer {
+  startDate: string;
+  endDate: string;
+  totalEur: number;
+}
+
+const plusDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const euros = (text: string | undefined | null): number | null => {
+  const m = /\d[\d.\s\u00a0]*(?:,\d{1,2})?/.exec(text ?? "");
+  if (!m) return null;
+  const n = Number(m[0].replace(/[.\s\u00a0]/g, "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+const germanDay = (text: string | undefined | null): string | null => {
+  const m = /(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(text ?? "");
+  return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : null;
+};
+
+/**
+ * What a Check24 hotel page says in fixed places: each offer with outward and return day and its total,
+ * and the price calendar with the cheapest total per day of departure. The cheapest per stay is kept.
+ */
+export function datedOffers(root: ReturnType<typeof parse>): PageOffer[] {
+  const listed: PageOffer[] = [];
+  for (const box of root.querySelectorAll("li.js-offer-box")) {
+    const raw = Number(box.getAttribute("data-total-price"));
+    const totalEur = Number.isFinite(raw) && raw > 0 ? raw : null;
+    const startDate = germanDay(box.querySelector(".departure .flight-date-ele strong")?.text);
+    const endDate = germanDay(box.querySelector(".return .flight-date-ele strong")?.text);
+    if (totalEur && startDate && endDate && endDate > startDate) listed.push({ startDate, endDate, totalEur });
+  }
+  let calendar: PageOffer[] = [];
+  for (const bar of root.querySelectorAll("#js-price-calendar .js-price-calendar-bar-ele")) {
+    const startDate = bar.getAttribute("data-departure-date");
+    const totalEur = euros(bar.querySelector(".js-pc-price")?.text);
+    // "11 Tage" counts the day of return: ten nights.
+    const days = Number(/(\d+)\s*Tag/.exec(bar.querySelector(".js-pc-duration")?.text ?? "")?.[1]);
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !totalEur || !Number.isInteger(days) || days < 2) continue;
+    calendar.push({ startDate, endDate: plusDays(startDate, days - 1), totalEur });
+  }
+  const key = (o: PageOffer) => `${o.startDate}|${o.endDate}`;
+  // The calendar is taken to show totals like the offers do. Where both name the same stay and the calendar is
+  // far below, it counts by the head and is left out.
+  if (calendar.some((c) => listed.some((o) => key(o) === key(c) && c.totalEur < 0.6 * Math.min(...listed.filter((x) => key(x) === key(c)).map((x) => x.totalEur))))) calendar = [];
+  const best = new Map<string, PageOffer>();
+  for (const o of [...listed, ...calendar]) {
+    const known = best.get(key(o));
+    if (!known || o.totalEur < known.totalEur) best.set(key(o), o);
+  }
+  return [...best.values()].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
 }
 
 export interface PageReview {
@@ -546,7 +601,8 @@ export function extractBlocks(html: string): PageBlocks {
     if (merged.length > photos.length) photos = merged;
   }
 
-  return { title, og, jsonLd, state, text, photos, reviews, captured: { total: capturedImgs.length, marked: marked.length }, capturedReviews };
+  const offers = datedOffers(root);
+  return { title, og, jsonLd, state, text, photos, reviews, captured: { total: capturedImgs.length, marked: marked.length }, capturedReviews, ...(offers.length ? { offers } : {}) };
 }
 
 /**

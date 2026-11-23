@@ -5,7 +5,7 @@ import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
-import { analyzeLink, nightsBetween, urlForStay } from "../import/url.js";
+import { analyzeLink, nightsBetween, urlForStay, urlForWindow } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
@@ -272,7 +272,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
         deviceRead: first?.fetchNote === "device",
         // false when the advert takes fewer guests than the trip has travellers: platforms then show a hint instead of a price.
         fitsParty: p.maxGuests === null || partySize === 0 ? null : p.maxGuests >= partySize,
-        checkUrl: link ? urlForStay(link, stay) : null,
+        checkUrl: link ? ((flexible && options.length === 0 ? urlForWindow(link, stay.window) : null) ?? urlForStay(link, stay)) : null,
+        // One page for the whole window: a single look brings every possible stay, the single stays need none of their own.
+        checkWindow: Boolean(link && flexible && options.length === 0 && urlForWindow(link, stay.window)),
         // What is known for each stay looked at, by the night, so that different dates and lengths compare. `best` marks the one `price` shows.
         stays: stays.map(({ row: _r, ...x }) => ({ ...x, best: best !== null && x.startDate === best.startDate && x.endDate === best.endDate })),
         // What is known for each of the trip's periods, so they can be set side by side.
@@ -412,7 +414,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       const source = await settleSource(db, ctx.fetcher, found);
       const shared = analyzeLink(source.url);
       const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
-      const url = urlForStay(link, stay);
+      // Where one page shows every stay inside the trip's window, that page is opened instead of one per stay.
+      const whole = !named && !dates && stay.dateOptionId === null ? urlForWindow(link, stay.window) : null;
+      const url = whole ?? urlForStay(link, stay);
       // Read on the device before: the platform refused the server, or gave it too little to go by.
       const device = onlyTheDeviceSeesPrices(source);
       const justRead = source.lastFetchedAt !== null && Date.now() - source.lastFetchedAt.getTime() < 60_000;
@@ -422,7 +426,7 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       }
       // No link form for the trip's dates: opening the undated page on the device would cost time and tell nothing.
       const pointless = device && stay.startDate !== null && stay.endDate !== null && url === link.canonicalUrl;
-      checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url });
+      checks.push({ candidateId: candidate.id, platform: source.platform, mode: pointless || (!device && justRead) ? ("skipped" as const) : device ? ("device" as const) : ("server" as const), needsDevice: device, checkUrl: url, window: whole !== null });
     }
     await logActivity(ctx, tripId, uid, "availability_checked", { candidates: checks.length });
     return reply.code(202).send({ dateOptionId: stay.dateOptionId, startDate: stay.startDate, endDate: stay.endDate, adults: stay.adults, children: stay.children, checks });
