@@ -1031,6 +1031,13 @@ describe("tidying up trips", () => {
 
     const id = (await s.importLink("https://www.novasol.de/ferienhaeuser/CLD520")).body.candidateId as string;
     const member = await s.join("member", "Tante");
+    // A link to the trip that went astray is taken back before anyone uses it.
+    const stray = (await s.call("POST", `/trips/${s.tripId}/invites`, s.owner, {})).body;
+    const openLinks = (await s.call("GET", `/trips/${s.tripId}/invites`, s.owner)).body.invites;
+    expect(openLinks).toHaveLength(1);
+    expect((await s.call("GET", `/trips/${s.tripId}/invites`, member)).status).toBe(403);
+    expect((await s.call("DELETE", `/trips/${s.tripId}/invites/${openLinks[0].id}`, s.owner)).status).toBe(204);
+    expect((await s.call("GET", `/auth/invites/${stray.token}`, null)).status).toBe(410);
     expect((await s.call("DELETE", `/trips/${s.tripId}`, member)).status).toBe(403);
     const shelf = (await s.call("GET", "/trips", s.owner)).body.trips.find((x: { kind: string }) => x.kind === "watchlist").id as string;
     expect((await s.call("DELETE", `/trips/${shelf}`, s.owner)).body.error.code).toBe("watchlist");

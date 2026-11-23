@@ -279,6 +279,30 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(201).send({ token, url: `${ctx.config.PUBLIC_BASE_URL.replace(/\/$/, "")}/einladung/${token}`, role: body.role, expiresAt, maxUses: body.maxUses });
   });
 
+  /** Links to this trip that still work, so one that went astray can be taken back. The links themselves cannot be shown again. */
+  app.get("/trips/:tripId/invites", async (req) => {
+    const uid = userId(req);
+    const tripId = uuidParam((req.params as { tripId: string }).tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const open = await db
+      .select({ id: invites.id, role: invites.role, createdAt: invites.createdAt, expiresAt: invites.expiresAt, maxUses: invites.maxUses, usedCount: invites.usedCount, createdBy: users.name })
+      .from(invites)
+      .innerJoin(users, eq(users.id, invites.createdBy))
+      .where(and(eq(invites.tripId, tripId), sql`${invites.usedCount} < ${invites.maxUses}`, sql`${invites.expiresAt} > now()`))
+      .orderBy(asc(invites.createdAt));
+    return { invites: open };
+  });
+
+  app.delete("/trips/:tripId/invites/:inviteId", async (req, reply) => {
+    const uid = userId(req);
+    const params = req.params as { tripId: string; inviteId: string };
+    const tripId = uuidParam(params.tripId);
+    await requireMember(db, tripId, uid, "organizer");
+    const gone = await db.delete(invites).where(and(eq(invites.id, uuidParam(params.inviteId)), eq(invites.tripId, tripId))).returning({ id: invites.id });
+    if (!gone.length) throw notFound();
+    return reply.code(204).send();
+  });
+
   app.get("/trips/:tripId/activity", async (req) => {
     const uid = userId(req);
     const tripId = uuidParam((req.params as { tripId: string }).tripId);

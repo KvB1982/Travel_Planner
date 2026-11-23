@@ -565,3 +565,5 @@ Jede Gruppe hat genau eine gemeinsame Merkliste: eine Reise mit `kind: "watchlis
 - **Eindeutige Namen:** In einer Gruppe darf es jeden Reisenamen nur einmal geben, ebenso unter den privaten Reisen einer Person; Groß- und Kleinschreibung und Leerzeichen am Rand zählen nicht, archivierte Reisen zählen mit. `POST /trips` und `PATCH /trips/:id` (Name oder Gruppe) antworten sonst mit 409 `title_taken`. Schon vorhandene Doppelte bleiben, bis eine umbenannt oder gelöscht wird.
 - **Reise in eine andere Gruppe:** `PATCH /trips/:id` mit `{ "groupId" }`. Die Mitglieder der alten Gruppe gehen heraus, die der neuen kommen hinein.
 - **Inserat in eine andere Reise, auch in einer anderen Gruppe:** `POST /candidates/:id/move` mit `{ "tripId" }`; Ziel kann jede Reise oder Merkliste sein, in der man Mitglied ist. 409 `already_in_trip`.
+
+Offene Einladungen zu einer Reise (nur Organisation): `GET /trips/:id/invites` liefert `{ invites: [{ id, role, createdAt, expiresAt, maxUses, usedCount, createdBy }] }`, `DELETE /trips/:id/invites/:inviteId` (204) nimmt eine zurück. Der Link selbst lässt sich nicht noch einmal anzeigen.
