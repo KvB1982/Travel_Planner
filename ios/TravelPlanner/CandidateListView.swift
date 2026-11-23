@@ -157,6 +157,18 @@ struct CandidateListView: View {
         return option?.label ?? option.flatMap { Format.dateRange($0.startDate, $0.endDate) } ?? "Zeitraum"
     }
 
+    /// Countries folded shut, as "trip|country" entries separated by line breaks, remembered across launches.
+    @AppStorage("foldedCountries") private var foldedRaw = ""
+    private var foldedCountries: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
+    private func foldKey(_ country: String) -> String { "\(tripID)|\(country)" }
+
+    private func toggleCountry(_ country: String) {
+        var set = foldedCountries
+        let key = foldKey(country)
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        withAnimation { foldedRaw = set.sorted().joined(separator: "\n") }
+    }
+
     /// The offers of one country with its regions, the way the list shows them.
     private struct CountrySection: Identifiable {
         var country: String?
@@ -176,7 +188,7 @@ struct CandidateListView: View {
 
     /// The head of one country in the list: flag, name in large type and number of offers.
     /// A country with a single region names it here; several regions get dividers below instead.
-    private func countryHeader(_ section: CountrySection) -> some View {
+    private func countryHeader(_ section: CountrySection, folded: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let flag = Format.flag(forCountry: section.country) { Text(flag).font(.title2) }
             // In a narrow column the name shrinks a little and the rest gives way; nothing wraps.
@@ -195,9 +207,13 @@ struct CandidateListView: View {
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Color.accentColor.opacity(0.15), in: Capsule())
                 .foregroundStyle(.tint)
+            Image(systemName: "chevron.down").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                .rotationEffect(.degrees(folded ? -90 : 0))
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityValue(folded ? "zugeklappt" : "aufgeklappt")
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -267,17 +283,22 @@ struct CandidateListView: View {
             ForEach(countrySections) { section in
                 Section {
                     // A row of its own, not a section header: headers are forced small and grey by the system.
-                    if countrySections.count > 1 || section.country != nil {
-                        countryHeader(section)
+                    let headed = countrySections.count > 1 || section.country != nil
+                    if headed {
+                        Button { toggleCountry(section.id) } label: { countryHeader(section, folded: foldedCountries.contains(foldKey(section.id))) }
+                            .buttonStyle(.plain)
                             .listRowBackground(Color.accentColor.opacity(0.10))
                             .listRowSeparator(.hidden)
                             .selectionDisabled()
                     }
-                    ForEach(section.regions) { region in
-                        if section.regions.count > 1 {
-                            regionDivider(region.region ?? "Weitere", count: region.offers.count)
+                    // A folded country keeps its head with the number of offers; its offers wait behind it.
+                    if !headed || !foldedCountries.contains(foldKey(section.id)) {
+                        ForEach(section.regions) { region in
+                            if section.regions.count > 1 {
+                                regionDivider(region.region ?? "Weitere", count: region.offers.count)
+                            }
+                            ForEach(region.offers) { row($0) }
                         }
-                        ForEach(region.offers) { row($0) }
                     }
                 }
                 .listSectionSpacing(14)
