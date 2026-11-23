@@ -8,17 +8,23 @@ struct MainView: View {
     /// Whether the last step between offers went on to the next one, for the direction the new offer comes in from.
     @State var stepForward = true
     @Environment(AppModel.self) var model
+    /// Which columns show on the iPad. Opening an offer folds the trips away, so the offer has the room.
+    @State private var columns: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             TripListView(selection: $tripID)
         } content: {
-            if let tripID {
-                CandidateListView(tripID: tripID, selection: $candidateID)
-                    .id(tripID)
-            } else {
-                ContentUnavailableView("Wähle eine Reise", systemImage: "suitcase")
+            Group {
+                if let tripID {
+                    CandidateListView(tripID: tripID, selection: $candidateID)
+                        .id(tripID)
+                } else {
+                    ContentUnavailableView("Wähle eine Reise", systemImage: "suitcase")
+                }
             }
+            // Wide enough for the whole row of filters up to "Preise prüfen".
+            .navigationSplitViewColumnWidth(min: 380, ideal: 590, max: 700)
         } detail: {
             if let candidateID {
                 CandidateDetailView(candidateID: candidateID, onStep: step) { self.candidateID = nil }
@@ -29,6 +35,9 @@ struct MainView: View {
             }
         }
         .onChange(of: tripID) { candidateID = nil }
+        .onChange(of: candidateID) { before, now in
+            if now != nil, now != before, columns == .all { withAnimation { columns = .doubleColumn } }
+        }
         .modifier(BackgroundReader())
     }
 }
