@@ -422,9 +422,9 @@ struct CandidateDetailView: View {
         let mine = detail.votes.entries.first { $0.userId == model.user?.id }
         Section {
             HStack(spacing: 10) {
-                voteButton(.yes, "Ja", "hand.thumbsup", .green, mine)
-                voteButton(.maybe, "Vielleicht", "questionmark.circle", .orange, mine)
-                voteButton(.no, "Nein", "hand.thumbsdown", .red, mine)
+                voteButton(.yes, "Ja", "hand.thumbsup", mine)
+                voteButton(.maybe, "Vielleicht", "questionmark.circle", mine)
+                voteButton(.no, "Nein", "hand.thumbsdown", mine)
             }
             .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
             .listRowSeparator(.hidden)
@@ -445,7 +445,7 @@ struct CandidateDetailView: View {
         }
     }
 
-    private func voteButton(_ verdict: Verdict, _ label: String, _ symbol: String, _ color: Color, _ mine: VoteEntry?) -> some View {
+    private func voteButton(_ verdict: Verdict, _ label: String, _ symbol: String, _ mine: VoteEntry?) -> some View {
         let chosen = mine?.verdict == verdict
         return Button {
             // A second tap on the own choice takes the vote back.
@@ -458,8 +458,9 @@ struct CandidateDetailView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .foregroundStyle(chosen ? Color.white : color)
-            .background(chosen ? color : color.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+            // Calm grey next to photos and map; only the own choice stands out, in the colour of the app.
+            .foregroundStyle(chosen ? Color.white : Color.primary)
+            .background(chosen ? Color.accentColor : Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             .contentShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
