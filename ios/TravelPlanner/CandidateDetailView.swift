@@ -198,6 +198,16 @@ struct CandidateDetailView: View {
                     if let summary = profile.summary { Text(summary).font(.callout) }
                 }
                 .listRowSeparator(.hidden)
+                // The advert itself, on the platform it came from: in the browser or the platform's own app.
+                if let source = detail.sources.first, let url = URL(string: source.url) {
+                    Button { openURL(url) } label: {
+                        Label("Original auf \(Format.platformName(source.platform)) öffnen", systemImage: "arrow.up.right.square")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .listRowSeparator(.hidden)
+                }
             }
 
             // Right under the title: voting is what the group opens an offer for.
