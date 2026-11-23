@@ -542,3 +542,16 @@ Eine Reise kann statt fester Daten (oder zusätzlich) ein Zeitfenster haben: `fl
 - Im Listeneintrag steht `stays`: alle Aufenthalte, zu denen etwas bekannt ist, je `{ startDate, endDate, nights, totalCents, perNightCents, available, checkedAt, best }`. `best` ist der buchbare Aufenthalt mit dem niedrigsten Preis je Nacht; ihn zeigt `price` (mit seinen eigenen `startDate`, `endDate`, `nights`). `availability` ist `available`, sobald ein Aufenthalt im Fenster frei ist, und `unavailable` erst, wenn alle angesehenen belegt sind.
 - Ohne eigenen Zeitraum fragt der Prüflauf der Reise nach der mittleren Dauer ab dem frühesten Anreisetag. Hat die Reise Zeiträume, bleibt der früheste der Standard; mit `dateOptionId` in der Liste gilt wie bisher nur dieser eine.
 - Novasol-Links mit `start=TT-MM-JJJJ&nights=N` werden jetzt als Aufenthalt gelesen.
+- `GET /trips/:id` nennt unter `trip.stayVariants` bis zu drei Aufenthalte, nach denen es sich lohnt, alle Inserate zu fragen: mittlere Dauer am Anfang des Fensters, mittlere Dauer am Ende, kürzeste Dauer in der Mitte. Je Variante ein Prüflauf mit `startDate` und `endDate`. Ohne Fenster ist die Liste leer.
+- Reisen nennen neben `groupId` auch `groupName`.
+
+### Merkliste der Gruppe
+
+Jede Gruppe hat genau eine gemeinsame Merkliste: eine Reise mit `kind: "watchlist"` und der `groupId` der Gruppe, automatisch angelegt, alle Mitglieder sehen und pflegen sie (Rolle `member`). Sie erscheint in `GET /trips` neben der persönlichen Merkliste (`kind: "watchlist"`, `groupId: null`), beide mit `groupId` und `groupName`. `GET /groups` nennt sie je Gruppe als `watchlistId`; `groups[].trips` enthält nur echte Reisen. Importieren, Verschieben (`POST /candidates/:id/move` mit ihrer Id als `tripId`), Notizen und Löschen funktionieren wie bei jeder Reise; umbenennen, Zeiträume und Einladungen gibt es für Merklisten nicht.
+
+### Mitglieder pflegen
+
+- Hinzufügen: `POST /groups/:id/invites`, Link weitergeben. Offene Links: `GET /groups/:id/invites` liefert `{ invites: [{ id, createdAt, expiresAt, maxUses, usedCount, createdBy }] }` (der Link selbst lässt sich nicht noch einmal anzeigen), zurücknehmen mit `DELETE /groups/:id/invites/:inviteId` (204).
+- Entfernen: `DELETE /groups/:id/members/:userId`. Rolle ändern: `PATCH /groups/:id/members/:userId` mit `{ "role" }`. Gruppe umbenennen: `PATCH /groups/:id`.
+- Den eigenen Anzeigenamen ändert jede Person selbst: `PATCH /me` mit `{ "name" }`, Antwort `{ user }`. Namen anderer ändert niemand.
+- Hinzufügen, Entfernen, Rollen und Links sind der Verwaltung (`admin`) vorbehalten; verlassen kann jede Person die Gruppe selbst.

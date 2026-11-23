@@ -908,6 +908,11 @@ describe("a window of possible dates", () => {
     expect((await t.call("POST", "/trips", owner, { title: "x", flexStart: "2027-05-14" })).status).toBe(400);
     const tripId = (await t.call("POST", "/trips", owner, { title: "Pfingsten", adults: 4, flexStart: "2027-05-14", flexEnd: "2027-05-30", nightsMin: 7, nightsMax: 14 })).body.trip.id as string;
     const list = async () => (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    expect((await t.call("GET", `/trips/${tripId}`, owner)).body.trip.stayVariants).toEqual([
+      { startDate: "2027-05-14", endDate: "2027-05-25", nights: 11 },
+      { startDate: "2027-05-19", endDate: "2027-05-30", nights: 11 },
+      { startDate: "2027-05-18", endDate: "2027-05-25", nights: 7 },
+    ]);
 
     // Shared with dates that fit: they are the stay this advert is looked at for.
     const id = (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: "https://www.novasol.de/ferienhaeuser/CLD520?start=15-05-2027&nights=10&adult=4", html: fixture("novasol.html") })).body.candidateId as string;
@@ -971,6 +976,30 @@ describe("groups", () => {
     expect(redeemed.body).toMatchObject({ tripId: solo.id, token: null });
     expect(await titles(anna.token)).toEqual(["Nur ich", "Pfingsten", "Vor der Gruppe"]);
     expect((await t.call("POST", "/invites/redeem", anna.token, { link: tripLink.url })).status).toBe(410);
+
+    // The group has a shelf of its own, apart from each person's. Both see it and put adverts on it.
+    const shelves = async (token: string) => (await t.call("GET", "/trips", token)).body.trips.filter((x: { kind: string }) => x.kind === "watchlist");
+    const mine = await shelves(owner);
+    expect(mine.map((x: { groupId: string | null }) => x.groupId).sort()).toEqual([group.id, null].sort());
+    const shared = mine.find((x: { groupId: string | null }) => x.groupId === group.id);
+    expect(shared).toMatchObject({ title: "Merkliste", groupName: "Familie" });
+    expect((await t.call("GET", "/groups", owner)).body.groups[0].watchlistId).toBe(shared.id);
+    expect((await shelves(anna.token)).some((x: { id: string }) => x.id === shared.id)).toBe(true);
+    expect((await t.call("POST", `/trips/${shared.id}/imports`, anna.token, { url: "https://www.novasol.de/ferienhaeuser/CLD520" })).status).toBe(202);
+    await t.ctx.queue.idle();
+    expect((await t.call("GET", `/trips/${shared.id}/candidates`, owner)).body.candidates).toHaveLength(1);
+    expect((await t.call("PATCH", `/trips/${shared.id}`, owner, { title: "x" })).status).toBe(403);
+
+    // Tending the group: a link that went astray is taken back, a name is put right, the administration is shared.
+    const stray = (await t.call("POST", `/groups/${group.id}/invites`, owner, {})).body;
+    const openLinks = (await t.call("GET", `/groups/${group.id}/invites`, owner)).body.invites;
+    expect(openLinks).toHaveLength(1);
+    expect((await t.call("DELETE", `/groups/${group.id}/invites/${openLinks[0].id}`, owner)).status).toBe(204);
+    expect((await t.call("POST", "/invites/redeem", anna.token, { link: stray.url })).status).toBe(410);
+    expect((await t.call("PATCH", "/me", anna.token, { name: "Anna B." })).body.user.name).toBe("Anna B.");
+    const shared2 = await t.call("PATCH", `/groups/${group.id}/members/${anna.user.id}`, owner, { role: "admin" });
+    expect(shared2.body.groups[0].members.map((m: { name: string; role: string }) => [m.name, m.role])).toEqual([["Kristian", "admin"], ["Anna B.", "admin"]]);
+    await t.call("PATCH", `/groups/${group.id}/members/${anna.user.id}`, owner, { role: "member" });
 
     // Only the administration adds people, and the group never loses it.
     expect((await t.call("POST", `/groups/${group.id}/invites`, anna.token, {})).status).toBe(403);
