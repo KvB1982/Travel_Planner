@@ -603,10 +603,11 @@ final class WebPage: NSObject, WKNavigationDelegate {
         webView.allowsBackForwardNavigationGestures = true
     }
 
-    /// Check24 hands an iPad its desktop page, whose gallery only ever loads small previews (335 wide).
-    /// Its phone page loads the large versions, at any width. So Check24 is always read as a phone would.
-    static func wantsPhonePage(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else { return false }
+    /// Check24 has two pages. The desktop page carries the hotel's data, board and reviews, but its gallery only ever
+    /// loads small previews (335 wide). The phone page loads the large pictures and little else. So Check24 is read
+    /// as a desktop browser would, on every device, and only its gallery is browsed once more as a phone.
+    static func isCheck24(_ url: URL?) -> Bool {
+        guard let host = url?.host?.lowercased() else { return false }
         return host.contains("check24") || host == "24.de" || host.hasSuffix(".24.de")
     }
 
@@ -615,13 +616,47 @@ final class WebPage: NSObject, WKNavigationDelegate {
         return "Mozilla/5.0 (iPhone; CPU iPhone OS \(version.joined(separator: "_")) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version.joined(separator: ".")) Mobile/15E148 Safari/604.1"
     }()
 
+    static let desktopAgent: String = {
+        let version = UIDevice.current.systemVersion.split(separator: ".").prefix(2).joined(separator: ".")
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
+    }()
+
+    /// The address last asked for, before the site's redirects.
+    private var requested: URL?
+
+    /// The hotel's own large pictures from Check24's phone page. Loads that page in place of the desktop one;
+    /// empty when it does not come up or shows a question for the person instead.
+    private func check24PhonePictures(limit: Int) async -> [Picture] {
+        guard let url = requested else { return [] }
+        webView.customUserAgent = Self.phoneAgent
+        defer { webView.customUserAgent = Self.desktopAgent }
+        isLoading = true
+        webView.load(URLRequest(url: url))
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(500))
+            if !isLoading { break }
+        }
+        try? await Task.sleep(for: .seconds(3))
+        if await isChallenge() { return [] }
+        if await isConsentWall() { return [] }
+        _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
+        await settle()
+        var photos = await pictures()
+        _ = try? await webView.evaluateJavaScript("window.__tpMax = 260; true")
+        merge(await run(Self.browseGallery).pictures, into: &photos)
+        let chosen = PictureQuality.check24Selection(photos.map(\.url), limit: limit)
+        Self.log.info("Check24 Telefonseite: \(photos.count) Bildadressen gesehen, \(chosen.count) Hotelbilder gewählt")
+        return chosen.map { Picture(url: $0, gallery: true) }
+    }
+
     /// The address of the advert as first reached, after the site's own redirects.
     private(set) var advertURL: String?
 
     func load(_ url: URL) {
         advertURL = nil
         isLoading = true
-        webView.customUserAgent = Self.wantsPhonePage(url) ? Self.phoneAgent : nil
+        requested = url
+        webView.customUserAgent = Self.isCheck24(url) ? Self.desktopAgent : nil
         webView.load(URLRequest(url: url))
     }
 
@@ -841,11 +876,11 @@ final class WebPage: NSObject, WKNavigationDelegate {
         progress = "Blättere die Bildergalerie durch …"
         // On Check24 the browsing goes on further: its gallery repeats every picture in several sizes, and the
         // hotel's own pictures are sorted out afterwards.
-        let onCheck24 = (webView.url?.host() ?? "").contains("check24")
+        let onCheck24 = Self.isCheck24(webView.url)
         _ = try? await webView.evaluateJavaScript("window.__tpMax = \(maxPictures.map { onCheck24 ? max($0, 260) : $0 } ?? 100_000); true")
         let gallery = await run(Self.browseGallery)
         merge(gallery.pictures, into: &photos)
-        if (webView.url?.host() ?? "").contains("check24") {
+        if onCheck24 {
             // Check24 mixes hundreds of guest photos and maps into its gallery, each in several sizes: only the
             // hotel's own pictures go on, each once in its widest version.
             let limit = maxPictures == nil ? 80 : Self.check24Pictures
@@ -871,6 +906,13 @@ final class WebPage: NSObject, WKNavigationDelegate {
 
         // Never left the advert: the page as it is now holds everything, including the opened reviews.
         let page = gallery.stayed && reviews.stayed ? ((try? await outerHTML()) ?? advert) : advert
+        if onCheck24 {
+            // Everything else is read by now; only then the page is swapped for the phone one with the large pictures.
+            progress = "Hole die großen Bilder …"
+            let large = await check24PhonePictures(limit: maxPictures == nil ? 80 : Self.check24Pictures)
+            progress = nil
+            if large.count >= 5 { photos = large }
+        }
         return Captured(html: Self.append(reviews: reviews.reviews, to: Self.append(pictures: photos, to: page)),
                         pictures: photos.filter(\.gallery).count, reviews: reviews.reviews.count)
     }

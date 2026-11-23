@@ -214,19 +214,29 @@ struct BackgroundReader: ViewModifier {
             .onChange(of: scenePhase) { if scenePhase == .active { start() } }
     }
 
-    /// Offers on any own trip whose photos are mostly small previews, with the page to read them from. At most twenty.
+    /// Check24 offers this device has read again once since the reading learned to take the data from the desktop
+    /// page and the pictures from the phone page. Earlier readings brought either small pictures or little data.
+    private static let rereadKey = "check24RereadTwoPages"
+
+    /// Check24 offers on any own trip that this device has not yet read again, with the page to read them from.
+    /// At most twenty per start of the app.
     private func blurry(_ backend: any TravelBackend) async -> [PendingReading] {
+        let done = Set(UserDefaults.standard.stringArray(forKey: Self.rereadKey) ?? [])
         var found: [PendingReading] = []
         for trip in ((try? await backend.trips()) ?? []) where trip.status != .archived {
-            for offer in ((try? await backend.candidates(tripId: trip.id)) ?? []) where PictureQuality.isSmallCheck24(offer.listing.coverImageUrl, below: 1000) {
+            for offer in ((try? await backend.candidates(tripId: trip.id)) ?? []) where offer.listing.platforms.contains("check24") {
                 guard found.count < 20 else { return found }
-                guard let detail = try? await backend.candidate(offer.id), PictureQuality.mostlyCheck24Previews((detail.photos ?? []).map { $0.url }),
-                      let address = detail.sources.first?.url else { continue }
-                found.append(PendingReading(candidateId: offer.id, tripId: trip.id, platform: offer.listing.platforms.first, title: offer.listing.title, url: address))
+                guard !done.contains(offer.id), let address = try? await backend.candidate(offer.id).sources.first?.url else { continue }
+                found.append(PendingReading(candidateId: offer.id, tripId: trip.id, platform: "check24", title: offer.listing.title, url: address))
                 sharpening.insert(offer.id)
             }
         }
         return found
+    }
+
+    private func rereadDone(_ id: String) {
+        var done = UserDefaults.standard.stringArray(forKey: Self.rereadKey) ?? []
+        if !done.contains(id) { done.append(id); UserDefaults.standard.set(done, forKey: Self.rereadKey) }
     }
 
     private func start() {
@@ -275,6 +285,7 @@ struct BackgroundReader: ViewModifier {
                     try await backend.capture(candidateId: advert.candidateId, html: captured.html, sourceId: nil, forTrip: false, url: page.advertURL ?? advert.url, dateOptionId: nil)
                     WebPage.log.info("Neues Inserat \(platform, privacy: .public): \(captured.pictures) Bilder, \(captured.reviews) Bewertungen gesendet")
                     sent += 1
+                    if sharpening.contains(advert.candidateId) { rereadDone(advert.candidateId) }
                 } catch {
                     if let api = error as? APIError, api.isUnauthorized || api.code == "daily_limit" { break }
                 }
