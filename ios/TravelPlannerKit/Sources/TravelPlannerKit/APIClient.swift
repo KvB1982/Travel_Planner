@@ -219,20 +219,63 @@ public struct APIClient: TravelBackend {
         try await perform(try request(method, path, body: body))
     }
 
+    /// Pauses before the second, third, ... try, in seconds. Together they bridge a restart of the server,
+    /// which answers with 502 for a quarter of a minute.
+    static let retryPauses: [Double] = [1, 2, 4, 6, 8]
+
+    /// Whether a failed try is worth another one without telling the person.
+    /// Reading, replacing and deleting (GET, PUT, DELETE) can go again after a gateway answer or a lost connection:
+    /// doing them twice changes nothing. Creating and changing (POST, PATCH) go again only when the request never
+    /// left the device, so nothing is ever entered twice.
+    static func worthRetrying(status: Int?, failure: URLError.Code?, method: String) -> Bool {
+        let repeatable = method == "GET" || method == "PUT" || method == "DELETE"
+        if let status { return repeatable && (status == 502 || status == 503 || status == 504) }
+        guard let failure else { return false }
+        switch failure {
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed: return true
+        case .networkConnectionLost, .timedOut: return repeatable
+        default: return false
+        }
+    }
+
     private func perform(_ request: URLRequest) async throws -> Data {
+        let method = request.httpMethod ?? "GET"
+        var tries = 0
+        while true {
+            do {
+                return try await once(request)
+            } catch let error as Failure {
+                guard tries < Self.retryPauses.count, Self.worthRetrying(status: error.status, failure: error.code, method: method) else { throw error.shown }
+                try await Task.sleep(for: .seconds(Self.retryPauses[tries]))
+                tries += 1
+            }
+        }
+    }
+
+    /// One failed try, with what is needed to decide about another one.
+    private struct Failure: Error {
+        var status: Int?
+        var code: URLError.Code?
+        var shown: APIError
+    }
+
+    private func once(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
-            throw APIError(status: 0, code: "offline", message: "Der Server ist nicht erreichbar. (\(error.localizedDescription))")
+            if error.code == .cancelled { throw CancellationError() }
+            throw Failure(status: nil, code: error.code, shown: APIError(status: 0, code: "offline", message: "Der Server ist nicht erreichbar. (\(error.localizedDescription))"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             if let body = try? Self.decoder.decode(ErrorBody.self, from: data) {
-                throw APIError(status: status, code: body.error.code, message: body.error.message)
+                throw Failure(status: status, code: nil, shown: APIError(status: status, code: body.error.code, message: body.error.message))
             }
-            throw APIError(status: status, code: "http_\(status)", message: "Der Server hat mit Status \(status) geantwortet.")
+            let message = (502...504).contains(status) ? "Der Server startet gerade neu oder ist kurz nicht erreichbar. Bitte versuche es gleich noch einmal."
+                                                       : "Der Server hat mit Status \(status) geantwortet."
+            throw Failure(status: status, code: nil, shown: APIError(status: status, code: "http_\(status)", message: message))
         }
         return data
     }

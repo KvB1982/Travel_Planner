@@ -1122,3 +1122,21 @@ final class NewTripHomeTests: XCTestCase {
         XCTAssertEqual(byDefault.groupId, "g-1")
     }
 }
+
+final class RetryTests: XCTestCase {
+    func testWhatIsTriedAgainQuietly() {
+        XCTAssertFalse(APIClient.worthRetrying(status: 502, failure: nil, method: "POST"))
+        XCTAssertFalse(APIClient.worthRetrying(status: 502, failure: nil, method: "PATCH"))
+        XCTAssertTrue(APIClient.worthRetrying(status: 502, failure: nil, method: "PUT"))
+        XCTAssertTrue(APIClient.worthRetrying(status: 504, failure: nil, method: "DELETE"))
+        XCTAssertTrue(APIClient.worthRetrying(status: 503, failure: nil, method: "GET"))
+        XCTAssertFalse(APIClient.worthRetrying(status: 500, failure: nil, method: "GET"))
+        XCTAssertFalse(APIClient.worthRetrying(status: 404, failure: nil, method: "GET"))
+        XCTAssertTrue(APIClient.worthRetrying(status: nil, failure: .cannotConnectToHost, method: "POST"))
+        // A request that may have arrived is not sent twice, unless it only reads.
+        XCTAssertFalse(APIClient.worthRetrying(status: nil, failure: .networkConnectionLost, method: "POST"))
+        XCTAssertTrue(APIClient.worthRetrying(status: nil, failure: .networkConnectionLost, method: "GET"))
+        XCTAssertFalse(APIClient.worthRetrying(status: nil, failure: .notConnectedToInternet, method: "GET"))
+        XCTAssertGreaterThanOrEqual(APIClient.retryPauses.reduce(0, +), 15)
+    }
+}
