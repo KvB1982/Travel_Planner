@@ -14,6 +14,19 @@ extension Photo {
 }
 
 /// The pictures of an offer as a strip to swipe through. A tap opens the picture full screen.
+/// Lets the strip run as far as the swipe carries it, and brings it to rest on the leading edge of a photo.
+private struct PhotoSnap: ScrollTargetBehavior {
+    /// Where each photo begins, from the start of the strip.
+    let edges: [CGFloat]
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        let limit = max(0, context.contentSize.width - context.containerSize.width)
+        // Near the end the strip simply rests at its end, so the last photo is never cut off.
+        guard target.rect.minX < limit - 1, let nearest = edges.min(by: { abs($0 - target.rect.minX) < abs($1 - target.rect.minX) }) else { return }
+        target.rect.origin.x = min(nearest, limit)
+    }
+}
+
 struct PhotoStrip: View {
     @Environment(AppModel.self) private var model
     let photos: [Photo]
@@ -26,6 +39,15 @@ struct PhotoStrip: View {
     }
 
     private let height: CGFloat = 240
+
+    /// Where each photo begins in the strip, for settling after a swipe.
+    private var edges: [CGFloat] {
+        var x: CGFloat = 0
+        return photos.map { photo in
+            defer { x += width(of: photo) + 6 }
+            return x
+        }
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -46,7 +68,9 @@ struct PhotoStrip: View {
             }
             .scrollTargetLayout()
         }
-        .scrollTargetBehavior(.viewAligned)
+        // A strong swipe carries on over several photos with its own momentum and then settles on the edge of one.
+        // The system's own snapping stops at the next photo, however hard the swipe.
+        .scrollTargetBehavior(PhotoSnap(edges: edges))
         .scrollPosition(id: $position)
         .frame(height: height)
         .overlay(alignment: .bottomTrailing) {
