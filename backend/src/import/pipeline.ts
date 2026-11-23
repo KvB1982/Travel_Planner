@@ -6,7 +6,7 @@ import { positionFitsCountry } from "./country.js";
 import type { Extractor, ReviewSummarizer } from "./extract.js";
 import { looksBlocked, UnsafeUrlError, type PageFetcher } from "./fetch.js";
 import { emptyProfile, fillPercent, mergeProfiles, type Profile } from "./profile.js";
-import { analyzeLink, embeddedTarget, nightsBetween, urlForStay, type LinkInfo } from "./url.js";
+import { analyzeLink, embeddedTarget, nightsBetween, personsAsked, urlForStay, type LinkInfo } from "./url.js";
 
 const APPROXIMATE_POSITION = new Set(["airbnb", "vrbo"]);
 /** A title a security check left behind in place of the advert's own. */
@@ -42,6 +42,25 @@ export async function resolveLink(raw: string, fetcher: PageFetcher): Promise<Li
     if (!info.isShortLink && info.platform !== "other") return info;
   }
   return analyzeLink(page.finalUrl);
+}
+
+/**
+ * A source that came in through a short link nobody could resolve at the time sits there as an unknown
+ * platform. Once the link resolves, the source takes its real platform, number and address, so prices can be asked.
+ */
+export async function settleSource<S extends { id: string; listingId: string; platform: string; url: string; externalId: string | null; canonicalUrl: string }>(db: Db, fetcher: PageFetcher, source: S): Promise<S> {
+  try {
+    if (source.platform !== "other" || !analyzeLink(source.url).isShortLink) return source;
+    const link = await resolveLink(source.url, fetcher);
+    if (link.platform === "other") return source;
+    const [taken] = await db.select({ id: listingSources.id }).from(listingSources).where(and(eq(listingSources.platform, link.platform), eq(listingSources.externalId, link.externalId))).limit(1);
+    if (taken) return source;
+    await db.update(listingSources).set({ platform: link.platform, externalId: link.externalId, canonicalUrl: link.canonicalUrl }).where(eq(listingSources.id, source.id));
+    await db.update(listings).set({ kind: link.kind }).where(eq(listings.id, source.listingId));
+    return { ...source, platform: link.platform, externalId: link.externalId, canonicalUrl: link.canonicalUrl };
+  } catch {
+    return source;
+  }
 }
 
 function seedProfile(link: LinkInfo): Profile {
@@ -283,7 +302,7 @@ export async function processImport(
       price.startDate = stay.startDate;
       price.endDate = stay.endDate;
       price.nights = nightsBetween(stay.startDate, stay.endDate);
-      if (stay.adults !== null) price.persons = stay.adults + (stay.children ?? 0);
+      price.persons = personsAsked(input.link, stay) ?? price.persons;
     }
     if (input.link.searchWindow && !fromDevice && !priceBelongsToTrip) {
       // Whatever was read, a window of possible dates is not a stay.

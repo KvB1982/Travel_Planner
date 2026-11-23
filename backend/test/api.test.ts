@@ -139,7 +139,7 @@ describe("import", () => {
     const res = await s.importLink("https://urlaub.check24.de/suche/angebot?days=11-25&departureDate=2027-08-06&pageArea=package&returnDate=2027-08-30&roomAllocation=A-A-7-11&hotelId=12912");
     const detail = await s.call("GET", `/candidates/${res.body.candidateId}`, s.owner);
     expect(new URL(s.requested.at(-1)!).searchParams.get("days")).toBe("7");
-    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 8 });
+    expect(detail.body.listing.profile.price).toMatchObject({ startDate: "2027-08-21", endDate: "2027-08-28", nights: 7, persons: 4 });
     // The window of the shared link is beside the point once the page was read for the trip.
     expect(detail.body.listing.profile.warnings.join(" ")).not.toMatch(/11 bis 25 Tagen/);
   });
@@ -937,6 +937,27 @@ describe("a window of possible dates", () => {
     expect(check.body).toMatchObject({ startDate: "2027-05-20", endDate: "2027-05-29", dateOptionId: null });
     expect(check.body.checks[0].checkUrl).toContain("start=20-05-2027");
     expect((await t.call("GET", "/me/pending-readings", owner)).body.pending).toEqual([]);
+  });
+});
+
+describe("short links of a portal", () => {
+  it("gives a source its platform once its short link resolves", async () => {
+    const short = "https://c.24.de/pr/AbC123";
+    const target = "https://urlaub.check24.de/suche/hotelinformation?hotelId=5429&departureDate=2027-05-15&returnDate=2027-05-30&days=11-15&roomAllocation=A-A-7-11&pageArea=package";
+    let resolves = false;
+    const s = await setup({ fetcher: async (url) => page(fixture("novasol.html"), { finalUrl: resolves && url === short ? target : url }) });
+    const first = await s.importLink(short);
+    expect(first.body.platform).toBe("other");
+
+    // Later the link leads somewhere: the trip check settles the source and names the page for the trip's dates.
+    resolves = true;
+    const check = await s.call("POST", `/trips/${s.tripId}/check`, s.owner, {});
+    const [one] = check.body.checks;
+    expect(one).toMatchObject({ platform: "check24", needsDevice: true, mode: "device" });
+    const asked = new URL(one.checkUrl).searchParams;
+    expect(Object.fromEntries(asked)).toMatchObject({ hotelId: "5429", departureDate: "2027-08-21", returnDate: "2027-08-28", days: "7", roomAllocation: "A-A-7-11" });
+    const detail = await s.call("GET", `/candidates/${first.body.candidateId}`, s.owner);
+    expect(detail.body.sources[0]).toMatchObject({ platform: "check24" });
   });
 });
 

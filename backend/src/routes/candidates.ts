@@ -4,14 +4,15 @@ import { z } from "zod";
 import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
-import { inWindow, processImport, resolveLink, startImport, tripStay } from "../import/pipeline.js";
+import { inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
 import { analyzeLink, nightsBetween, urlForStay } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
 import { HttpError, parseBody, requireCandidate, requireMember, userId, uuidParam } from "../http.js";
 import { logActivity } from "./trips.js";
 
-const MAX_PAGE_BYTES = 6 * 1024 * 1024;
+// Rendered pages of the comparison portals run to well over six megabytes before the app trims them.
+const MAX_PAGE_BYTES = 12 * 1024 * 1024;
 
 function tally(rows: { verdict: "yes" | "maybe" | "no"; veto: boolean }[]) {
   return {
@@ -111,7 +112,8 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     const dates = await datesFor(candidate.tripId, body);
     await spend(uid, "reading");
     const sources = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt));
-    const source = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
+    const found = body.sourceId ? sources.find((s) => s.id === body.sourceId) : sources[0];
+    const source = found && (await settleSource(db, ctx.fetcher, found));
     if (!source) throw new HttpError(body.sourceId ? 404 : 409, body.sourceId ? "not_found" : "no_source", body.sourceId ? "Diese Quelle gehört nicht zum Angebot." : "Zu diesem Angebot gibt es keinen Link.");
     // The shared link keeps the dates and party; an app short link carries nothing, so its resolved form is used.
     const shared = analyzeLink(source.url);
@@ -127,8 +129,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post("/candidates/:candidateId/refresh", async (req, reply) => {
     const uid = userId(req);
     const { candidate } = await requireCandidate(db, uuidParam((req.params as { candidateId: string }).candidateId), uid, "member");
-    const [source] = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt)).limit(1);
-    if (!source) throw new HttpError(409, "no_source", "Zu diesem Angebot gibt es keinen Link.");
+    const [first] = await db.select().from(listingSources).where(eq(listingSources.listingId, candidate.listingId)).orderBy(asc(listingSources.createdAt)).limit(1);
+    if (!first) throw new HttpError(409, "no_source", "Zu diesem Angebot gibt es keinen Link.");
+    const source = await settleSource(db, ctx.fetcher, first);
     // Platforms are asked sparingly: not again within a minute.
     if (source.lastFetchedAt && Date.now() - source.lastFetchedAt.getTime() < 60_000) throw new HttpError(429, "too_soon", "Das Angebot wurde gerade erst abgerufen. Bitte gleich noch einmal versuchen.");
     await spend(uid, "reading");
@@ -404,8 +407,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
     await spend(uid, "reading");
     const checks = [];
     for (const candidate of open) {
-      const source = sources.find((x) => x.listingId === candidate.listingId);
-      if (!source) continue;
+      const found = sources.find((x) => x.listingId === candidate.listingId);
+      if (!found) continue;
+      const source = await settleSource(db, ctx.fetcher, found);
       const shared = analyzeLink(source.url);
       const link = shared.isShortLink ? analyzeLink(source.canonicalUrl) : shared;
       const url = urlForStay(link, stay);

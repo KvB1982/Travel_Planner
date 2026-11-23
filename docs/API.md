@@ -498,6 +498,14 @@ Liest das Gerät eine Seite für den Zeitraum, bevor Preis und Verfügbarkeit ge
 
 Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfügbarkeit, gleicher Zeitraum), entsteht keine neue Preiszeile. Der Zeitpunkt der Bestätigung steht dann in `availabilityCheckedAt`, in `price.checkedAt` und in `periods[].checkedAt`; `price.capturedAt` bleibt der Zeitpunkt, zu dem der Preis zum ersten Mal so gesehen wurde. Wer auf das Ende eines Abrufs wartet, vergleicht `availabilityCheckedAt`, `price.checkedAt` oder `emptyCheckAt` mit dem Absenden.
 
+## Check24
+
+Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung ist die Hotelnummer). Angebote, die vorher als `other` hereinkamen, stellt der Server beim nächsten `check`, `refresh` oder `capture` selbst um. Preise gibt es nur vom Gerät: `checkUrl` trägt den Zeitraum der Reise als festen Aufenthalt. Die Zimmerbelegung des geteilten Links bleibt dabei erhalten, weil ein Hotel kein Zimmer für die ganze Gruppe hat; `price.persons` nennt deshalb die Personen aus dem Link, nicht die der Reise.
+
+## Große Seiten vom Gerät
+
+Eine vom Gerät gelesene Seite (`html` bei Import, `capture`, weiterer Quelle) darf samt Umschlag höchstens 12 MB groß sein; darüber antwortet der Server mit 413 `too_large`. Die App sollte die Seite vor dem Senden ausdünnen. Der Server liest nur: `<meta>`, sichtbaren Text, `<img>` mit Adresse, `<script>` mit `type` `application/json` oder `application/ld+json` (auch mit `id` wie `__NEXT_DATA__`, `js-hotel-data`, `data-deferred-state`) und eingebettete Skripte, die `window.__NAME__ =` zuweisen. Gefahrlos entfernen lassen sich also: `<style>`, `<svg>`, `<template>`, `<iframe>`, `<noscript>`, `<link>`, Kommentare, Skripte mit `src`, eingebettete Skripte ohne `window.__`, sowie `data:`-Adressen in Attributen und `style`-Attribute.
+
 ## Gruppen
 
 Eine Gruppe sind Leute, die immer wieder zusammen verreisen. Jede Reise der Gruppe steht allen Mitgliedern offen: Wer der Gruppe beitritt, wird Mitglied aller ihrer Reisen; eine neue Reise in der Gruppe bekommt alle als Mitglieder. Beim Umstellen wurden alle bisherigen Konten und Reisen in eine Gruppe „Unsere Gruppe" gelegt; das älteste Konto verwaltet sie.
