@@ -85,6 +85,9 @@ struct TripListView: View {
                         manage: section.id == "private" ? nil : { managedGroup = ManagedGroup(id: section.id) },
                         newTrip: { newTripGroup = section.id; showNewTrip = true })
                 .listRowSeparator(.hidden)
+                // The head of a group is no trip: a tap on it or its menu must not select anything. On the iPad the
+                // list otherwise took the group for a trip and the middle column said "Reise nicht gefunden".
+                .selectionDisabled()
             if !collapsed.contains(section.id) {
                 ForEach(section.trips) { trip in
                     TripRow(trip: trip, color: color).tag(trip.id)
@@ -104,7 +107,7 @@ struct TripListView: View {
                     .tag(list.id)
                 }
                 if section.trips.isEmpty && section.watchlist == nil {
-                    Text("Noch keine Reise.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Noch keine Reise.").font(.footnote).foregroundStyle(.secondary).selectionDisabled()
                 }
             }
         }
@@ -116,6 +119,7 @@ struct TripListView: View {
             GroupHeader(section: .init(id: "archive", title: "Archiv", group: nil, trips: archived, watchlist: nil), color: .gray,
                         symbol: "archivebox", collapsed: !archiveOpen, toggle: { archiveOpen.toggle() }, manage: nil, newTrip: nil)
                 .listRowSeparator(.hidden)
+                .selectionDisabled()
             if archiveOpen {
                 ForEach(archived) { trip in
                     TripRow(trip: trip, color: .gray).tag(trip.id)
@@ -274,7 +278,9 @@ struct TripListView: View {
         }
         .refreshable { await load() }
         .task(id: model.revision) { await load() }
-        .onChange(of: selection) {
+        .onChange(of: selection) { before, now in
+            // Whatever the list hands over: only a trip counts as chosen.
+            if let now, !trips.isEmpty, !trips.contains(where: { $0.id == now }) { selection = before; return }
             if let trip = trips.first(where: { $0.id == selection }) { lastGroup = trip.groupId ?? "private" }
         }
     }
