@@ -340,7 +340,7 @@ struct StaySheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(Format.dateRange(stay.startDate, stay.endDate) ?? stay.startDate)
                                 Text([stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" },
-                                      stay.available == false ? "belegt" : nil, stay.best == true ? "bester Preis je Nacht" : nil].compactMap { $0 }.joined(separator: " · "))
+                                      stay.available == false ? "belegt" : nil, stay.best == true ? "beste Wahl" : nil].compactMap { $0 }.joined(separator: " · "))
                                     .font(.footnote).foregroundStyle(stay.available == false ? Color.red : Color.secondary)
                             }
                             Spacer()

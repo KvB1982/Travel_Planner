@@ -82,10 +82,12 @@ public struct Trip: Codable, Identifiable, Hashable, Sendable {
     public var flexEnd: String?
     public var nightsMin: Int?
     public var nightsMax: Int?
+    public var nightsPreferred: Int?
 
     public var flexWindow: FlexWindow? {
         guard let flexStart, let flexEnd else { return nil }
-        return FlexWindow(start: String(flexStart.prefix(10)), end: String(flexEnd.prefix(10)), nightsMin: nightsMin ?? 1, nightsMax: nightsMax ?? max(nightsMin ?? 1, 28))
+        return FlexWindow(start: String(flexStart.prefix(10)), end: String(flexEnd.prefix(10)), nightsMin: nightsMin ?? 1, nightsMax: nightsMax ?? max(nightsMin ?? 1, 28),
+                          nightsPreferred: nightsPreferred)
     }
 
     /// The phase to open: today's, falling back to research on servers that know no phases.
@@ -314,6 +316,9 @@ public struct CandidateSummary: Codable, Identifiable, Hashable, Sendable {
     public var fitsParty: Bool?
     /// Every stay something is known about, for trips with a flexible window. `price` shows the best of them.
     public var stays: [Stay]?
+    /// Why the marked stay leads: "cheapest" (no wish given), "preferred" (the wished length), "cheaper_longer"
+    /// (longer, but clearly cheaper a night), "nearest" (the wished length is not on offer).
+    public var bestStayReason: String?
     /// `checkUrl` is one page covering the whole flexible window of the trip: reading it once brings every
     /// possible stay, so no single stays need to be asked for.
     public var checkWindow: Bool?

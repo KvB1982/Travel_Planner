@@ -22,7 +22,7 @@ public struct TripChanges: Encodable, Hashable, Sendable {
         flex = trip.flexWindow
     }
 
-    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, flexStart, flexEnd, nightsMin, nightsMax }
+    enum CodingKeys: String, CodingKey { case title, region, adults, children, pets, budgetTotalCents, flexStart, flexEnd, nightsMin, nightsMax, nightsPreferred }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -32,6 +32,8 @@ public struct TripChanges: Encodable, Hashable, Sendable {
             // Both days go together; both null switches the window off.
             try c.encode(flex?.start, forKey: .flexStart); try c.encode(flex?.end, forKey: .flexEnd)
             try c.encode(flex?.nightsMin, forKey: .nightsMin); try c.encode(flex?.nightsMax, forKey: .nightsMax)
+            // Always along with the two bounds, so a wish outside new bounds never stays behind on the server.
+            try c.encode(flex?.nightsPreferred, forKey: .nightsPreferred)
         }
     }
 }

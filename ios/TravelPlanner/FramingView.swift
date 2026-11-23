@@ -233,10 +233,14 @@ struct TripEditor: View {
     @State private var flexEnd = Calendar.current.date(byAdding: .day, value: 196, to: .now) ?? .now
     @State private var nightsMin = 7
     @State private var nightsMax = 14
+    /// The length of stay liked best, when one is given.
+    @State private var wish = false
+    @State private var nightsWish = 10
     @State private var filled = false
 
     private var window: FlexWindow {
-        FlexWindow(start: Format.isoDay(flexStart), end: Format.isoDay(flexEnd), nightsMin: nightsMin, nightsMax: max(nightsMin, nightsMax))
+        FlexWindow(start: Format.isoDay(flexStart), end: Format.isoDay(flexEnd), nightsMin: nightsMin, nightsMax: max(nightsMin, nightsMax),
+                   nightsPreferred: wish && nightsMax > nightsMin ? min(max(nightsWish, nightsMin), max(nightsMin, nightsMax)) : nil)
     }
 
     var body: some View {
@@ -266,11 +270,19 @@ struct TripEditor: View {
                         DatePicker("Frühestens anreisen", selection: $flexStart, displayedComponents: .date)
                         DatePicker("Spätestens abreisen", selection: $flexEnd, in: flexStart..., displayedComponents: .date)
                         Stepper("Mindestens \(nightsMin) \(nightsMin == 1 ? "Nacht" : "Nächte")", value: $nightsMin, in: 1...60)
+                        if nightsMax > nightsMin {
+                            Toggle("Lieblingsdauer angeben", isOn: $wish)
+                            if wish {
+                                Stepper("Am liebsten \(nightsWish) \(nightsWish == 1 ? "Nacht" : "Nächte")", value: $nightsWish, in: nightsMin...nightsMax)
+                            }
+                        }
                         Stepper("Höchstens \(nightsMax) \(nightsMax == 1 ? "Nacht" : "Nächte")", value: $nightsMax, in: nightsMin...60)
                     }
                 } footer: {
                     Text(!flexible ? "Für Reisen, deren genaue Daten vom Angebot abhängen: Statt eines festen Zeitraums gibst du ein Fenster und eine Dauer an."
-                         : window.isValid ? "Jeder Aufenthalt in diesem Fenster zählt als Preis der Reise, auch die Daten aus einem geteilten Link. Verglichen wird der Preis je Nacht."
+                         : window.isValid ? (wish && nightsMax > nightsMin
+                                            ? "Jeder Aufenthalt in diesem Fenster zählt. Vorn steht der günstigste Termin mit der Lieblingsdauer. Ein längerer nur, wenn er je Nacht deutlich günstiger ist, ein anderer, wenn es die Lieblingsdauer nicht gibt."
+                                            : "Jeder Aufenthalt in diesem Fenster zählt als Preis der Reise, auch die Daten aus einem geteilten Link. Verglichen wird der Preis je Nacht.")
                          : "Das Fenster ist kürzer als der kürzeste Aufenthalt.")
                         .foregroundStyle(flexible && !window.isValid ? Color.red : Color.secondary)
                 }
@@ -302,12 +314,18 @@ struct TripEditor: View {
                     flexible = true
                     flexStart = Format.day(known.start) ?? flexStart; flexEnd = Format.day(known.end) ?? flexEnd
                     nightsMin = known.nightsMin; nightsMax = known.nightsMax
+                    if let liked = known.nightsPreferred { wish = true; nightsWish = liked }
+                    else { nightsWish = (known.nightsMin + known.nightsMax) / 2 }
                 } else if onlyWindow {
                     // Opened to set a window: the fields are there at once.
                     flexible = true
                 }
             }
-            .onChange(of: nightsMin) { if nightsMax < nightsMin { nightsMax = nightsMin } }
+            .onChange(of: nightsMin) {
+                if nightsMax < nightsMin { nightsMax = nightsMin }
+                nightsWish = min(max(nightsWish, nightsMin), nightsMax)
+            }
+            .onChange(of: nightsMax) { nightsWish = min(max(nightsWish, nightsMin), max(nightsMin, nightsMax)) }
         }
     }
 }

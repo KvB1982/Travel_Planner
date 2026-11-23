@@ -604,6 +604,7 @@ public actor DemoBackend: TravelBackend {
             if let flex = changes.flex, !flex.isValid { throw APIError(status: 400, code: "invalid_request", message: "Das Zeitfenster ist kürzer als der kürzeste Aufenthalt.") }
             trips[index].flexStart = changes.flex?.start; trips[index].flexEnd = changes.flex?.end
             trips[index].nightsMin = changes.flex?.nightsMin; trips[index].nightsMax = changes.flex?.nightsMax
+            trips[index].nightsPreferred = changes.flex?.nightsPreferred
         }
         return trips[index]
     }

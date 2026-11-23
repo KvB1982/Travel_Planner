@@ -143,8 +143,10 @@ public struct FlexWindow: Hashable, Sendable {
     public var end: String
     public var nightsMin: Int
     public var nightsMax: Int
-    public init(start: String, end: String, nightsMin: Int, nightsMax: Int) {
-        self.start = start; self.end = end; self.nightsMin = nightsMin; self.nightsMax = nightsMax
+    /// The length of stay the group would like best, between the two; nil when any length is as good as another.
+    public var nightsPreferred: Int?
+    public init(start: String, end: String, nightsMin: Int, nightsMax: Int, nightsPreferred: Int? = nil) {
+        self.start = start; self.end = end; self.nightsMin = nightsMin; self.nightsMax = nightsMax; self.nightsPreferred = nightsPreferred
     }
 
     /// Nights between the two days; nil when they are no dates.
@@ -169,7 +171,8 @@ public struct FlexWindow: Hashable, Sendable {
     public var summary: String {
         let range = Format.dateRange(start, end) ?? "\(start) – \(end)"
         let nights = nightsMin == nightsMax ? (nightsMin == 1 ? "1 Nacht" : "\(nightsMin) Nächte") : "\(nightsMin) bis \(nightsMax) Nächte"
-        return "\(nights) zwischen \(range)"
+        let wish = nightsPreferred.flatMap { nightsMin == nightsMax ? nil : ", am liebsten \($0)" } ?? ""
+        return "\(nights)\(wish) zwischen \(range)"
     }
 }
 

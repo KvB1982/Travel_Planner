@@ -15,6 +15,8 @@ struct CandidateDetailView: View {
     /// Every stay known for this offer on a trip with a flexible window, by date.
     @State private var stays: [Stay] = []
     @State private var allStays = false
+    /// Why the marked stay leads, as the server says it.
+    @State private var bestStayReason: String?
     /// Where the photo strip sits on screen: a swipe that starts on it moves the photos, not the offer.
     @State private var stripFrame: CGRect = .zero
     @State private var error: String?
@@ -149,6 +151,16 @@ struct CandidateDetailView: View {
         }
     }
 
+    /// A few words on why the marked stay leads.
+    private var bestLabel: String {
+        switch bestStayReason {
+        case "preferred": "Lieblingsdauer, günstigster Termin"
+        case "cheaper_longer": "länger, aber je Nacht deutlich günstiger"
+        case "nearest": "Lieblingsdauer nicht zu haben, nächstliegende Dauer"
+        default: "günstigster je Nacht"
+        }
+    }
+
     /// "Mögliche Reisedaten": each stay in the trip's window with its price, by date, the cheapest per night marked.
     /// Long lists show the best and the first few; the rest unfolds.
     @ViewBuilder private var staysSection: some View {
@@ -161,7 +173,7 @@ struct CandidateDetailView: View {
                         Text(Format.dateRange(stay.startDate, stay.endDate) ?? stay.startDate)
                             .fontWeight(stay.best == true ? .semibold : .regular)
                         Text([stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" }, stay.available == false ? "belegt" : nil,
-                              stay.best == true ? "günstigster je Nacht" : nil].compactMap { $0 }.joined(separator: " · "))
+                              stay.best == true ? bestLabel : nil].compactMap { $0 }.joined(separator: " · "))
                             .font(.footnote).foregroundStyle(stay.available == false ? Color.red : stay.best == true ? Color.green : Color.secondary)
                     }
                     Spacer()
@@ -194,6 +206,7 @@ struct CandidateDetailView: View {
             // The possible stays come with the list of the trip, not with the offer itself.
             if let trip = detail?.candidate.tripId, let list = try? await backend.candidates(tripId: trip) {
                 stays = (list.first { $0.id == id }?.stays ?? []).sorted { $0.startDate < $1.startDate }
+                bestStayReason = list.first { $0.id == id }?.bestStayReason
             }
         } catch is CancellationError {
             if detail == nil { error = "Das Angebot wurde nicht geladen." }
