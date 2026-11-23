@@ -197,6 +197,9 @@ struct CandidateDetailView: View {
                 .listRowSeparator(.hidden)
             }
 
+            // Right under the title: voting is what the group opens an offer for.
+            voteSection(detail)
+
             importSection(detail, canEdit: canEdit)
 
             hintsSection(detail, canEdit: canEdit)
@@ -209,28 +212,6 @@ struct CandidateDetailView: View {
 
             // High up on purpose: where the house is decides more than most of the rows below.
             LocationSection(detail: detail) { mapTarget = $0 }
-
-            Section("Deine Stimme") {
-                let mine = detail.votes.entries.first { $0.userId == model.user?.id }
-                Picker("Deine Stimme", selection: Binding(
-                    get: { mine?.verdict },
-                    set: { verdict in
-                        if let verdict { perform { try await $0.vote(candidateId: candidateID, verdict: verdict, veto: verdict == .no && (mine?.veto ?? false)) } }
-                    })) {
-                    ForEach(Verdict.allCases, id: \.self) { verdict in
-                        Text(verdict.label).tag(Verdict?.some(verdict))
-                    }
-                }
-                .pickerStyle(.segmented)
-                if mine?.verdict == .no {
-                    Toggle("Veto: für mich ausgeschlossen", isOn: Binding(
-                        get: { mine?.veto ?? false },
-                        set: { veto in perform { try await $0.vote(candidateId: candidateID, verdict: .no, veto: veto) } }))
-                }
-                ForEach(detail.votes.entries) { entry in
-                    LabeledContent(entry.name, value: entry.veto ? "Veto" : entry.verdict.label)
-                }
-            }
 
             priceSection(detail)
 
@@ -370,6 +351,52 @@ struct CandidateDetailView: View {
                 }
             }
         }
+    }
+
+    /// Three large buttons to vote with, the own choice filled in, and how the others voted underneath.
+    @ViewBuilder private func voteSection(_ detail: CandidateDetail) -> some View {
+        let mine = detail.votes.entries.first { $0.userId == model.user?.id }
+        Section {
+            HStack(spacing: 10) {
+                voteButton(.yes, "Ja", "hand.thumbsup", .green, mine)
+                voteButton(.maybe, "Vielleicht", "questionmark.circle", .orange, mine)
+                voteButton(.no, "Nein", "hand.thumbsdown", .red, mine)
+            }
+            .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            .listRowSeparator(.hidden)
+            if mine?.verdict == .no {
+                Toggle("Veto: für mich ausgeschlossen", isOn: Binding(
+                    get: { mine?.veto ?? false },
+                    set: { veto in perform { try await $0.vote(candidateId: candidateID, verdict: .no, veto: veto) } }))
+            }
+            let others = detail.votes.entries.filter { $0.userId != model.user?.id }
+            if !others.isEmpty {
+                Text(others.map { "\($0.name): \($0.veto ? "Veto" : $0.verdict.label)" }.joined(separator: " · "))
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(mine == nil ? "Wie findest du es?" : "Deine Stimme")
+        }
+    }
+
+    private func voteButton(_ verdict: Verdict, _ label: String, _ symbol: String, _ color: Color, _ mine: VoteEntry?) -> some View {
+        let chosen = mine?.verdict == verdict
+        return Button {
+            perform { try await $0.vote(candidateId: candidateID, verdict: verdict, veto: verdict == .no && (mine?.veto ?? false)) }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: chosen ? symbol + ".fill" : symbol).font(.title2)
+                Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .foregroundStyle(chosen ? Color.white : color)
+            .background(chosen ? color : color.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label)\(chosen ? ", deine Stimme" : "")")
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
     private func headline(_ detail: CandidateDetail) -> String {
