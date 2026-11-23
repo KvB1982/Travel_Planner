@@ -1219,3 +1219,14 @@ final class VoteRemovalTests: XCTestCase {
         try await demo.removeVote(candidateId: "c-1")
     }
 }
+
+final class PictureQualityTests: XCTestCase {
+    func testSmallCheck24Pictures() {
+        XCTAssertTrue(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/size=335c220/source=abc"))
+        XCTAssertTrue(PictureQuality.isSmallCheck24("https://cdn2.urlaub.check24.de/x?size=450x&source=abc"))
+        XCTAssertFalse(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/size=1920x/di=3/source=abc"))
+        XCTAssertFalse(PictureQuality.isSmallCheck24("https://cdn1.urlaub.check24.de/source=abc"))
+        XCTAssertFalse(PictureQuality.isSmallCheck24("https://a0.muscache.com/size=100x/pic.jpg"))
+        XCTAssertFalse(PictureQuality.isSmallCheck24(nil))
+    }
+}

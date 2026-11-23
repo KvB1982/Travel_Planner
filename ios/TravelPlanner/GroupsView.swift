@@ -194,6 +194,10 @@ struct BackgroundReader: ViewModifier {
     @State private var running = false
     /// Tried since the app started, so a page that cannot be read is not tried over and over.
     @State private var tried: Set<String> = []
+    /// The pass for sharper photos has run since the app started.
+    @State private var sharpened = false
+    /// The adverts read again only for sharper photos.
+    @State private var sharpening: Set<String> = []
 
     func body(content: Content) -> some View {
         content
@@ -210,13 +214,33 @@ struct BackgroundReader: ViewModifier {
             .onChange(of: scenePhase) { if scenePhase == .active { start() } }
     }
 
+    /// Offers on any own trip whose cover photo is only a small preview, with the page to read them from. At most twenty.
+    private func blurry(_ backend: any TravelBackend) async -> [PendingReading] {
+        var found: [PendingReading] = []
+        for trip in ((try? await backend.trips()) ?? []) where trip.status != .archived {
+            for offer in ((try? await backend.candidates(tripId: trip.id)) ?? []) where PictureQuality.isSmallCheck24(offer.listing.coverImageUrl) {
+                guard found.count < 20 else { return found }
+                guard let address = try? await backend.candidate(offer.id).sources.first?.url else { continue }
+                found.append(PendingReading(candidateId: offer.id, tripId: trip.id, platform: offer.listing.platforms.first, title: offer.listing.title, url: address))
+                sharpening.insert(offer.id)
+            }
+        }
+        return found
+    }
+
     private func start() {
         guard !running, !model.isDemo, let backend = model.backend else { return }
         running = true
         Task {
             defer { running = false }
-            guard let pending = try? await backend.pendingReadings() else { return }
-            let fresh = pending.filter { !tried.contains($0.candidateId) }
+            let pending = (try? await backend.pendingReadings()) ?? []
+            var fresh = pending.filter { !tried.contains($0.candidateId) }
+            // Then adverts whose photos are only previews, once per start of the app: their gallery is read again,
+            // so the sharp versions arrive without anyone asking.
+            if !sharpened {
+                sharpened = true
+                fresh += await blurry(backend).filter { advert in !tried.contains(advert.candidateId) && !fresh.contains { $0.candidateId == advert.candidateId } }
+            }
             guard !fresh.isEmpty else { return }
             var sent = 0
             for advert in fresh {
@@ -235,6 +259,12 @@ struct BackgroundReader: ViewModifier {
                 }
                 guard let captured = try? await page.capture(maxPictures: WebPage.usualPictures), captured.html.count >= 500 else { continue }
                 if await page.isChallenge() { continue }
+                // A reading only for sharper photos is worth sending when it brought photos; a page behind a
+                // consent or sign-in wall would bring none.
+                if sharpening.contains(advert.candidateId), captured.pictures < 5 {
+                    WebPage.log.info("Bilder neu einlesen \(platform, privacy: .public): nur \(captured.pictures) Bilder, nicht gesendet")
+                    continue
+                }
                 do {
                     try await backend.capture(candidateId: advert.candidateId, html: captured.html, sourceId: nil, forTrip: false, url: page.advertURL ?? advert.url, dateOptionId: nil)
                     WebPage.log.info("Neues Inserat \(platform, privacy: .public): \(captured.pictures) Bilder, \(captured.reviews) Bewertungen gesendet")

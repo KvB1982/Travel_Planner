@@ -87,3 +87,16 @@ public extension Format {
         return String(String.UnicodeScalarView(code.unicodeScalars.compactMap { UnicodeScalar(127_397 + $0.value) }))
     }
 }
+
+public enum PictureQuality {
+    /// Whether a picture address of Check24 names only a preview: its `size=` step is narrower than 600.
+    /// Check24 signs every size on its own, so a larger version only exists once a device has seen its address.
+    public static func isSmallCheck24(_ address: String?) -> Bool {
+        guard let address, let parts = URLComponents(string: address), parts.host?.contains("check24") == true else { return false }
+        let places = parts.path.split(separator: "/").map(String.init) + (parts.queryItems ?? []).map { "\($0.name)=\($0.value ?? "")" }
+        guard let size = places.first(where: { $0.hasPrefix("size=") }) else { return false }
+        let digits = size.dropFirst(5).prefix { $0.isNumber }
+        guard let width = Int(digits) else { return false }
+        return width < 600
+    }
+}
