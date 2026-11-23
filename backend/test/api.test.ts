@@ -969,6 +969,24 @@ describe("short links of a portal", () => {
   });
 });
 
+describe("invitation links in the browser", () => {
+  it("lets the app claim the links and shows a page that gives nothing away", async () => {
+    const t = await testApp();
+    const aasa = await t.app.inject({ method: "GET", url: "/.well-known/apple-app-site-association" });
+    expect(aasa.statusCode).toBe(200);
+    expect(aasa.headers["content-type"]).toMatch(/^application\/json/);
+    expect(aasa.json().applinks.details[0]).toEqual({ appIDs: ["AX2SZQVU9L.com.von-bleichert.travelplanner"], components: [{ "/": "/einladung/*" }] });
+
+    // No such invitation exists, and the page looks no different for it.
+    const page = await t.app.inject({ method: "GET", url: "/einladung/abcDEF123456_-xyz" });
+    expect(page.statusCode).toBe(200);
+    expect(page.headers["content-type"]).toMatch(/^text\/html/);
+    expect(page.body).toContain("Einladung zum Reiseplaner");
+    expect(page.body).toContain('href="reiseplaner://einladung/abcDEF123456_-xyz?server=https%3A%2F%2Freisen.example.test"');
+    expect((await t.app.inject({ method: "GET", url: "/einladung/%3Cscript%3E" })).statusCode).toBe(404);
+  });
+});
+
 describe("groups", () => {
   it("lets whoever administers a group run all its trips", async () => {
     const t = await testApp();

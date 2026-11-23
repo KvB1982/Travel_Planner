@@ -17,6 +17,10 @@ const schema = z.object({
   FILES_DIR: z.string().default("/data/files"),
   /** The app's bundle identifiers, separated by commas: who "Sign in with Apple" tokens have to be issued for. */
   APPLE_CLIENT_IDS: z.string().default("com.von-bleichert.travelplanner"),
+  /** Team and bundle identifier: the app that may open invitation links of this server directly. */
+  APPLE_APP_ID: z.string().default("AX2SZQVU9L.com.von-bleichert.travelplanner"),
+  /** Where the app can be had while it is in testing. Named on the invitation page only when set. */
+  TESTFLIGHT_URL: z.string().url().optional(),
 });
 
 export type Config = z.infer<typeof schema>;

@@ -499,6 +499,15 @@ Liest das Gerät eine Seite für den Zeitraum, bevor Preis und Verfügbarkeit ge
 
 Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfügbarkeit, gleicher Zeitraum), entsteht keine neue Preiszeile. Der Zeitpunkt der Bestätigung steht dann in `availabilityCheckedAt`, in `price.checkedAt` und in `periods[].checkedAt`; `price.capturedAt` bleibt der Zeitpunkt, zu dem der Preis zum ersten Mal so gesehen wurde. Wer auf das Ende eines Abrufs wartet, vergleicht `availabilityCheckedAt`, `price.checkedAt` oder `emptyCheckAt` mit dem Absenden.
 
+## Einladungslink im Browser
+
+Zwei öffentliche Antworten ohne Anmeldung, damit ein Tipp auf den Link die App öffnet:
+
+- `GET /.well-known/apple-app-site-association`: `application/json`, `applinks` für `/einladung/*` und die App aus `APPLE_APP_ID` (Vorgabe `AX2SZQVU9L.com.von-bleichert.travelplanner`).
+- `GET /einladung/:token`: kleine deutsche Seite mit dem Knopf „In der App öffnen" (`reiseplaner://einladung/<token>?server=<PUBLIC_BASE_URL>`). Der Token wird weder geprüft noch verbraucht, die Seite sieht für gültige und ungültige gleich aus. Mit `TESTFLIGHT_URL` in der Umgebung nennt sie den Link zum Laden der App. Der Token steht nicht im Protokoll.
+
+Eingelöst wird weiter nur über die API.
+
 ## Check24
 
 Kurzlinks `c.24.de/pr/…` werden aufgelöst und als `check24` geführt (Kennung ist die Hotelnummer). Angebote, die vorher als `other` hereinkamen, stellt der Server beim nächsten `check`, `refresh` oder `capture` selbst um. Preise gibt es nur vom Gerät: `checkUrl` trägt den Zeitraum der Reise als festen Aufenthalt. Die Zimmerbelegung des geteilten Links bleibt dabei erhalten, weil ein Hotel kein Zimmer für die ganze Gruppe hat; `price.persons` nennt deshalb die Personen aus dem Link, nicht die der Reise.
