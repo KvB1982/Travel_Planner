@@ -1274,4 +1274,12 @@ final class Check24PictureTests: XCTestCase {
         XCTAssertNil(InviteLink("reiseplaner://einladung/abc?server=javascript%3Aalert(1)"))
         XCTAssertNil(InviteLink("reiseplaner://anderes/abc?server=https%3A%2F%2Fx.example"))
     }
+
+    func testSignInPagesAreNotAdverts() {
+        XCTAssertTrue(LinkFinder.isSignInPage(URL(string: "https://accounts.check24.com/login?context=urlaub")!))
+        XCTAssertTrue(LinkFinder.isSignInPage(URL(string: "https://www.airbnb.de/login")!))
+        XCTAssertFalse(LinkFinder.isSignInPage(URL(string: "https://urlaub.check24.de/suche/hotelinformation?hotelId=12912")!))
+        XCTAssertFalse(LinkFinder.isSignInPage(URL(string: "https://www.airbnb.de/rooms/123456")!))
+        XCTAssertFalse(LinkFinder.isSignInPage(URL(string: "https://www.novasol.de/ferienhaeuser/login-strand-idyll")!))
+    }
 }

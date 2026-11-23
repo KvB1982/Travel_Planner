@@ -788,6 +788,9 @@ public struct APIClient: TravelBackend {
 
     public func importLink(tripId: String, url: String, html: String?) async throws -> ImportResult {
         struct Body: Encodable { var url: String; var html: String? }
+        if let address = URL(string: url), LinkFinder.isSignInPage(address) {
+            throw APIError(status: 0, code: "sign_in_page", message: "Das ist die Anmeldeseite von \(address.host() ?? "der Plattform"), kein Inserat. Öffne das Inserat selbst und teile dessen Adresse.")
+        }
         let page = html.flatMap { $0.utf8.count <= Self.maxPageBytes ? $0 : nil }
         return try await send("POST", "/trips/\(tripId.pathEscaped)/imports", body: Body(url: url, html: page))
     }

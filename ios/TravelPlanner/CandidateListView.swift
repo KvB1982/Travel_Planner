@@ -625,7 +625,8 @@ struct CandidateListView: View {
                 let captured = try await hiddenPage.capture(quick: true)
                 WebPage.log.info("Prüflauf \(platform, privacy: .public): \(captured.html.count) Zeichen gelesen")
                 if await hiddenPage.isChallenge() { needsPerson.append(check); continue }
-                guard captured.html.count >= 500 else { failed += 1; evaluating[check.candidateId] = nil; continue }
+                // Check24's phone page carries no reliable price: better no reading than a wrong one.
+                guard captured.html.count >= 500, !captured.lean else { failed += 1; evaluating[check.candidateId] = nil; continue }
                 // The address asked for, not where the site redirected to: only it is sure to carry the dates of the trip.
                 try await backend.capture(candidateId: check.candidateId, html: captured.html, sourceId: nil, forTrip: true,
                                           url: address, dateOptionId: periodID)

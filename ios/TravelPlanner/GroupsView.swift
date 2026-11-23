@@ -275,6 +275,7 @@ struct BackgroundReader: ViewModifier {
                 }
                 guard let captured = try? await page.capture(maxPictures: WebPage.usualPictures), captured.html.count >= 500 else { continue }
                 if await page.isChallenge() { continue }
+                if captured.lean { continue }
                 // A reading only for sharper photos is worth sending when it brought photos; a page behind a
                 // consent or sign-in wall would bring none.
                 if sharpening.contains(advert.candidateId), captured.pictures < 5 {

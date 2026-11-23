@@ -163,6 +163,10 @@ struct CaptureView: View {
                 guard captured.html.count >= 500 else {
                     throw APIError(status: 0, code: "empty_page", message: "Die Seite ist noch leer. Warte kurz und versuche es erneut.")
                 }
+                guard !captured.lean else {
+                    page.load(URL(string: source.url) ?? URL(string: "about:blank")!)
+                    throw APIError(status: 0, code: "lean_page", message: "Check24 hat nur seine Telefonseite geliefert, darauf fehlen die Daten des Hotels. Die Seite wird neu geladen. Tippe danach noch einmal auf „Übernehmen“.")
+                }
                 if readPictures, let expectedPictures, expectedPictures >= 8, captured.pictures * 2 < (allPictures ? expectedPictures : min(expectedPictures, WebPage.usualPictures)) {
                     held = captured
                     sending = false
@@ -646,6 +650,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
         merge(await run(Self.browseGallery).pictures, into: &photos)
         let chosen = PictureQuality.check24Selection(photos.map(\.url), limit: limit)
         Self.log.info("Check24 Telefonseite: \(photos.count) Bildadressen gesehen, \(chosen.count) Hotelbilder gewählt")
+        // The phone's mark must not outlive this visit: the next page is to be the full one again.
+        await forgetCheck24Device()
         return chosen.map { Picture(url: $0, gallery: true) }
     }
 
@@ -656,8 +662,31 @@ final class WebPage: NSObject, WKNavigationDelegate {
         advertURL = nil
         isLoading = true
         requested = url
-        webView.customUserAgent = Self.isCheck24(url) ? Self.desktopAgent : nil
-        webView.load(URLRequest(url: url))
+        guard Self.isCheck24(url) else {
+            webView.customUserAgent = nil
+            webView.load(URLRequest(url: url))
+            return
+        }
+        webView.customUserAgent = Self.desktopAgent
+        Task {
+            await forgetCheck24Device()
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    /// Check24 remembers in cookies that a phone was here once ("deviceoutput=mobile", "forcedeviceoutput=1") and
+    /// from then on hands out its phone page to everyone, whatever they say they are. Without these the page is
+    /// chosen afresh. The answer to the cookie question lives in other cookies and stays.
+    private func forgetCheck24Device() async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        for cookie in await store.allCookies() where cookie.domain.contains("check24") && ["deviceoutput", "forcedeviceoutput", "devicetype"].contains(cookie.name) {
+            await store.deleteCookie(cookie)
+        }
+    }
+
+    /// Whether a page read from Check24 is its phone page, which carries neither the hotel's data nor reviews.
+    static func isLeanCheck24(_ html: String, url: URL?) -> Bool {
+        isCheck24(url) && !html.contains("js-hotel-data")
     }
 
     struct Picture: Decodable, Equatable {
@@ -819,6 +848,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
         var html: String
         var pictures: Int
         var reviews: Int
+        /// Check24 answered with its phone page: no data of the hotel, no reviews, no reliable price. Not worth sending.
+        var lean = false
     }
 
     private func merge(_ more: [Picture], into all: inout [Picture]) {
@@ -858,6 +889,14 @@ final class WebPage: NSObject, WKNavigationDelegate {
     /// not browsed and no photos are sent, so the stored ones stay as they are.
     /// `maxPictures` ends the browsing once that many photos of the gallery are in; nil reads them all.
     func capture(quick: Bool = false, gallery readGallery: Bool = true, maxPictures: Int? = nil) async throws -> Captured {
+        let site = webView.url
+        var captured = try await read(quick: quick, gallery: readGallery, maxPictures: maxPictures)
+        captured.lean = Self.isLeanCheck24(captured.html, url: site)
+        if captured.lean { Self.log.info("Check24: nur die Telefonseite gelesen (\(captured.html.count) Zeichen), wird nicht gesendet") }
+        return captured
+    }
+
+    private func read(quick: Bool, gallery readGallery: Bool, maxPictures: Int?) async throws -> Captured {
         _ = try? await webView.callAsyncJavaScript(Self.scrollThrough, contentWorld: .page)
         await settle()
         let advert = try await outerHTML()

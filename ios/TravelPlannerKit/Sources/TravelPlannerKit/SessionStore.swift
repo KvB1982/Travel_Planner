@@ -121,6 +121,17 @@ public struct InviteLink: Equatable, Sendable {
 }
 
 public enum LinkFinder {
+    /// Whether an address leads to a sign-in page instead of an advert, such as `accounts.check24.com/login`.
+    /// Portals send there when a link needs an account; importing it would only store the sign-in form.
+    public static func isSignInPage(_ url: URL) -> Bool {
+        let host = (url.host() ?? "").lowercased()
+        let first = host.split(separator: ".").first.map(String.init) ?? ""
+        if ["accounts", "account", "login", "signin", "auth", "sso", "id", "anmelden"].contains(first) { return true }
+        let parts = url.path().lowercased().split(separator: "/").map(String.init)
+        return parts.contains { ["login", "signin", "sign-in", "anmelden", "anmeldung", "oauth", "authorize"].contains($0) }
+    }
+
+
     /// The first web address in shared text; apps such as Airbnb share "Schau dir das an: https://…".
     public static func firstURL(in text: String) -> URL? {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
