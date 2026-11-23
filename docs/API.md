@@ -502,6 +502,8 @@ Findet ein Abruf genau dasselbe wie der vorige (gleicher Betrag, gleiche Verfüg
 
 Eine Gruppe sind Leute, die immer wieder zusammen verreisen. Jede Reise der Gruppe steht allen Mitgliedern offen: Wer der Gruppe beitritt, wird Mitglied aller ihrer Reisen; eine neue Reise in der Gruppe bekommt alle als Mitglieder. Beim Umstellen wurden alle bisherigen Konten und Reisen in eine Gruppe „Unsere Gruppe" gelegt; das älteste Konto verwaltet sie.
 
+Wer eine Gruppe verwaltet (`admin`), verwaltet auch alle ihre Reisen: `role` in `GET /trips` und `GET /trips/:id` ist für diese Person `organizer`, und alles, was dem Organisator vorbehalten ist (ändern, archivieren, löschen, verschieben, einladen, Schlussrunde, Entscheidung), steht ihr offen. Das gilt nicht für die Merkliste der Gruppe und nicht für Gäste. `members[].role` zeigt weiter die eingetragene Rolle. Gibt jemand die Verwaltung ab, endet das Recht für Reisen, die andere angelegt haben.
+
 `GET /groups`:
 
 ```json

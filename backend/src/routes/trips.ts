@@ -6,7 +6,7 @@ import { z } from "zod";
 import { hashToken, newToken } from "../auth/tokens.js";
 import type { AppContext } from "../app.js";
 import { activityEvents, dateOptions, documents, groupMembers, groups, invites, tripListings, tripMembers, tripPhases, trips, users, type TripPhase } from "../db/schema.js";
-import { HttpError, notFound, parseBody, requireMember, userId, uuidParam } from "../http.js";
+import { HttpError, effectiveRole, notFound, parseBody, requireMember, runsTrip, userId, uuidParam } from "../http.js";
 import { ensureGroupShelf, onlyGroupOf, openTripToGroup, requireGroupMember } from "./groups.js";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Datum im Format JJJJ-MM-TT");
@@ -144,6 +144,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
       .select({
         trip: trips,
         role: tripMembers.role,
+        runs: runsTrip,
         candidates: sql<number>`(select count(*)::int from ${tripListings} where ${tripListings.tripId} = ${trips.id})`,
         favorites: sql<number>`(select count(*)::int from ${tripListings} where ${tripListings.tripId} = ${trips.id} and ${tripListings.status} = 'favorite')`,
       })
@@ -159,7 +160,7 @@ export function tripRoutes(app: FastifyInstance, ctx: AppContext): void {
     };
     const named = await db.select({ id: groups.id, name: groups.name }).from(groups);
     const groupName = (id: string | null) => named.find((g) => g.id === id)?.name ?? null;
-    return { trips: rows.map((r) => ({ ...r.trip, groupName: groupName(r.trip.groupId), currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: r.role, candidateCount: r.candidates, favoriteCount: r.favorites })) };
+    return { trips: rows.map((r) => ({ ...r.trip, groupName: groupName(r.trip.groupId), currentPhase: currentPhase(r.trip.phase, stayOf(r.trip)), role: effectiveRole(r.role, r.runs), candidateCount: r.candidates, favoriteCount: r.favorites })) };
   });
 
   app.get("/trips/:tripId", async (req) => {

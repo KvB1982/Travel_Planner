@@ -941,6 +941,35 @@ describe("a window of possible dates", () => {
 });
 
 describe("groups", () => {
+  it("lets whoever administers a group run all its trips", async () => {
+    const t = await testApp();
+    const owner = await t.bootstrap();
+    const group = (await t.call("POST", "/groups", owner, { name: "Familie" })).body.groups[0];
+    const link = (await t.call("POST", `/groups/${group.id}/invites`, owner, {})).body;
+    const anna = (await t.call("POST", `/auth/invites/${link.token}/accept`, null, { name: "Anna" })).body;
+    const hers = (await t.call("POST", "/trips", anna.token, { title: "Annas Reise" })).body.trip;
+    const mine = (await t.call("POST", "/trips", owner, { title: "Meine Reise" })).body.trip;
+
+    // The administrator is an organizer of her trip in effect; she stays a plain member of the other.
+    expect((await t.call("GET", `/trips/${hers.id}`, owner)).body.role).toBe("organizer");
+    const roleIn = async (token: string, id: string) => (await t.call("GET", "/trips", token)).body.trips.find((x: { id: string }) => x.id === id).role;
+    expect(await roleIn(owner, hers.id)).toBe("organizer");
+    expect(await roleIn(anna.token, mine.id)).toBe("member");
+    expect((await t.call("PATCH", `/trips/${mine.id}`, anna.token, { title: "Anders" })).status).toBe(403);
+    expect((await t.call("PATCH", `/trips/${hers.id}`, owner, { title: "Umbenannt" })).status).toBe(200);
+    expect((await t.call("PATCH", `/trips/${hers.id}`, owner, { status: "archived" })).status).toBe(200);
+
+    // The shared shelf gains nothing from it, and the right goes with the administration.
+    const shelf = (await t.call("GET", "/trips", owner)).body.trips.find((x: { kind: string; groupId: string | null }) => x.kind === "watchlist" && x.groupId === group.id);
+    expect(shelf.role).not.toBe("organizer");
+    const annaId = (await t.call("GET", "/me", anna.token)).body.user.id;
+    const ownerId = (await t.call("GET", "/me", owner)).body.user.id;
+    await t.call("PATCH", `/groups/${group.id}/members/${annaId}`, owner, { role: "admin" });
+    expect((await t.call("PATCH", `/groups/${group.id}/members/${ownerId}`, anna.token, { role: "member" })).status).toBe(200);
+    expect((await t.call("DELETE", `/trips/${hers.id}`, owner)).status).toBe(403);
+    expect((await t.call("DELETE", `/trips/${mine.id}`, anna.token)).status).toBe(204);
+  });
+
   it("opens every trip of the group to all its members", async () => {
     const t = await testApp();
     const owner = await t.bootstrap();
