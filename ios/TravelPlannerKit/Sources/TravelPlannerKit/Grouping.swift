@@ -131,19 +131,47 @@ public enum PictureQuality {
         return .hotel
     }
 
-    /// From everything collected on a Check24 page: the hotel's own pictures only, each once in its widest
-    /// version, in the order they came, at most `limit`. Guest photos and maps are left out.
+    /// Check24's image services are nested: an address asking for 1920 may wrap one that asks its own source for
+    /// only 800. What the picture really holds is the smallest step on the way to the original.
+    /// `original` is the innermost address, the same for every version of one picture; `width` the smallest
+    /// size named along the chain, or `Int.max` when none names one (then the original comes through untouched).
+    public static func check24Chain(_ address: String) -> (original: String, width: Int)? {
+        guard var packed = check24Source(address) else { return nil }
+        var smallest = check24Width(address) > 0 ? check24Width(address) : Int.max
+        var original = packed
+        for _ in 0..<4 {
+            var padded = packed.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            while padded.count % 4 != 0 { padded += "=" }
+            guard let data = Data(base64Encoded: padded), let text = String(data: data, encoding: .utf8), text.hasPrefix("http") else { break }
+            original = text
+            guard let inner = packedSource(in: text) else { break }
+            // A crop such as `size=800c600` counts by its width, like `size=800x`.
+            if let size = text.range(of: "size=") {
+                let width = Int(text[size.upperBound...].prefix { $0.isNumber }) ?? 0
+                if width > 0 { smallest = min(smallest, width) }
+            }
+            packed = inner
+            original = inner
+        }
+        return (original, smallest)
+    }
+
+    /// From everything collected on a Check24 page: the hotel's own pictures only, each once in the version that
+    /// really holds the most, in the order they came, at most `limit`. Guest photos and maps are left out.
     public static func check24Selection(_ addresses: [String], limit: Int) -> [String] {
-        var order: [String] = [], best: [String: String] = [:]
+        var order: [String] = [], best: [String: (address: String, width: Int)] = [:]
         for address in addresses {
-            guard let source = check24Source(address), check24Kind(address) == .hotel else { continue }
-            if let known = best[source] {
-                if check24Width(address) > check24Width(known) { best[source] = address }
+            guard check24Kind(address) == .hotel, let chain = check24Chain(address) else { continue }
+            if let known = best[chain.original] {
+                // The larger real size wins; between equals the larger step asked of the outer service.
+                if chain.width > known.width || (chain.width == known.width && check24Width(address) > check24Width(known.address)) {
+                    best[chain.original] = (address, chain.width)
+                }
             } else {
-                order.append(source); best[source] = address
+                order.append(chain.original); best[chain.original] = (address, chain.width)
             }
         }
-        return order.prefix(limit).compactMap { best[$0] }
+        return order.prefix(limit).compactMap { best[$0]?.address }
     }
 
     /// Whether a picture address of Check24 names only a preview: its `size=` step is narrower than 600.

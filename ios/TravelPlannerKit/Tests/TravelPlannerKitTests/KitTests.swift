@@ -1282,4 +1282,17 @@ final class Check24PictureTests: XCTestCase {
         XCTAssertFalse(LinkFinder.isSignInPage(URL(string: "https://www.airbnb.de/rooms/123456")!))
         XCTAssertFalse(LinkFinder.isSignInPage(URL(string: "https://www.novasol.de/ferienhaeuser/login-strand-idyll")!))
     }
+
+    func testCheck24PicturesAreJudgedByTheirRealSize() {
+        let nested = "https://cdn1.urlaub.check24.de/size=1920x/di=3/source=aHR0cHM6Ly9jZG4tY3RzLTEuY29tbXVuaXR5LmNoZWNrMjQuZGUvc2l6ZT04MDBjNjAwL3NvdXJjZT1hSFIwY0hNNkx5OXBMblJ5WVhabGJHRndhUzVqYjIwdmJHOWtaMmx1Wnk4eEx6SXZNeTgwTHpsaE5XUmlaVFUzWDNjdWFuQm4hc2ln!abc"
+        let direct1200 = "https://cdn1.urlaub.check24.de/size=1200x/source=aHR0cHM6Ly9pLnRyYXZlbGFwaS5jb20vbG9kZ2luZy8xLzIvMy80LzlhNWRiZTU3X3cuanBn!def"
+        let direct450 = "https://cdn1.urlaub.check24.de/size=450x/source=aHR0cHM6Ly9pLnRyYXZlbGFwaS5jb20vbG9kZ2luZy8xLzIvMy80LzlhNWRiZTU3X3cuanBn!ghi"
+        let other = "https://cdn1.urlaub.check24.de/size=1920x/source=aHR0cHM6Ly9pLmdpYXRhbWVkaWEuY29tL2kucGhwP3VpZD0xJms9YWJj!x"
+        XCTAssertEqual(PictureQuality.check24Chain(nested)?.width, 800)
+        XCTAssertEqual(PictureQuality.check24Chain(nested)?.original, "https://i.travelapi.com/lodging/1/2/3/4/9a5dbe57_w.jpg")
+        XCTAssertEqual(PictureQuality.check24Chain(direct1200)?.original, "https://i.travelapi.com/lodging/1/2/3/4/9a5dbe57_w.jpg")
+        XCTAssertEqual(PictureQuality.check24Chain(direct1200)?.width, 1200)
+        // One picture in three versions: the one asking for 1920 really holds 800, so the plain 1200 wins.
+        XCTAssertEqual(PictureQuality.check24Selection([direct450, nested, direct1200, other], limit: 10), [direct1200, other])
+    }
 }
