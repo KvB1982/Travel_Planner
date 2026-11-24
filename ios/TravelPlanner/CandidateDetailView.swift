@@ -161,37 +161,54 @@ struct CandidateDetailView: View {
         }
     }
 
-    /// "Mögliche Reisedaten": each stay in the trip's window with its price, by date, the cheapest per night marked.
-    /// Long lists show the best and the first few; the rest unfolds.
-    @ViewBuilder private var staysSection: some View {
+    /// The stays of a trip with a flexible window, as rows inside the price section: each with its dates and price,
+    /// by date, the leading one marked. Long lists show the leading one and the first few; the rest unfolds.
+    @ViewBuilder private var stayRows: some View {
         let limit = 4
         let shown = allStays || stays.count <= limit + 1 ? stays : stays.filter { $0.best == true } + stays.filter { $0.best != true }.prefix(limit - 1)
-        Section {
-            ForEach(shown.sorted { $0.startDate < $1.startDate }) { stay in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(Format.dateRange(stay.startDate, stay.endDate) ?? stay.startDate)
-                            .fontWeight(stay.best == true ? .semibold : .regular)
-                        Text([stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" }, stay.available == false ? "belegt" : nil,
-                              stay.best == true ? bestLabel : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(.footnote).foregroundStyle(stay.available == false ? Color.red : stay.best == true ? Color.green : Color.secondary)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        if let total = stay.groupTotalCents ?? stay.totalCents { Text(Format.euro(cents: total)).fontWeight(stay.best == true ? .semibold : .regular) }
-                        if let each = stay.householdTotalCents, each != (stay.groupTotalCents ?? stay.totalCents) {
-                            Text("\(Format.euro(cents: each)) je Haushalt").font(.footnote).foregroundStyle(.secondary)
-                        } else if let night = stay.perNightCents {
-                            Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary)
-                        }
+        ForEach(shown.sorted { $0.startDate < $1.startDate }) { stay in
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Format.dateRange(stay.startDate, stay.endDate) ?? stay.startDate)
+                        .fontWeight(stay.best == true ? .semibold : .regular)
+                    Text([stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" }, stay.available == false ? "belegt" : nil,
+                          stay.best == true ? bestLabel : nil].compactMap { $0 }.joined(separator: " · "))
+                        .font(.footnote).foregroundStyle(stay.available == false ? Color.red : stay.best == true ? Color.green : Color.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let total = stay.groupTotalCents ?? stay.totalCents { Text(Format.euro(cents: total)).fontWeight(stay.best == true ? .semibold : .regular) }
+                    if let each = stay.householdTotalCents, each != (stay.groupTotalCents ?? stay.totalCents) {
+                        Text("\(Format.euro(cents: each)) je Haushalt").font(.footnote).foregroundStyle(.secondary)
+                    } else if let night = stay.perNightCents {
+                        Text("\(Format.euro(cents: night)) je Nacht").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
-            if stays.count > limit + 1 {
-                Button(allStays ? "Weniger zeigen" : "Alle \(stays.count) Termine zeigen") { withAnimation { allStays.toggle() } }.font(.subheadline)
+        }
+        if stays.count > limit + 1 {
+            Button(allStays ? "Weniger Termine zeigen" : "Alle \(stays.count) Termine zeigen") { withAnimation { allStays.toggle() } }.font(.subheadline)
+        }
+    }
+
+    /// The top of the price section on a trip with a flexible window: the leading stay is the price of the offer.
+    /// A price from the shared link has no place here: it was for dates nobody chose.
+    @ViewBuilder private func leadingStay(_ stay: Stay, share: PriceShare) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let total = stay.groupTotalCents ?? share.group(stay.totalCents) {
+                Text(share.splits ? "\(Format.euro(cents: total)) für die Gruppe" : Format.euro(cents: total)).font(.title3.weight(.semibold))
+            } else {
+                Text("Noch kein Preis bekannt").font(.headline)
             }
-        } header: {
-            Text("Mögliche Reisedaten")
+            if share.splits, let each = stay.householdTotalCents ?? share.household(stay.totalCents) {
+                Text("\(Format.euro(cents: each)) je Haushalt").font(.subheadline.weight(.medium))
+            }
+            Text([Format.dateRange(stay.startDate, stay.endDate), stay.nights.map { $0 == 1 ? "1 Nacht" : "\($0) Nächte" },
+                  stay.perNightCents.map { "\(Format.euro(cents: $0)) je Nacht" }].compactMap { $0 }.joined(separator: " · "))
+                .font(.subheadline).foregroundStyle(.secondary)
+            Text(stays.count > 1 ? "Bester von \(stays.count) möglichen Terminen in eurem Zeitfenster: \(bestLabel)." : "Der bisher einzige geprüfte Termin in eurem Zeitfenster.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if share.splits { Text(share.note).font(.footnote).foregroundStyle(.secondary) }
         }
     }
 
@@ -302,7 +319,6 @@ struct CandidateDetailView: View {
 
             // Right under the title: voting is what the group opens an offer for.
             voteSection(detail)
-            if stays.count > 1 { staysSection }
 
             importSection(detail, canEdit: canEdit)
 
@@ -644,8 +660,13 @@ struct CandidateDetailView: View {
         let tripID = detail.candidate.tripId
         let current = detail.prices.first { $0.tripId == tripID } ?? detail.prices.first
         let share = detail.share
+        // On a trip with a flexible window the stays are the prices: the leading one on top, the others below it.
+        let leading = stays.first { $0.best == true } ?? stays.filter { $0.available != false }.min { ($0.perNightCents ?? .max) < ($1.perNightCents ?? .max) } ?? stays.first
         Section("Preis") {
-            if let current, let text = Format.price(totalCents: share.group(current.totalCents), rangeMaxCents: share.group(current.rangeMaxCents), kind: current.kind) {
+            if let leading {
+                leadingStay(leading, share: share)
+                if stays.count > 1 { stayRows }
+            } else if let current, let text = Format.price(totalCents: share.group(current.totalCents), rangeMaxCents: share.group(current.rangeMaxCents), kind: current.kind) {
                 VStack(alignment: .leading, spacing: 2) {
                     if current.tripId == tripID {
                         Text(share.splits ? "\(text) für die Gruppe" : text).font(.title3.weight(.semibold))
@@ -688,7 +709,8 @@ struct CandidateDetailView: View {
             // What the price is made of, what comes on top and what it used to be: folded away until asked for.
             let lines = current?.breakdown ?? []
             let extras = detail.listing.profile.price?.extraCosts ?? []
-            let earlier = detail.prices.filter { $0.id != current?.id && $0.totalCents != nil }
+            // With stays every reading is one of them and shows above; "earlier prices" would only repeat them.
+            let earlier = leading == nil ? detail.prices.filter { $0.id != current?.id && $0.totalCents != nil } : []
             if open.contains("price") {
                 ForEach(lines, id: \.self) { line in
                     LabeledContent(line.item, value: line.amountCents.map { Format.euro(cents: $0) } ?? "nicht beziffert")
