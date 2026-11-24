@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { chooseStay, joinReviews } from "../src/import/pipeline.js";
-import { extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
+import { advertsOwn, coverOf, extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
 import { aboutHeadcount } from "../src/routes/candidates.js";
 it("tells a guest's snapshot from a hotel picture through the nested Check24 image services, and keeps the widest size", () => {
   const b = (t: string) => Buffer.from(t).toString("base64url");
@@ -72,4 +72,16 @@ it("hides only the plain hint on headcount, not one that says more", () => {
   expect(aboutHeadcount("Der Preis für 4 Personen ist ein Ab-Preis, der Zeitraum passt nicht genau.")).toBe(false);
   expect(aboutHeadcount("Preis je Person statt gesamt, bei 4 Personen.")).toBe(false);
   expect(aboutHeadcount("Kein Aufzug.")).toBe(false);
+});
+
+it("takes the portal's regional stock pictures out, also from what was stored, and picks another cover", () => {
+  const b = (t: string) => Buffer.from(t).toString("base64url");
+  const c = "https://cdn1.urlaub.check24.de";
+  const city = `${c}/size=1920x/di=3/source=${b("https://bigassets.urlaub.check24.de/urlaub/sem/bg/city_961.jpg")}!s1/picture.jpg`;
+  const badge = "https://cdn-public.community.check24.de/group-images/12.webp";
+  const room = `${c}/size=1920x/di=3/source=${b("https://images.example.test/1.jpg")}!s2/picture.jpg`;
+  expect(advertsOwn([{ url: city }, { url: badge }, { url: room }])).toEqual([{ url: room }]);
+  expect(coverOf(city, [{ url: city }, { url: room }])).toBe(room);
+  expect(coverOf(room, [{ url: city }, { url: room }])).toBe(room);
+  expect(joinPhotos([{ url: room }], [{ url: city }]).map((p) => p.url)).toEqual([room]);
 });

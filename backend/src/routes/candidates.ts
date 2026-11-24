@@ -5,6 +5,7 @@ import type { AppContext } from "../app.js";
 import { aiUsage, comments, dateOptions, listings, listingSources, priceSnapshots, sourceSuggestions, tripCriteria, tripListings, tripMembers, tripRankings, trips, users, votes } from "../db/schema.js";
 import { fillPercent, mergeProfiles, profileSchema } from "../import/profile.js";
 import { chooseStay, inWindow, processImport, resolveLink, settleSource, startImport, tripStay } from "../import/pipeline.js";
+import { advertsOwn, coverOf } from "../import/blocks.js";
 import { analyzeLink, carriesStay, nightsBetween, urlForStay, urlForWindow } from "../import/url.js";
 import { compare } from "../compare.js";
 import { judge, MEASURABLE } from "../criteria.js";
@@ -270,9 +271,9 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
           lon: listing.lon,
           // The position is an estimate or deliberately blurred by the platform: draw an area, not a pin.
           locationApproximate: listing.lat !== null && (p.uncertain.includes("lat") || p.uncertain.includes("lon")),
-          coverImageUrl: listing.coverImageUrl,
+          coverImageUrl: coverOf(listing.coverImageUrl, p.photos ?? []),
           // What can actually be shown; the page may advertise more than it gave away (profile.photoCount).
-          photoCount: p.photos?.length || p.photoCount,
+          photoCount: advertsOwn(p.photos ?? []).length || p.photoCount,
           fillPercent: listing.fillPercent,
           maxGuests: p.maxGuests,
           bedrooms: p.bedrooms,
@@ -514,9 +515,19 @@ export function candidateRoutes(app: FastifyInstance, ctx: AppContext): void {
       price: self?.entry.price ?? null,
       checkWindow: self?.entry.checkWindow ?? false,
       // Without the hints on headcount where the price is one household's; see `warnings`.
-      listing: listing && self?.entry.priceBasis === "household" ? { ...listing, profile: { ...listing.profile, warnings: hintsFor(listing.profile.warnings, "household") } } : listing,
+      // And without pictures that turned out not to be the advert's own.
+      listing: listing && {
+        ...listing,
+        coverImageUrl: coverOf(listing.coverImageUrl, listing.profile.photos),
+        profile: {
+          ...listing.profile,
+          photos: advertsOwn(listing.profile.photos),
+          coverImageUrl: coverOf(listing.profile.coverImageUrl, listing.profile.photos),
+          warnings: hintsFor(listing.profile.warnings, self?.entry.priceBasis ?? "group"),
+        },
+      },
       // In page order, first is the cover. Empty for adverts imported before pictures were collected.
-      photos: listing?.profile.photos ?? [],
+      photos: advertsOwn(listing?.profile.photos ?? []),
       // What guests say: the model's summary and the single reviews, newest first where the page dates them.
       reviews: reviewsFor(listing, sources[0]?.platform ?? null),
       // Every hint with whether this trip hid it. `listing.profile.warnings` stays the full, unfiltered list.

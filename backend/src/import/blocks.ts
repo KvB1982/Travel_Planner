@@ -285,6 +285,9 @@ function unwrapCheck24(url: string): { inner: string; width: number } {
 function notTheAdverts(url: string): boolean {
   if (/images\.ctfassets\.net/.test(url)) return true;
   if (!/check24\./.test(url)) return false;
+  // Pictures the portal puts on every page of a region: the view behind the page head, a community's badge.
+  const stock = /bigassets\.|\/sem\/bg\/|group-images|cdn-public\.community/i;
+  if (stock.test(url)) return true;
   // The services are nested: each layer wraps the next one's address the same way.
   let inner = url;
   for (let depth = 0; depth < 4; depth++) {
@@ -295,9 +298,20 @@ function notTheAdverts(url: string): boolean {
     } catch {
       break;
     }
-    if (/maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner)) return true;
+    if (stock.test(inner) || /maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner)) return true;
   }
   return false;
+}
+
+/** The advert's own pictures among those stored: what an earlier reading took for one and no longer counts drops out. */
+export function advertsOwn<P extends { url: string }>(photos: P[]): P[] {
+  return photos.filter((p) => !NOT_A_PHOTO.test(p.url) && !notTheAdverts(p.url));
+}
+
+/** The cover to show: the stored one if it is still the advert's own, else the first picture that is. */
+export function coverOf(cover: string | null, photos: { url: string }[]): string | null {
+  if (cover && advertsOwn([{ url: cover }]).length) return cover;
+  return advertsOwn(photos)[0]?.url ?? null;
 }
 
 function cleanPhotos(candidates: PagePhoto[], limit = 80): PagePhoto[] {
