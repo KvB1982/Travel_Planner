@@ -1312,4 +1312,15 @@ final class Check24PictureTests: XCTestCase {
         XCTAssertEqual(one.group(100), 100)
         XCTAssertFalse(one.partyMismatch(asked: nil, persons: 8))
     }
+
+    func testEveryCountryHasAFlag() {
+        for name in ["Italien", "Kroatien", "Malediven", "Tunesien", "Vereinigte Arabische Emirate", "Mauritius", "Sri Lanka", "Ägypten",
+                     "Griechenland", "Türkei", "Spanien", "Dominikanische Republik", "Kap Verde", "Thailand", "Zypern", "Bulgarien", "Greece", "Maldives"] {
+            XCTAssertNotNil(Format.flag(forCountry: name), name)
+        }
+        XCTAssertEqual(Format.flag(forCountry: "Malediven"), "🇲🇻")
+        XCTAssertEqual(Format.flag(forCountry: " italien "), "🇮🇹")
+        XCTAssertNil(Format.flag(forCountry: "Toskana"))
+        XCTAssertNil(Format.flag(forCountry: nil))
+    }
 }

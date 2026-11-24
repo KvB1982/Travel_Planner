@@ -67,23 +67,31 @@ public enum OfferGrouping {
 }
 
 public extension Format {
-    /// The flag for a country as adverts name it in German or English; nil when the name is not known.
+    /// Every country by its German and English name, as the system knows them, plus the short and everyday names
+    /// adverts use. Built once.
+    private static let countryCodes: [String: String] = {
+        var codes: [String: String] = [:]
+        for language in ["en", "de"] {
+            let locale = Locale(identifier: language)
+            for region in Locale.Region.isoRegions where region.subRegions.isEmpty && region.identifier.count == 2 {
+                if let name = locale.localizedString(forRegionCode: region.identifier) { codes[name.lowercased()] = region.identifier }
+            }
+        }
+        let more: [String: String] = [
+            "italia": "IT", "españa": "ES", "hrvatska": "HR", "danmark": "DK", "holland": "NL", "england": "GB", "schottland": "GB",
+            "wales": "GB", "großbritannien": "GB", "grossbritannien": "GB", "uk": "GB", "usa": "US", "vereinigte staaten von amerika": "US",
+            "türkiye": "TR", "tschechische republik": "CZ", "vae": "AE", "emirate": "AE", "dubai": "AE", "dom. rep.": "DO",
+            "dominikanische republik": "DO", "kapverden": "CV", "kapverdische inseln": "CV", "kap verde": "CV", "südkorea": "KR", "russland": "RU",
+            "mazedonien": "MK", "bosnien": "BA", "bosnien-herzegowina": "BA", "elfenbeinküste": "CI", "sansibar": "TZ", "bali": "ID",
+        ]
+        codes.merge(more) { _, extra in extra }
+        return codes
+    }()
+
+    /// The flag for a country as adverts name it in German or English; nil when the name is no country.
     static func flag(forCountry name: String?) -> String? {
         guard let key = name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !key.isEmpty else { return nil }
-        let codes: [String: String] = [
-            "deutschland": "DE", "germany": "DE", "österreich": "AT", "austria": "AT", "schweiz": "CH", "switzerland": "CH",
-            "italien": "IT", "italy": "IT", "italia": "IT", "frankreich": "FR", "france": "FR", "spanien": "ES", "spain": "ES", "españa": "ES",
-            "portugal": "PT", "kroatien": "HR", "croatia": "HR", "hrvatska": "HR", "slowenien": "SI", "slovenia": "SI",
-            "griechenland": "GR", "greece": "GR", "türkei": "TR", "turkey": "TR", "dänemark": "DK", "denmark": "DK", "danmark": "DK",
-            "schweden": "SE", "sweden": "SE", "norwegen": "NO", "norway": "NO", "finnland": "FI", "finland": "FI",
-            "niederlande": "NL", "netherlands": "NL", "holland": "NL", "belgien": "BE", "belgium": "BE", "luxemburg": "LU",
-            "polen": "PL", "poland": "PL", "tschechien": "CZ", "czechia": "CZ", "ungarn": "HU", "hungary": "HU",
-            "großbritannien": "GB", "vereinigtes königreich": "GB", "united kingdom": "GB", "england": "GB", "irland": "IE", "ireland": "IE",
-            "island": "IS", "iceland": "IS", "malta": "MT", "zypern": "CY", "cyprus": "CY", "montenegro": "ME", "albanien": "AL",
-            "bulgarien": "BG", "rumänien": "RO", "usa": "US", "vereinigte staaten": "US", "united states": "US", "kanada": "CA", "canada": "CA",
-            "marokko": "MA", "ägypten": "EG", "thailand": "TH", "mexiko": "MX",
-        ]
-        guard let code = codes[key] else { return nil }
+        guard let code = countryCodes[key] else { return nil }
         return String(String.UnicodeScalarView(code.unicodeScalars.compactMap { UnicodeScalar(127_397 + $0.value) }))
     }
 }

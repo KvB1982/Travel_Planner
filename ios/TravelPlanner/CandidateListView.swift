@@ -197,7 +197,8 @@ struct CandidateListView: View {
     /// A country with a single region names it here; several regions get dividers below instead.
     private func countryHeader(_ section: CountrySection, folded: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if let flag = Format.flag(forCountry: section.country) { Text(flag).font(.title2) }
+            // Every head carries a sign: the flag, or a globe where the advert names no country the system knows.
+            Text(Format.flag(forCountry: section.country) ?? "🌍").font(.title2)
             // In a narrow column the name shrinks a little and the rest gives way; nothing wraps.
             Text(section.country ?? "Land unbekannt").font(.title3.weight(.bold)).foregroundStyle(.primary)
                 .lineLimit(1).minimumScaleFactor(0.7).layoutPriority(2)
