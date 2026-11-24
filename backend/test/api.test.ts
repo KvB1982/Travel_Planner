@@ -1033,6 +1033,29 @@ describe("every possible stay from one page", () => {
   });
 });
 
+describe("pictures two hotels share", () => {
+  it("shows a picture stored for two of the trip's hotels with neither", async () => {
+    const b = (x: string) => Buffer.from(x).toString("base64url");
+    const c = "https://cdn1.urlaub.check24.de";
+    const pic = (name: string) => `${c}/size=1920x/di=3/source=${b(`https://i.giatamedia.example/${name}.jpg`)}!s1/picture.jpg`;
+    const hotelPage = (own: string) => `<html><head><title>Hotel ${own}</title></head><body><script id="js-hotel-data" type="application/json">${JSON.stringify({ hotel: { images: [pic("beach"), pic(own), pic(`${own}-pool`)] } })}</script>${"<p>Ein Hotel am Meer mit Pool und Garten.</p>".repeat(20)}</body></html>`;
+    const t = await testApp({ fetcher: async () => page("", { blocked: true, status: 403 }) });
+    const owner = await t.bootstrap();
+    const tripId = (await t.call("POST", "/trips", owner, { title: "Sommer", adults: 2 })).body.trip.id as string;
+    const add = async (hotelId: string, own: string) => (await t.call("POST", `/trips/${tripId}/imports`, owner, { url: `https://urlaub.check24.de/suche/hotelinformation?hotelId=${hotelId}&pageArea=package`, html: hotelPage(own) })).body.candidateId as string;
+    const one = await add("1", "a");
+    await t.ctx.queue.idle();
+    expect((await t.call("GET", `/candidates/${one}`, owner)).body.photos).toHaveLength(3);
+    await add("2", "b");
+    await t.ctx.queue.idle();
+    const detail = (await t.call("GET", `/candidates/${one}`, owner)).body;
+    expect(detail.photos.map((p: { url: string }) => p.url)).toEqual([pic("a"), pic("a-pool")]);
+    expect(detail.listing.coverImageUrl).toBe(pic("a"));
+    const list = (await t.call("GET", `/trips/${tripId}/candidates`, owner)).body.candidates;
+    expect(list.map((x: { listing: { coverImageUrl: string } }) => x.listing.coverImageUrl).sort()).toEqual([pic("a"), pic("b")]);
+  });
+});
+
 describe("short links of a portal", () => {
   it("gives a source its platform once its short link resolves", async () => {
     const short = "https://c.24.de/pr/AbC123";

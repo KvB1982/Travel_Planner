@@ -526,7 +526,7 @@ Der Server liest daraus ohne Sprachmodell jeden Termin: die Angebote (`li.js-off
 
 ## Bildgrößen
 
-Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) und Casamundo (`/large/`) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220`, `size=1920x` … als Pfadsegment, je mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie.
+Der Server speichert keine Bilder, nur die Adressen bei den Portalen (`photos[].url`, `thumbUrl`). Airbnb, FeWo-direkt und Novasol (2048 Pixel) und Casamundo (`/large/`) werden auf die größte Fassung umgestellt. Check24 signiert jede Größe einzeln (`size=335c220`, `size=1920x` … als Pfadsegment, je mit eigener Prüfsumme); eine größere Fassung gibt es deshalb nur, wenn ihre Adresse in der Seite oder in `tp-captured-images` steht. Gleiche Bilder in zwei Größen erkennt der Server am Segment `source=` und behält die größere. Karten und Gästefotos fallen aus der Galerie. Ebenso Check24-Standardbilder (Regionsbild hinter dem Seitenkopf, Gruppenabzeichen, Ortsbilder `local://locations/`). Diese Filter wirken auch bei der Ausgabe auf schon Gespeichertes (`photos`, `coverImageUrl`, `photoCount`). Dazu: Ein Check24-Bild, das bei zwei Angeboten derselben Reise gespeichert ist, gehört keinem von beiden (Ortsbild oder Nachbarhotel) und wird bei beiden nicht gezeigt.
 
 ## Große Seiten vom Gerät
 

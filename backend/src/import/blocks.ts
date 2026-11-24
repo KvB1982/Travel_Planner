@@ -229,7 +229,7 @@ const SIZE_WORDS = ["thumb", "thumbnail", "tiny", "xsmall", "small", "medium", "
 const SIZE_SEGMENT = new RegExp(`/(${SIZE_WORDS.join("|")})(?=/)`, "i");
 
 /** The same picture in two sizes shares this key; `rank` says which of them is the larger. */
-function photoKey(url: string): { key: string; rank: number } | null {
+export function photoKey(url: string): { key: string; rank: number } | null {
   let u: URL;
   try {
     u = new URL(url);
@@ -298,7 +298,7 @@ function notTheAdverts(url: string): boolean {
     } catch {
       break;
     }
-    if (stock.test(inner) || /maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner)) return true;
+    if (stock.test(inner) || /^local:\/\/locations\//.test(inner) || /maps\.google|googleapis\.com\/maps|staticmap|cts-ratings|travellerpictures/i.test(inner)) return true;
   }
   return false;
 }
