@@ -216,7 +216,7 @@ struct BackgroundReader: ViewModifier {
 
     /// Check24 offers this device has read again once since the reading learned to take the data from the desktop
     /// page and the pictures from the phone page. Earlier readings brought either small pictures or little data.
-    private static let rereadKey = "check24RereadFullPages"
+    private static let rereadKey = "check24RereadOwnPictures"
 
     /// Check24 offers on any own trip that this device has not yet read again, with the page to read them from.
     /// At most twenty per start of the app.

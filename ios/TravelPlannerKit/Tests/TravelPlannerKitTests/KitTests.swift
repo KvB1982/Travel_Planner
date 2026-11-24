@@ -1323,4 +1323,14 @@ final class Check24PictureTests: XCTestCase {
         XCTAssertNil(Format.flag(forCountry: "Toskana"))
         XCTAssertNil(Format.flag(forCountry: nil))
     }
+
+    func testCheck24StockPicturesStayOut() {
+        let city = "https://cdn1.urlaub.check24.de/size=1920x/source=aHR0cHM6Ly9jZG4tY3RzLTEuY29tbXVuaXR5LmNoZWNrMjQuZGUvc2l6ZT0xOTIweC9zb3VyY2U9YUhSMGNITTZMeTlpYVdkaGMzTmxkSE11ZFhKc1lYVmlMbU5vWldOck1qUXVaR1V2ZFhKc1lYVmlMM05sYlM5aVp5OWphWFI1WHprMk1TNXFjR2Mhcw!t"
+        let group = "https://cdn1.urlaub.check24.de/size=1920x/source=aHR0cHM6Ly9jZG4tcHVibGljLmNvbW11bml0eS5jaGVjazI0LmRlL2dyb3VwLWltYWdlcy8xNDY5LndlYnA_Y3RzX2RvPWJhY2tlbmQ!t"
+        let own = "https://cdn1.urlaub.check24.de/size=1920x/source=aHR0cHM6Ly9pLmdpYXRhbWVkaWEuY29tL2kucGhwP3VpZD0xJms9YWJj!x"
+        XCTAssertEqual(PictureQuality.check24Kind(city), .stock)
+        XCTAssertEqual(PictureQuality.check24Kind(group), .stock)
+        XCTAssertEqual(PictureQuality.check24Kind(own), .hotel)
+        XCTAssertEqual(PictureQuality.check24Selection([group, city, own], limit: 10), [own])
+    }
 }

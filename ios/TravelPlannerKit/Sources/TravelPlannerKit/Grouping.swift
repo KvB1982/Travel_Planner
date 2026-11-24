@@ -98,7 +98,7 @@ public extension Format {
 
 public enum PictureQuality {
     /// What a Check24 picture address shows, told from the address packed into its `source=` part.
-    public enum Check24Kind: Equatable, Sendable { case hotel, guest, map }
+    public enum Check24Kind: Equatable, Sendable { case hotel, guest, map, stock }
 
     /// The `source=` part of a Check24 picture address: the same picture carries the same one in every size.
     public static func check24Source(_ address: String) -> String? {
@@ -136,6 +136,9 @@ public enum PictureQuality {
         let all = seen.lowercased()
         if all.contains("maps.google") || all.contains("staticmap") { return .map }
         if all.contains("cts-ratings") || all.contains("travellerpictures") { return .guest }
+        // Check24's own stock: the picture of the region behind the page head and the badge of a community group.
+        // Every hotel of a region carries the same ones, so they made different offers look alike.
+        if all.contains("bigassets.") || all.contains("/sem/bg/") || all.contains("group-images") || all.contains("cdn-public.community") { return .stock }
         return .hotel
     }
 

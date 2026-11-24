@@ -648,7 +648,8 @@ final class WebPage: NSObject, WKNavigationDelegate {
         var photos = await pictures()
         _ = try? await webView.evaluateJavaScript("window.__tpMax = 260; true")
         merge(await run(Self.browseGallery).pictures, into: &photos)
-        let chosen = PictureQuality.check24Selection(photos.map(\.url), limit: limit)
+        // Only what the page shows as the hotel's own: pictures in cards of other hotels stay out.
+        let chosen = PictureQuality.check24Selection(photos.filter(\.gallery).map(\.url), limit: limit)
         Self.log.info("Check24 Telefonseite: \(photos.count) Bildadressen gesehen, \(chosen.count) Hotelbilder gewählt")
         // The phone's mark must not outlive this visit: the next page is to be the full one again.
         await forgetCheck24Device()
@@ -946,7 +947,7 @@ final class WebPage: NSObject, WKNavigationDelegate {
             // Check24 mixes hundreds of guest photos and maps into its gallery, each in several sizes: only the
             // hotel's own pictures go on, each once in its widest version.
             let limit = maxPictures == nil ? 80 : Self.check24Pictures
-            let chosen = PictureQuality.check24Selection(photos.map(\.url), limit: limit)
+            let chosen = PictureQuality.check24Selection(photos.filter(\.gallery).map(\.url), limit: limit)
             if !chosen.isEmpty {
                 Self.log.info("Check24: \(photos.count) Bildadressen gesehen, \(chosen.count) Hotelbilder gewählt")
                 photos = chosen.map { Picture(url: $0, gallery: true) }
