@@ -57,7 +57,11 @@ function onlyTheDeviceSeesPrices(source: { platform: string; fetchNote: string |
  * A hint that the price is for fewer people than travel. Right for a house; beside the point where the trip
  * counts households and the price is one household's: there the list says so itself and reckons the group's.
  */
-export const aboutHeadcount = (hint: string) => /preis/i.test(hint) && /\d+\s*(Erwachsene|Personen|Kinder|Gäste|Reisende)/i.test(hint);
+export const aboutHeadcount = (hint: string) =>
+  /preis/i.test(hint) &&
+  /\d+\s*(Erwachsene|Personen|Kinder|Gäste|Reisende)/i.test(hint) &&
+  // A hint that says something else as well stays: a "from" price, other dates, a price by the head, missing children's prices.
+  !/ab[- ]?preis|\bab \d|zeitraum|termin|datum|nächte|(pro|je) person|p\.\s?p\.|doppelzimmer|unklar|fehl|zwei preise|verschiedene preise|nur für die/i.test(hint);
 const hintsFor = (warnings: string[], basis: "group" | "household") => (basis === "household" ? warnings.filter((w) => !aboutHeadcount(w)) : warnings);
 
 function warningsFor(listing: typeof listings.$inferSelect | undefined, hidden: string[], basis: "group" | "household" = "group") {

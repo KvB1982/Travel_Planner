@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { chooseStay, joinReviews } from "../src/import/pipeline.js";
 import { extractBlocks, joinPhotos, sameIn } from "../src/import/blocks.js";
+import { aboutHeadcount } from "../src/routes/candidates.js";
 it("tells a guest's snapshot from a hotel picture through the nested Check24 image services, and keeps the widest size", () => {
   const b = (t: string) => Buffer.from(t).toString("base64url");
   const c = "https://cdn1.urlaub.check24.de";
@@ -62,4 +63,13 @@ it("lets the wished length lead, a clearly cheaper longer stay pass it, and take
   // Only whole weeks to be had.
   expect(pick([s(7, 2100), s(14, 4760)], 12)).toEqual([14, "nearest"]);
   expect(pick([], 10)).toBeNull();
+});
+
+it("hides only the plain hint on headcount, not one that says more", () => {
+  expect(aboutHeadcount("Der Preis gilt für 2 Erwachsene und 2 Kinder, nicht für 8 Personen.")).toBe(true);
+  expect(aboutHeadcount("Preis für 4 Personen.")).toBe(true);
+  expect(aboutHeadcount("Der Preis gilt nur für die 2 Erwachsenen, Kinderpreise fehlen.")).toBe(false);
+  expect(aboutHeadcount("Der Preis für 4 Personen ist ein Ab-Preis, der Zeitraum passt nicht genau.")).toBe(false);
+  expect(aboutHeadcount("Preis je Person statt gesamt, bei 4 Personen.")).toBe(false);
+  expect(aboutHeadcount("Kein Aufzug.")).toBe(false);
 });
